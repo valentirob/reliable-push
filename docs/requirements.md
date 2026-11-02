@@ -38,6 +38,10 @@ one or more apps.
 ### Multi-app
 - **FR-13** One deployment serves several apps of one organisation, each with its own sender API key, OIDC issuer/audience, device-token validity, default timeout and fallback webhook.
 
+### Testing and demo
+- **FR-14** A local web console (part of the test harness, never deployed to production) lets a person create simulated devices, send simulated pushes with configurable device behaviour, watch delivery/read/fallback status live, inspect fallback webhook calls and logs, and run E2E scenarios — for manual testing and demos.
+- **FR-15** The sender API offers a paginated list of notifications per app (filter by user, state, time) in addition to lookup by `trackingId`.
+
 ## Non-functional requirements
 
 - **NFR-1 Security** All APIs authenticated (sender API key; device JWT). Events accepted only for `trackingId`s of the same app and user as the device token. Rate limiting per device and per app. No secrets in the repo.

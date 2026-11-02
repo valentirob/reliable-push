@@ -23,7 +23,7 @@ sending pushes itself.
 | `android/` | Android SDK (FCM v1 data mode + opt-in AndroidConfigV2 mode) | Kotlin, minSdk 26 |
 | `ios/` | iOS SDK + Notification Service Extension helper | Swift, iOS 15+, SPM |
 | `client-java/` | Optional zero-dependency Java client for the sender API | Java 17+, JDK only |
-| `harness/` | Fake sender, fake fallback receiver, device simulator, E2E scenarios | Java / docker-compose |
+| `harness/` | Fake sender, fake fallback receiver, device simulator, E2E scenarios, web console for manual tests and demos (`./scripts/demo.sh`) | Java, plain HTML/JS, docker-compose |
 | `docs/` | Requirements, specs, plans, guides, status | Markdown |
 
 ## Where the knowledge lives (read before working)
@@ -71,4 +71,5 @@ Filled in as components land; keep this section accurate.
 | Task | Command |
 |---|---|
 | Backend build + unit tests | `cd backend && ./mvnw verify` *(after backend scaffold)* |
+| Demo / manual-test web console (local only) | `./scripts/demo.sh` → http://localhost:8090 *(after harness)* |
 | E2E (local only, manual or agent) | `./scripts/e2e.sh` — details in `.agents/skills/run-e2e/SKILL.md` *(after harness)* |

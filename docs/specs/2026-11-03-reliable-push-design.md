@@ -3,7 +3,7 @@
 - **Status:** Approved in conversation 2026-11-03; written spec pending maintainer review.
 - **Requirements:** [`../requirements.md`](../requirements.md)
 - **Scope of this spec:** all components and their contracts. Implementation runs in cycles, each with its own plan:
-  1. Contracts + backend + zero-dependency Java sender client + harness + repo scaffolding (LICENSE, README, docs, CI).
+  1. Contracts + backend + zero-dependency Java sender client + harness with web console + repo scaffolding (LICENSE, README, docs, CI).
   2. Android SDK.
   3. iOS SDK.
 
@@ -107,6 +107,7 @@ Retention: a daily job deletes closed notifications and their events older than
 |---|---|---|
 | `POST` | `/v1/notifications` | `{userId, externalId?, policy?, timeoutMinutes?, fallback:{...}}` → `201 {trackingId, dueAt}` |
 | `GET` | `/v1/notifications/{trackingId}` | → `{state, createdAt, deliveredAt, readAt, ...}` |
+| `GET` | `/v1/notifications?userId=&state=&since=&limit=&cursor=` | → `{items:[...], nextCursor}` (newest first, `limit` ≤ 100, scoped to the API key's app) |
 | `DELETE` | `/v1/notifications/{trackingId}` | cancel → `204` (409 if already closed) |
 
 `appId` comes from the API key, never from the body. `POST` with an existing
@@ -279,10 +280,12 @@ tests only.
 - **Prerequisites:** Docker Desktop or Podman with compose, JDK 21. Mobile
   E2E (cycles 2–3) additionally needs a local Android emulator / Xcode iOS
   simulator; those scenarios run against the same local harness.
-- **Fast clock:** the `e2e` Spring profile enables
+- **Fast clock:** the `e2e` and `demo` Spring profiles enable
   `reliable-push.testing.minute-duration` (e.g. `1s`), so a "10 minute" timeout
   takes 10 s and the full suite runs in a few minutes. The property is rejected
-  at startup in any other profile, so it cannot leak into production.
+  at startup in any other profile, so it cannot leak into production. The same
+  two profiles also write the backend JSON log to a shared volume for the
+  harness (stdout logging is unchanged).
 - **Machine-readable results** for agents: exit code `0` = all passed; JUnit XML
   in `harness/build/e2e/junit/`; a summary `harness/build/e2e/summary.json`
   (`{scenario, status, durationMs, failure: {expected, actual, hint}, logs}`);
@@ -299,6 +302,77 @@ tests only.
   `release/*`. The merge commit or PR description states the result
   (`E2E: 14/14 passed, scripts/e2e.sh, <date>`).
 
+### 10.2 Harness web console (manual testing and demo)
+
+A browser console, part of the harness, to run manual tests, simulate pushes and
+show delivery tracking live. It is a **local test/demo tool only**: never built
+into the backend image, never deployed with the Helm chart, so it adds no
+production attack surface.
+
+**Start:** `./scripts/demo.sh [--realtime]` (Windows `scripts\demo.ps1`) starts
+the harness compose stack with the `console` profile and opens
+`http://localhost:8090`. Default is the fast clock (1 "minute" = 1 s,
+§10.1); `--realtime` uses real minutes for live demos with real timing. Ports
+bind to `127.0.0.1` only. A permanent banner reads "Test harness — simulated
+data, not for production".
+
+**Architecture:**
+
+```
+Browser (static HTML/CSS/JS) ──REST + SSE──► harness-control (:8090)
+                                               ├─► backend sender API  (/v1/notifications, harness API key)
+                                               ├─► backend device API  (via device simulator, fake OIDC tokens)
+                                               ├─► fallback receiver   (inbox + failure-mode switch)
+                                               └─► backend JSON log file (shared volume, demo/e2e profiles only)
+```
+
+- **Frontend:** plain HTML, CSS and ES-module JavaScript served as static files
+  by `harness-control`; **no build step, no npm runtime dependencies**, no
+  framework. Works in current Chrome, Firefox, Safari, Edge.
+- **`harness-control`:** a small Spring Boot app in `harness/` (same dependency
+  budget as the backend) that orchestrates the simulators and exposes
+  `/console/api/*` plus one Server-Sent Events stream `/console/api/stream`. It
+  polls the backend once per second for active notifications (one poller,
+  whatever the number of browser tabs) and pushes changes over SSE.
+
+**Screens / features:**
+
+1. **Devices** — create simulated users and devices (iOS / Android, mode v1 or
+   v2), register them through the real device API, show device-token expiry and
+   trigger a refresh. In cycles 2–3 the sample apps running on a local
+   emulator/simulator also appear here as real devices.
+2. **Send push** — form for `userId`, message, policy (`NOT_DELIVERED` /
+   `NOT_READ`), timeout, and per-device behaviour: deliver after *n* s, read
+   after *m* s, never, offline then late delivery. Shows the exact payload the
+   customer backend would send for APNs, FCM v1 and FCM v2 (copyable), to
+   document the payload contract (§6).
+3. **Live tracking** — table of notifications with state badges and countdowns
+   to `due_at` and to the end of the trigger window; detail view with a
+   timeline: registered → push simulated → DELIVERED (device) → READ →
+   fallback claimed / dispatched / retried / expired / cancelled. Cancel button
+   calls the real sender API.
+4. **Fallback inbox** — webhooks received by the fallback receiver with HMAC
+   verification result, attempt number and `Idempotency-Key`; switch to make
+   the receiver fail (HTTP 500, timeout) to demonstrate retries,
+   `FALLBACK_FAILED` and `FALLBACK_EXPIRED`.
+5. **Scenarios** — run any E2E scenario (§10) from the console and watch it
+   live; result shown with the same data as `summary.json`.
+6. **Logs** — tail of the backend ECS JSON logs, filterable by `trace.id`,
+   `rp.tracking_id` and `event.action`, to show the logging catalogue (§9.1).
+
+**Backend support needed:** a list endpoint on the sender API (§4.1,
+`GET /v1/notifications`), useful to real senders as well. No console-specific
+endpoint is added to the backend.
+
+**Tests:** `harness-control` REST/SSE integration tests; a `console-smoke` E2E
+scenario drives the UI headless with Playwright for Java (test-scope
+dependency of the harness only): register a device, send a push, see
+`DELIVERED`, see a fallback in the inbox.
+
+**Real pushes (cycles 2–3, optional):** a "real sender" mode can send through
+FCM/APNs with credentials from a local, git-ignored `.env`, to demo the sample
+apps on real or emulated devices. Credentials are never committed or logged.
+
 ## 11. SDLC
 
 - Gitflow (`.agents/rules/gitflow.md`), Conventional Commits, SemVer tags on `main`.
@@ -312,7 +386,7 @@ tests only.
 LICENSE  README.md  AGENTS.md  CLAUDE.md  CONTRIBUTING.md  SECURITY.md
 .agents/{rules,skills}/   .claude/{agents,skills->../.agents/skills}
 .github/workflows/
-backend/      client-java/      harness/      android/      ios/      deploy/helm/      scripts/ (e2e.sh, e2e.ps1)
+backend/      client-java/      harness/      android/      ios/      deploy/helm/      scripts/ (e2e.sh, e2e.ps1, demo.sh, demo.ps1)
 docs/  requirements.md  STATUS.md  specs/  plans/  architecture.md  api.md
        integration-guide.md  security.md  operations.md  testing.md
 ```
