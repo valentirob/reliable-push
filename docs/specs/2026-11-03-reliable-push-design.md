@@ -3,7 +3,7 @@
 - **Status:** Approved in conversation 2026-11-03; written spec pending maintainer review.
 - **Requirements:** [`../requirements.md`](../requirements.md)
 - **Scope of this spec:** all components and their contracts. Implementation runs in cycles, each with its own plan:
-  1. Contracts + backend + harness + repo scaffolding (LICENSE, README, docs, CI).
+  1. Contracts + backend + zero-dependency Java sender client + harness + repo scaffolding (LICENSE, README, docs, CI).
   2. Android SDK.
   3. iOS SDK.
 
@@ -48,13 +48,15 @@ another module's repositories.
 
 ## 2. Notification lifecycle
 
-States: `PENDING`, `DELIVERED`, `READ`, `FALLBACK_TRIGGERED`, `FALLBACK_FAILED`, `CANCELLED`, plus the internal `DISPATCHING` (fallback claimed, webhook in progress or awaiting retry; reported to senders as `FALLBACK_PENDING`).
+States: `PENDING`, `DELIVERED`, `READ`, `FALLBACK_TRIGGERED`, `FALLBACK_FAILED`, `FALLBACK_EXPIRED`, `CANCELLED`, plus the internal `DISPATCHING` (fallback claimed, webhook in progress or awaiting retry; reported to senders as `FALLBACK_PENDING`).
 
 ```
 PENDING ──DELIVERED event──► DELIVERED ──READ event──► READ
 PENDING ──READ event───────► READ                (READ implies delivered; delivered_at = read_at if unset)
 PENDING / DELIVERED ──due & policy unmet──► (dispatching) ──2xx──► FALLBACK_TRIGGERED
-                                                        └─retries exhausted─► FALLBACK_FAILED
+                                                        ├─retries exhausted─► FALLBACK_FAILED
+                                                        └─trigger window passed─► FALLBACK_EXPIRED
+PENDING / DELIVERED ──claimed after trigger window passed──► FALLBACK_EXPIRED   (never dispatched)
 PENDING / DELIVERED ──sender cancel──► CANCELLED
 ```
 
@@ -62,6 +64,7 @@ PENDING / DELIVERED ──sender cancel──► CANCELLED
 - **Due time:** `due_at = created_at + timeoutMinutes`. Rows whose policy is satisfied get `due_at = NULL` (removed from the partial index).
 - **Race safety:** events update with `UPDATE ... WHERE id = ? AND state IN (<allowed>)`; the worker claims rows with `SELECT ... FOR UPDATE SKIP LOCKED LIMIT n` and sets `state = 'DISPATCHING'` in the same transaction. Exactly one of "policy satisfied" and "fallback claimed" wins.
 - **Claim query:** `(state IN ('PENDING','DELIVERED') AND due_at <= now()) OR (state = 'DISPATCHING' AND next_attempt_at <= now())`. On claim, `next_attempt_at = now() + lease` (default 2 min) so a worker that crashes mid-dispatch releases the row automatically; on webhook failure `next_attempt_at = now() + backoff`; on success or final failure the row is closed. A crash after the webhook succeeded but before commit can re-send once; receivers de-duplicate with `Idempotency-Key`.
+- **Trigger window (stale-fallback guard):** a fallback may only be dispatched while `now() <= due_at + triggerWindowMinutes` (per app, default 20; must be ≥ the cumulative retry backoff). This applies to every attempt — the first one, retries, and re-claims after a worker crash or outage. A row claimed outside the window is closed as `FALLBACK_EXPIRED` without calling the webhook, and logged as `fallback.expired`. Retries whose next backoff would fall outside the window are not scheduled; the row expires instead. The original `due_at` is kept (not moved by retries) so the window is measured from when the trigger should have started.
 - **Late events** (after fallback claimed) are stored in `notification_event` with `late = true`; the state does not change.
 - **Duplicates** (same `trackingId` + type) are no-ops returning success.
 - **Multi-device:** events from any active device of the same `appId` + `userId` count.
@@ -153,12 +156,16 @@ Pushes sent in another shape are not tracked → they end in fallback (by design
 
 Token logic: decode `exp` locally; refresh when remaining < 20% of validity or
 on `401`; never refresh more than once per app launch. Events that fail to send
-are persisted and retried in a batch (Android WorkManager with network
+are persisted and retried in a batch (Android `JobScheduler` with network
 constraint; iOS on next app launch or next NSE run). No polling, no periodic jobs.
+SDK logging uses the platform logger (`android.util.Log` / `OSLog`) with the same
+event names as the backend (e.g. `tracking.event_sent`, `token.refreshed`),
+off below WARN in release builds, never logging tokens or notification content.
 
 ### 7.2 Android (`android/`, Kotlin, minSdk 26, AAR on Maven Central)
 - `ReliablePushMessagingService` helper delegating from the host's `FirebaseMessagingService` (v1) and `onNotificationReceived` (v2).
-- Storage: EncryptedSharedPreferences / Keystore-backed.
+- Storage: device token encrypted with an Android Keystore AES-GCM key, stored in private SharedPreferences (no `androidx.security-crypto`).
+- Pending-event retry via platform `JobScheduler` with a network constraint (no WorkManager); HTTP via `HttpURLConnection`, JSON via `org.json`.
 - Respects `POST_NOTIFICATIONS` (Android 13+); documents Play Data Safety entries.
 
 ### 7.3 iOS (`ios/`, Swift, iOS 15+, Swift Package)
@@ -188,13 +195,51 @@ reliable-push:
       device-token-validity: 90d
       default-policy: NOT_DELIVERED
       default-timeout-minutes: 10
-      fallback: { url: "https://fallback.example.com/hook", hmac-secret-ref: env:RP_SHOP_HOOK_SECRET, max-attempts: 5 }
+      fallback: { url: "https://fallback.example.com/hook", hmac-secret-ref: env:RP_SHOP_HOOK_SECRET, max-attempts: 5, trigger-window-minutes: 20 }
 ```
 
 ## 9. Operations
 
-- Java 21 (virtual threads), Spring Boot 3.x, Maven wrapper, Flyway, Actuator (`/actuator/health/{liveness,readiness}`), Micrometer Prometheus.
-- Metrics: `rp_notifications_registered_total`, `rp_events_total{type,late}`, `rp_fallback_total{outcome}`, `rp_webhook_latency_seconds`, `rp_due_backlog`.
+- Java 21 (virtual threads), Spring Boot 4.x, Maven wrapper, Flyway, Actuator (`/actuator/health/{liveness,readiness}`), Micrometer Prometheus.
+- Metrics: `rp_notifications_registered_total`, `rp_events_total{type,late}`, `rp_fallback_total{outcome=triggered|failed|expired}`, `rp_webhook_latency_seconds`, `rp_due_backlog`.
+
+### 9.1 Logging
+
+- **Framework:** Log4j 2 via `spring-boot-starter-log4j2` (Logback excluded); application code logs through the Log4j 2 API (or SLF4J bound to Log4j 2). Async loggers are not required; keep the default synchronous appender unless load tests show otherwise.
+- **Format:** profile-selected in `log4j2-spring.xml`:
+  - `json` (default in containers): one JSON object per line on stdout, `JsonTemplateLayout` with the bundled **Elastic Common Schema** template (`EcsLayout.json`), ready for Cloud Logging, OpenShift logging / EFK, Loki.
+  - `local`: `PatternLayout` `%d{ISO8601} %-5level [%t] %c{1.} [trace=%X{trace.id}] - %m%n%throwable`.
+- **Correlation:** a servlet filter reads the W3C `traceparent` header (or `X-Request-Id`), otherwise generates an id, puts it in the `ThreadContext` (`trace.id`) and returns it as `X-Request-Id`. The worker sets a new `trace.id` per claimed row and adds `rp.tracking_id`, so one notification can be followed across API and worker logs.
+- **Common fields** (ECS names, plus an `rp.*` namespace): `@timestamp`, `log.level`, `log.logger`, `message`, `service.name`, `service.version`, `trace.id`, `event.action`, `event.outcome` (`success|failure|unknown`), `event.duration` (ns), `http.request.method`, `url.path` (template, e.g. `/v1/notifications/{id}`), `http.response.status_code`, `rp.app_id`, `rp.tracking_id`, `rp.device_id`, `rp.user_hash` (truncated SHA-256 of `userId`; raw user ids are not logged).
+- **Never logged:** API keys, ID tokens, device JWTs, HMAC secrets, webhook signatures, fallback message content, request/response bodies.
+- **Event catalogue** (`event.action`; one INFO line each unless noted):
+
+| Event | Emitted when |
+|---|---|
+| `api.request` | every HTTP request completes (access log: method, path template, status, duration, app, outcome) |
+| `notification.registered` / `notification.duplicate` / `notification.cancelled` | sender API |
+| `device.registered` / `device.token_refreshed` / `device.revoked` | device API |
+| `tracking.event_accepted` (with `rp.event_type`, `rp.late`) / `tracking.event_ignored` (duplicate) | `/v1/events` |
+| `auth.failed` (WARN, reason code only) / `authz.denied` (WARN) / `rate_limit.exceeded` (WARN) | security filters |
+| `fallback.claimed` / `fallback.dispatched` / `fallback.retry_scheduled` / `fallback.failed` (WARN) / `fallback.expired` (WARN) / `fallback.reclaimed` (WARN, lease expired → previous worker crashed) | worker |
+| `retention.purged` | retention job (count only) |
+
+- Levels: INFO for the catalogue, WARN for security and degraded outcomes, ERROR only for unexpected exceptions (with stack trace), DEBUG off by default. Log levels configurable at runtime via environment (`LOGGING_LEVEL_*`).
+
+### 9.2 Dependency budget ("lightweight")
+
+The backend, the sender client and the mobile SDKs avoid heavy frameworks. Any new dependency needs a justification in the PR and must fit this budget.
+
+| Component | Allowed | Not allowed |
+|---|---|---|
+| Backend service | Spring Boot web (embedded Tomcat), Spring JDBC (`JdbcClient`), Actuator + Micrometer Prometheus, Flyway, PostgreSQL driver, Log4j 2 (+ `log4j-layout-template-json` for ECS), Bean Validation, `nimbus-jose-jwt` (JWT/JWKS), Bucket4j core | JPA/Hibernate, Spring Security, Spring Cloud, Lombok, MapStruct, reactive stack, message brokers |
+| Sender client `client-java/` (optional helper for existing backends) | JDK 17+ only (`java.net.http.HttpClient`), hand-written JSON for its fixed small schema | any runtime dependency |
+| Android SDK | Kotlin stdlib, Android platform APIs (`HttpURLConnection`, `org.json`, Keystore AES-GCM, `JobScheduler`); `firebase-messaging` as `compileOnly` (host app provides it) | OkHttp/Retrofit, coroutines, WorkManager, DI frameworks, Gson/Moshi, `androidx.security-crypto` (deprecated) |
+| iOS SDK | Foundation, UserNotifications, Security (Keychain), OSLog | any third-party package |
+
+Size targets (checked in CI from cycle 2/3): Android AAR < 100 KB, iOS framework < 300 KB; backend container image < 250 MB.
+
+Authentication filters are implemented as small servlet filters on top of `nimbus-jose-jwt` instead of Spring Security; they are covered by dedicated unit and integration tests and by the security reviewer role.
 - Container: distroless or UBI-minimal JRE, non-root, writable dirs only under `/tmp`, works with OpenShift arbitrary UIDs.
 - Deploy: Helm chart (`deploy/helm/reliable-push`) with values for GKE and OpenShift (Route instead of Ingress, no fixed UID); separate `api`/`worker` deployments optional.
 
@@ -215,7 +260,9 @@ calls), device simulator (registers devices, sends DELIVERED/READ with
 configurable delay/loss), and a scenario runner that asserts outcomes:
 delivered before timeout, read policy, not delivered → exactly one fallback,
 late delivery, multi-device, cancellation, token refresh near expiry, rate
-limiting, worker restart during dispatch.
+limiting, worker crash during dispatch inside the trigger window (re-sent once)
+and outside it (`FALLBACK_EXPIRED`, webhook not called), and log assertions
+(every API call and trigger step produces its catalogue event; no secrets in logs).
 
 ## 11. SDLC
 
@@ -230,7 +277,7 @@ limiting, worker restart during dispatch.
 LICENSE  README.md  AGENTS.md  CLAUDE.md  CONTRIBUTING.md  SECURITY.md
 .agents/{rules,skills}/   .claude/{agents,skills->../.agents/skills}
 .github/workflows/
-backend/      harness/      android/      ios/      deploy/helm/
+backend/      client-java/      harness/      android/      ios/      deploy/helm/
 docs/  requirements.md  STATUS.md  specs/  plans/  architecture.md  api.md
        integration-guide.md  security.md  operations.md  testing.md
 ```

@@ -22,4 +22,9 @@ description: Platform and store-policy rules for the Android and iOS SDKs.
 ## Android
 - Mode v1 (default): data-only high-priority messages; the SDK reports DELIVERED and **always** posts a visible notification (no hidden high-priority messages).
 - Mode v2 (opt-in): `AndroidConfigV2` `RemoteNotification` with `mutable_content: true`; implement `onNotificationReceived` and return a `NotificationResponse` within 20 s. Do not use suppression to hide tracking work.
-- Longer work goes to WorkManager. Respect Android 13+ `POST_NOTIFICATIONS` permission.
+- Pending-event retry via platform `JobScheduler` (no WorkManager). Respect Android 13+ `POST_NOTIFICATIONS` permission.
+
+## Lightweight (spec §9.2)
+- Android: Kotlin stdlib + platform APIs only (`HttpURLConnection`, `org.json`, Keystore, `JobScheduler`); `firebase-messaging` is `compileOnly`. No OkHttp/Retrofit, coroutines, WorkManager, DI, Gson/Moshi.
+- iOS: Foundation, UserNotifications, Security, OSLog only. No third-party packages.
+- Logging: platform logger with the backend event names; nothing below WARN in release; never tokens or content.

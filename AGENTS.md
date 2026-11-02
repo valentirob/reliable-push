@@ -19,9 +19,10 @@ sending pushes itself.
 
 | Path | What | Stack |
 |---|---|---|
-| `backend/` | Tracking + fallback service (modular monolith, `api`/`worker` profiles) | Java 21, Spring Boot 3, PostgreSQL, Flyway |
+| `backend/` | Tracking + fallback service (modular monolith, `api`/`worker` profiles) | Java 21, Spring Boot 4, PostgreSQL, Flyway |
 | `android/` | Android SDK (FCM v1 data mode + opt-in AndroidConfigV2 mode) | Kotlin, minSdk 26 |
 | `ios/` | iOS SDK + Notification Service Extension helper | Swift, iOS 15+, SPM |
+| `client-java/` | Optional zero-dependency Java client for the sender API | Java 17+, JDK only |
 | `harness/` | Fake sender, fake fallback receiver, device simulator, E2E scenarios | Java / docker-compose |
 | `docs/` | Requirements, specs, plans, guides, status | Markdown |
 
