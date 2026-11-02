@@ -45,7 +45,7 @@ one or more apps.
 - **NFR-3 Reliability** Survives restarts; runs as multiple replicas without double-firing fallbacks.
 - **NFR-4 Portability** Runs on Google Cloud GKE and Red Hat OpenShift (non-root, arbitrary UID), PostgreSQL as the only stateful dependency.
 - **NFR-5 Store compliance** SDKs follow Apple App Store and Google Play policies: short work in extensions/services, no hidden background activity, minimal data, privacy manifests and documented data collection.
-- **NFR-6 Testability** Unit, integration and end-to-end tests run automatically; a harness simulates sender, fallback receiver and devices.
+- **NFR-6 Testability** Unit, integration and contract tests run automatically in CI. End-to-end tests run on a local PC with one command, started manually or by an AI agent in its feedback loop, against a harness that simulates sender, fallback receiver and devices; results are machine-readable.
 - **NFR-7 Observability** Health endpoints, Prometheus metrics (events, fallbacks, webhook outcomes, latency). Logging with Log4j 2 in structured JSON (Elastic Common Schema) with correlation ids; every API call and every trigger step emits a catalogued log event; no tokens, keys, user ids or message bodies in logs.
 - **NFR-10 Lightweight** Backend, sender client and mobile SDKs avoid heavy frameworks and stay within the dependency budget of the spec (§9.2): no ORM, no Spring Security, zero third-party runtime dependencies in the sender client and iOS SDK, platform APIs only in the Android SDK besides Kotlin stdlib.
 - **NFR-8 Continuity** Repo carries LLM-agnostic context (`AGENTS.md`, rules, skills, `docs/STATUS.md`) so work can continue with Claude Code, Antigravity or other tools.

@@ -11,7 +11,7 @@ description: Implement the next unchecked task from the active plan in docs/plan
 4. Write the failing test(s) described by the task. Run them and confirm they fail for the expected reason.
 5. Write the minimal code to pass. Run the component's test command and read the output.
 6. Refactor if needed, re-run tests.
-7. Run the `review-loop` skill on the diff when the task is non-trivial.
+7. Run the `review-loop` skill on the diff when the task is non-trivial. If the task touches `backend/`, `harness/`, `android/` or `ios/` and completes a feature (or the plan says so), run the `run-e2e` skill locally and fix until green.
 8. Tick the task checkbox in the plan, commit code + plan together with a Conventional Commit message.
 9. Continue with the next task, or run `session-handoff` if stopping.
 
