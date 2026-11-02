@@ -1,0 +1,43 @@
+# Maven / Java
+target/
+*.class
+*.jar
+*.war
+*.log
+hs_err_pid*
+!**/.mvn/wrapper/maven-wrapper.jar
+dependency-reduced-pom.xml
+
+# Gradle (Android)
+.gradle/
+build/
+local.properties
+*.apk
+*.aab
+
+# Swift / Xcode
+.build/
+xcuserdata/
+DerivedData/
+*.xcuserstate
+
+# IDEs
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.classpath
+.project
+.settings/
+*.swp
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Secrets / local env
+.env
+.env.*
+!.env.example

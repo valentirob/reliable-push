@@ -53,9 +53,9 @@ Expected: `openjdk version "21...` and a server version. Export `JAVA_HOME=/opt/
 **Files:**
 - Create: `LICENSE` (MIT, `Copyright (c) 2026 reliable-push contributors`), `README.md` (replace), `CONTRIBUTING.md`, `SECURITY.md`, `.gitignore` (Java/Maven/IDE/macOS, `.env`), `.editorconfig`, `.gitattributes` (`* text=auto`, `*.sh eol=lf`)
 
-- [ ] **Step 1: Write the files.** README: one-paragraph pitch, how it works (the 5-step flow of spec §1 as a list), component table, quick start placeholder pointing to `docs/integration-guide.md`, and a **Documentation** section linking `docs/requirements.md`, `docs/specs/2026-11-03-reliable-push-design.md`, `docs/architecture.md`, `docs/api.md`, `docs/integration-guide.md`, `docs/security.md`, `docs/operations.md`, `docs/testing.md`, `docs/STATUS.md`, `AGENTS.md`, `CONTRIBUTING.md`, `SECURITY.md`, `LICENSE`. CONTRIBUTING: gitflow, Conventional Commits, test-first, review-loop, E2E-local rule, AI agents → `AGENTS.md`. SECURITY: private reporting via GitHub Security Advisories.
-- [ ] **Step 2: Verify links** — Run: `grep -o '](\(docs/\|[A-Z]\)[^)]*)' README.md | sort -u` — every target either exists or is created by a later task of this plan (list them in the commit message).
-- [ ] **Step 3: Commit** `docs: add MIT license, README and contribution files`
+- [x] **Step 1: Write the files.** README: one-paragraph pitch, how it works (the 5-step flow of spec §1 as a list), component table, quick start placeholder pointing to `docs/integration-guide.md`, and a **Documentation** section linking `docs/requirements.md`, `docs/specs/2026-11-03-reliable-push-design.md`, `docs/architecture.md`, `docs/api.md`, `docs/integration-guide.md`, `docs/security.md`, `docs/operations.md`, `docs/testing.md`, `docs/STATUS.md`, `AGENTS.md`, `CONTRIBUTING.md`, `SECURITY.md`, `LICENSE`. CONTRIBUTING: gitflow, Conventional Commits, test-first, review-loop, E2E-local rule, AI agents → `AGENTS.md`. SECURITY: private reporting via GitHub Security Advisories.
+- [x] **Step 2: Verify links** — Run: `grep -o '](\(docs/\|[A-Z]\)[^)]*)' README.md | sort -u` — every target either exists or is created by a later task of this plan (list them in the commit message).
+- [x] **Step 3: Commit** `docs: add MIT license, README and contribution files`
 
 ### Task 2: Backend skeleton, profiles and Log4j 2 ECS logging
 
