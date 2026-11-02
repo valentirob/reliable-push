@@ -71,4 +71,4 @@ Filled in as components land; keep this section accurate.
 | Task | Command |
 |---|---|
 | Backend build + unit tests | `cd backend && ./mvnw verify` *(after backend scaffold)* |
-| E2E | see `.agents/skills/run-e2e/SKILL.md` *(after harness)* |
+| E2E (local only, manual or agent) | `./scripts/e2e.sh` — details in `.agents/skills/run-e2e/SKILL.md` *(after harness)* |

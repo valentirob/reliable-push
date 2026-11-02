@@ -14,7 +14,7 @@ otherwise run them one after another in a fresh mindset.
 
 1. **Correctness reviewer** — logic bugs, race conditions (fallback vs. delivery), error handling, contract drift from `openapi.yaml` and the spec.
 2. **Security reviewer** — apply `.agents/rules/security.md`; auth bypass, token handling, input validation, secrets, log leaks.
-3. **Test reviewer** — missing tests for new behaviour, weak assertions, untested edge cases; run the test suite and coverage.
+3. **Test reviewer** — missing tests for new behaviour, weak assertions, untested edge cases; run the test suite and coverage, and for changes to `backend/`, `harness/`, `android/` or `ios/` run the local E2E suite (`run-e2e` skill) and include its `summary.json` result.
 4. **Policy reviewer** (only for `android/**`, `ios/**`) — apply `.agents/rules/mobile-sdk.md` and store policies.
 
 ## Each finding

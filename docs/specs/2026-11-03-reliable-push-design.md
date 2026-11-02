@@ -250,7 +250,7 @@ Authentication filters are implemented as small servlet filters on top of `nimbu
 | Unit | JUnit 5, AssertJ | state machine, policy evaluation, token logic, HMAC, validation |
 | Integration (`*IT`) | Testcontainers PostgreSQL, WireMock (OIDC JWKS, webhook) | REST endpoints, SKIP LOCKED claiming with concurrent workers, retries, rate limits |
 | Contract | OpenAPI validation of requests/responses in ITs | API drift |
-| End-to-end | `harness/` + docker-compose | full scenarios across components |
+| End-to-end (local only, §10.1) | `harness/` + docker-compose | full scenarios across components |
 | Load | Gatling (cycle 1, basic) | NFR-2 target |
 | Mobile (cycles 2–3) | JUnit/Robolectric, XCTest; emulator/simulator instrumented tests against the harness | SDK logic, NSE/service handling |
 
@@ -264,10 +264,45 @@ limiting, worker crash during dispatch inside the trigger window (re-sent once)
 and outside it (`FALLBACK_EXPIRED`, webhook not called), and log assertions
 (every API call and trigger step produces its catalogue event; no secrets in logs).
 
+### 10.1 Local end-to-end runs and the feedback loop
+
+End-to-end tests run **on a local PC**, started either manually by a developer
+or by an AI agent (Claude Code, Antigravity, others) as part of its feedback
+loop. They are **not** executed in CI; CI runs unit, integration and contract
+tests only.
+
+- **One entry point**, same for humans and agents: `./scripts/e2e.sh [--scenario <name>] [--keep]`
+  (Windows: `scripts/e2e.ps1`). It builds the images, starts
+  `harness/docker-compose.yml` (backend, PostgreSQL, fake OIDC, fallback
+  receiver, device simulator), waits for health, runs the scenarios, collects
+  logs, and tears everything down unless `--keep` is given.
+- **Prerequisites:** Docker Desktop or Podman with compose, JDK 21. Mobile
+  E2E (cycles 2–3) additionally needs a local Android emulator / Xcode iOS
+  simulator; those scenarios run against the same local harness.
+- **Fast clock:** the `e2e` Spring profile enables
+  `reliable-push.testing.minute-duration` (e.g. `1s`), so a "10 minute" timeout
+  takes 10 s and the full suite runs in a few minutes. The property is rejected
+  at startup in any other profile, so it cannot leak into production.
+- **Machine-readable results** for agents: exit code `0` = all passed; JUnit XML
+  in `harness/build/e2e/junit/`; a summary `harness/build/e2e/summary.json`
+  (`{scenario, status, durationMs, failure: {expected, actual, hint}, logs}`);
+  container logs in `harness/build/e2e/logs/`. Output is deterministic (fixed
+  seeds, no wall-clock dependent assertions beyond the scaled clock).
+- **Agent feedback loop** (`.agents/skills/run-e2e`): run → read `summary.json`
+  → for each failure reproduce it with the smallest failing unit/integration
+  test → fix → rerun the failed scenario → rerun the full suite. Max 3
+  iterations, then stop and record the remaining failures in `docs/STATUS.md`.
+  Improvements the agent notices (flaky scenario, missing coverage, slow step)
+  are recorded as plan tasks, not silently changed.
+- **When it must run:** before merging any `feature/*` that touches `backend/`,
+  `harness/`, `android/` or `ios/` into `develop`, and before closing a
+  `release/*`. The merge commit or PR description states the result
+  (`E2E: 14/14 passed, scripts/e2e.sh, <date>`).
+
 ## 11. SDLC
 
 - Gitflow (`.agents/rules/gitflow.md`), Conventional Commits, SemVer tags on `main`.
-- GitHub Actions: on PR/push — build, unit + IT tests, JaCoCo coverage (≥ 80% line on backend), CodeQL, dependency review/OWASP check, container build + Trivy scan; E2E harness job on `develop`/`release/*`. Mobile jobs added in cycles 2–3.
+- GitHub Actions: on PR/push — build, unit + IT tests, JaCoCo coverage (≥ 80% line on backend), CodeQL, dependency review/OWASP check, container build + Trivy scan. No end-to-end job in CI: E2E runs locally (§10.1) and its result is reported in the merge. Mobile unit-test jobs added in cycles 2–3.
 - Multi-agent review: `.agents/skills/review-loop` (correctness, security, tests, mobile policy) run before merging feature branches; Claude subagents in `.claude/agents/`, any other tool runs the roles from the skill.
 - Continuity: `AGENTS.md`, `.agents/rules`, `.agents/skills`, `docs/STATUS.md` updated each session.
 
@@ -277,7 +312,7 @@ and outside it (`FALLBACK_EXPIRED`, webhook not called), and log assertions
 LICENSE  README.md  AGENTS.md  CLAUDE.md  CONTRIBUTING.md  SECURITY.md
 .agents/{rules,skills}/   .claude/{agents,skills->../.agents/skills}
 .github/workflows/
-backend/      client-java/      harness/      android/      ios/      deploy/helm/
+backend/      client-java/      harness/      android/      ios/      deploy/helm/      scripts/ (e2e.sh, e2e.ps1)
 docs/  requirements.md  STATUS.md  specs/  plans/  architecture.md  api.md
        integration-guide.md  security.md  operations.md  testing.md
 ```
