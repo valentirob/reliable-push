@@ -56,6 +56,7 @@ Database connection (Spring Boot): `SPRING_DATASOURCE_URL` (`jdbc:postgresql://h
 | `worker.lease` | `2m` | A product duration (scaled by the fast clock). Must be longer than every app's `fallback.http-timeout`; otherwise startup fails (a warning only with the fast clock) |
 | `worker.backlog-refresh-interval` | `30s` | Optional; how often `rp_due_backlog` is recomputed |
 | `retention-days` | `30` | At least 1. Closed notifications older than this are deleted daily |
+| `retention.cron` | `0 17 3 * * *` | Spring cron expression (six fields, always UTC) of the daily retention run (worker role); `-` disables the schedule |
 | `testing.minute-duration` | unset (1 minute = 60 s) | Fast clock, e.g. `1s`. Accepted only with the `e2e` or `demo` profile, must be positive |
 
 Per app, under `apps.<appId>` (the app id matches `[A-Za-z0-9][A-Za-z0-9_-]{0,63}`; at least one app is needed to do anything
@@ -195,7 +196,7 @@ Regenerate the list from the code with
 
 ## Retention
 
-`RetentionJob` (worker role) runs daily at 03:17 UTC and deletes closed notifications whose `closed_at` is older than
+`RetentionJob` (worker role) runs daily at 03:17 UTC (`reliable-push.retention.cron`, always UTC; `-` disables it) and deletes closed notifications whose `closed_at` is older than
 `retention-days`, in chunks of 1,000 rows, each chunk its own short transaction; events go with them (`ON DELETE
 CASCADE`). Notifications that are not closed are never deleted, whatever their age. Two replicas running it simultaneously
 is harmless. It logs `retention.purged` with the count. Devices are not purged by this job.

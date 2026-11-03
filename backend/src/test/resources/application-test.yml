@@ -15,6 +15,9 @@ reliable-push:
     revocation-cache-ttl: 0s
   worker:
     poll-interval: 200ms
+  retention:
+    # never fire the daily purge inside a test JVM (RetentionJobIT calls purge() directly)
+    cron: "-"
   apps:
     shop:
       # SHA-256 of the raw test key "test-sender-key-shop" (tests send that raw key in X-Api-Key)

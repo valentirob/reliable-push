@@ -35,8 +35,11 @@ public class RetentionJob {
         this.retention = Duration.ofDays(properties.retentionDays());
     }
 
-    /** Daily at 03:17 UTC (off the hour, away from other jobs' peaks). */
-    @Scheduled(cron = "0 17 3 * * *", zone = "UTC")
+    /**
+     * Daily at 03:17 UTC by default (off the hour, away from other jobs' peaks). The Spring cron expression is
+     * {@code reliable-push.retention.cron}, always in UTC; {@code -} disables the schedule (the test profile does).
+     */
+    @Scheduled(cron = "${reliable-push.retention.cron:0 17 3 * * *}", zone = "UTC")
     public void scheduled() {
         purge();
     }

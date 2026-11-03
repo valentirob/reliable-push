@@ -21,6 +21,8 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.scheduling.config.CronTask;
+import org.springframework.scheduling.config.ScheduledTaskHolder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.TestPropertySource;
 
@@ -59,7 +61,19 @@ class RetentionJobIT extends PostgresTestBase {
     @Autowired
     JdbcClient jdbc;
 
+    @Autowired
+    List<ScheduledTaskHolder> scheduledTasks;
+
     private EventCapture capture;
+
+    @Test
+    void dailyCronIsDisabledInTests() {
+        // reliable-push.retention.cron is "-" in application-test.yml: the job never fires inside a test JVM
+        assertThat(scheduledTasks)
+                .flatExtracting(holder -> List.copyOf(holder.getScheduledTasks()))
+                .extracting(scheduled -> scheduled.getTask())
+                .noneSatisfy(task -> assertThat(task).isInstanceOf(CronTask.class));
+    }
 
     @BeforeEach
     void startCapture() {
