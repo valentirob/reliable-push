@@ -76,7 +76,7 @@ reliable-push:
       fallback:
         url: http://localhost:9/hook
         hmac-secret-ref: env:RP_TEST_SHOP_HOOK_SECRET
-    # Used by DeviceApiIT.registerRateLimitedPerApp: registration allows 10 x device-per-minute = 10 requests per minute.
+    # Used by DeviceApiIT.registerRateLimitedPerApp: registration allows device-per-minute = 1 request per minute per user.
     # Key: SHA-256 of the raw test key "test-sender-key-deviceregister".
     deviceregister:
       sender-api-key-sha256: ea2147f6f94e572766cf77b92151241a4a221b9b25d3942f5439a944b91e973f
@@ -89,7 +89,7 @@ reliable-push:
       fallback:
         url: http://localhost:9/hook
         hmac-secret-ref: env:RP_TEST_SHOP_HOOK_SECRET
-    # Used by DeviceApiIT.deviceRateLimited429: only two device requests per minute (registration: 20 per minute).
+    # Used by DeviceApiIT.deviceRateLimited429: only two device requests per minute (registration: 2 per minute per user).
     # Key: SHA-256 of the raw test key "test-sender-key-devicelimited".
     devicelimited:
       sender-api-key-sha256: 510f70f5a6fcb46ef0602becb1c21d3ae4237723590312ddb078596498f19459

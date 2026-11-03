@@ -35,12 +35,6 @@ public class DeviceService {
     static final String TOKEN_REJECTED = "A valid device token is required.";
     static final String DEVICE_CHALLENGE = "Bearer realm=\"reliable-push\"";
     static final long IDENTITY_PROVIDER_RETRY_SECONDS = 30;
-    /**
-     * Registration is not authenticated by a device token, so it is limited per app instead of per device:
-     * {@code register:<appId>} gets {@code device-per-minute} x this factor requests per minute.
-     */
-    static final int REGISTER_LIMIT_FACTOR = 10;
-
     private final DeviceRepository repository;
     private final DeviceTokenService tokens;
     private final IdentityVerifiers identities;
@@ -68,8 +62,9 @@ public class DeviceService {
 
     public DeviceTokenResponse register(RegisterDeviceRequest request) {
         AppConfig app = apps.byId(request.appId()).orElseThrow(() -> new NotFoundException("Unknown appId."));
-        enforceRegisterLimit(app);
+        // verify first: a request without a valid credential consumes no bucket that a legitimate user depends on
         String userId = verifyCredential(app, request.idToken()).userId();
+        enforceRegisterLimit(app, userId);
         Instant now = clock.instant().truncatedTo(ChronoUnit.MICROS);
 
         UUID deviceId = null;
@@ -112,11 +107,14 @@ public class DeviceService {
     /** Revokes the device: every token it ever had stops working (on other instances after the cache TTL). */
     public void revoke(DevicePrincipal principal) {
         Instant now = clock.instant().truncatedTo(ChronoUnit.MICROS);
-        boolean revoked = repository.revoke(principal.deviceId(), principal.appId(), principal.userId(), now);
+        // conditional on the presented version, like refresh: a superseded token cannot revoke the current registration
+        boolean revoked = repository.revoke(
+                principal.deviceId(), principal.appId(), principal.userId(), principal.tokenVersion(), now);
         activeCache.evict(principal.deviceId());
-        if (revoked) {
-            logDevice("device.revoked", principal.appId(), principal.deviceId(), principal.userId());
+        if (!revoked) {
+            throw new UnauthorizedException(TOKEN_REJECTED, DEVICE_CHALLENGE);
         }
+        logDevice("device.revoked", principal.appId(), principal.deviceId(), principal.userId());
     }
 
     /**
@@ -134,15 +132,21 @@ public class DeviceService {
         return active;
     }
 
-    private void enforceRegisterLimit(AppConfig app) {
-        String bucket = "register:" + app.appId();
-        int perMinute = (int) Math.min(Integer.MAX_VALUE, (long) REGISTER_LIMIT_FACTOR * app.rateLimits().devicePerMinute());
-        if (limiter.tryConsume(bucket, perMinute)) {
+    /**
+     * Registration has no device token yet, so after the credential was verified it is limited per user:
+     * {@code register:<appId>:<userHash>} gets the app's {@code device-per-minute} requests per minute. Nothing is
+     * consumed before verification, so unauthenticated traffic cannot exhaust a bucket of a legitimate user.
+     */
+    private void enforceRegisterLimit(AppConfig app, String userId) {
+        String userHash = UserHash.of(userId);
+        String bucket = "register:" + app.appId() + ":" + userHash;
+        if (limiter.tryConsume(bucket, app.rateLimits().devicePerMinute())) {
             return;
         }
         long retryAfter = limiter.retryAfterSeconds(bucket);
         EventLog.warn("rate_limit.exceeded", Map.of(
-                "event.outcome", "failure", "rp.app_id", app.appId(), "rate_limit.scope", "register"));
+                "event.outcome", "failure", "rp.app_id", app.appId(), "rp.user_hash", userHash,
+                "rate_limit.scope", "register"));
         throw RetryLaterException.tooManyRequests(retryAfter);
     }
 

@@ -177,8 +177,8 @@ paths:
         older ones; a `deviceId` that belongs to another user is not reused (a new id is issued).
 
         Rejected credentials all get the same `401` body, whatever the reason. `503` with `Retry-After` means the
-        identity provider's keys could not be fetched: retry later. Registration is limited per app (ten times the
-        app's per-device limit per minute), not per device.
+        identity provider's keys could not be fetched: retry later. Registration is limited per user (the app's
+        per-device limit per minute, counted after the credential was verified), not per device.
       requestBody:
         required: true
         content:

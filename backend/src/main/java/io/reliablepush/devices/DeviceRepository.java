@@ -89,16 +89,21 @@ class DeviceRepository {
                 == 1;
     }
 
-    /** Sets {@code revoked_at} and bumps the version. @return {@code false} if the device was already revoked or does not exist */
-    boolean revoke(UUID id, String appId, String userId, Instant now) {
+    /**
+     * Sets {@code revoked_at} and bumps the version, provided the device still has {@code tokenVersion} and is not
+     * revoked. @return {@code false} otherwise
+     */
+    boolean revoke(UUID id, String appId, String userId, int tokenVersion, Instant now) {
         return jdbc.sql("""
                                 update device set revoked_at = :now, token_version = token_version + 1
-                                where id = :id and app_id = :appId and user_id = :userId and revoked_at is null
+                                where id = :id and app_id = :appId and user_id = :userId
+                                  and token_version = :version and revoked_at is null
                                 """)
                         .param("now", timestamp(now))
                         .param("id", id)
                         .param("appId", appId)
                         .param("userId", userId)
+                        .param("version", tokenVersion)
                         .update()
                 == 1;
     }

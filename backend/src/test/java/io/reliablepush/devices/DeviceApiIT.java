@@ -2,10 +2,13 @@ package io.reliablepush.devices;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.awaitility.Awaitility.await;
 
 import com.jayway.jsonpath.JsonPath;
 import io.reliablepush.shared.logging.UserHash;
+import io.reliablepush.shared.security.DevicePrincipal;
+import io.reliablepush.shared.web.UnauthorizedException;
 import io.reliablepush.support.FakeOidc;
 import io.reliablepush.support.OpenApiAssert;
 import io.reliablepush.support.PostgresTestBase;
@@ -68,6 +71,9 @@ class DeviceApiIT extends PostgresTestBase {
 
     @Autowired
     DeviceTokenService tokens;
+
+    @Autowired
+    DeviceService devices;
 
     // ---- helpers -----------------------------------------------------------------------------------------------
 
@@ -251,22 +257,14 @@ class DeviceApiIT extends PostgresTestBase {
     }
 
     @Test
-    void registerRateLimitedPerApp(CapturedOutput output) {
-        // the register bucket is device-per-minute x 10 = 10 for this app (only this test uses it)
-        int accepted = 0;
-        ResponseEntity<String> limited = null;
-        for (int i = 0; i < 11 && limited == null; i++) {
-            ResponseEntity<String> response = register(REGISTER_APP, IDP.idToken(uniqueUser(), REGISTER_AUDIENCE, Duration.ofMinutes(5)), "IOS", null);
-            if (response.getStatusCode().value() == 429) {
-                limited = response;
-            } else {
-                assertThat(response.getStatusCode().value()).isEqualTo(201);
-                accepted++;
-            }
-        }
+    void registerRateLimitedPerUser(CapturedOutput output) {
+        // the register bucket is the app's device-per-minute (1 for this app) per user, counted after verification
+        String userId = uniqueUser();
+        String firstToken = IDP.idToken(userId, REGISTER_AUDIENCE, Duration.ofMinutes(5));
+        assertThat(register(REGISTER_APP, firstToken, "IOS", null).getStatusCode().value()).isEqualTo(201);
 
-        assertThat(limited).as("the 11th registration of a 10 per minute app").isNotNull();
-        assertThat(accepted).isEqualTo(10);
+        ResponseEntity<String> limited = register(REGISTER_APP, IDP.idToken(userId, REGISTER_AUDIENCE, Duration.ofMinutes(5)), "IOS", null);
+
         assertProblem(limited, 429);
         assertThat(Long.parseLong(limited.getHeaders().getFirst(HttpHeaders.RETRY_AFTER))).isBetween(1L, 60L);
         OpenApiAssert.assertMatchesContract("POST", "/v1/devices", limited);
@@ -274,7 +272,26 @@ class DeviceApiIT extends PostgresTestBase {
                 .anySatisfy(line -> {
                     assertThat(JsonPath.<String>read(line, "$['rp.app_id']")).isEqualTo(REGISTER_APP);
                     assertThat(JsonPath.<String>read(line, "$['rate_limit.scope']")).isEqualTo("register");
+                    assertThat(JsonPath.<String>read(line, "$['rp.user_hash']")).isEqualTo(UserHash.of(userId));
                 }));
+        assertThat(output.getAll()).doesNotContain(userId);
+        // other users of the same app are not affected
+        assertThat(register(REGISTER_APP, IDP.idToken(uniqueUser(), REGISTER_AUDIENCE, Duration.ofMinutes(5)), "IOS", null)
+                        .getStatusCode().value())
+                .isEqualTo(201);
+    }
+
+    @Test
+    void invalidCredentialsConsumeNoRegistrationBudgetOfOtherUsers() {
+        // far more bogus registrations than any bucket of this app allows (1 per minute per user)
+        for (int i = 0; i < 15; i++) {
+            String bogus = i % 2 == 0 ? "not-a-jwt" : IDP.idToken(uniqueUser(), "some-other-app", Duration.ofMinutes(5));
+            assertProblem(register(REGISTER_APP, bogus, "IOS", null), 401);
+        }
+
+        ResponseEntity<String> legitimate = register(REGISTER_APP, IDP.idToken(uniqueUser(), REGISTER_AUDIENCE, Duration.ofMinutes(5)), "IOS", null);
+
+        assertThat(legitimate.getStatusCode().value()).isEqualTo(201);
     }
 
     // ---- re-registration ---------------------------------------------------------------------------------------
@@ -417,6 +434,28 @@ class DeviceApiIT extends PostgresTestBase {
                 .isEqualTo(1);
         // other devices are not affected
         assertThat(refresh(other).getStatusCode().value()).isEqualTo(200);
+    }
+
+    @Test
+    void supersededTokenCannotRevokeTheCurrentRegistration() {
+        String userId = uniqueUser();
+        ResponseEntity<String> first = registerUser(userId, null);
+        UUID deviceId = UUID.fromString(deviceId(first));
+        ResponseEntity<String> second = register(APP, idToken(userId), "IOS", deviceId.toString());
+        assertThat(second.getStatusCode().value()).isEqualTo(201);
+
+        // what the filter would hand over if the old token (version 0) were still accepted from the cache
+        assertThatThrownBy(() -> devices.revoke(new DevicePrincipal(APP, userId, deviceId, 0)))
+                .isInstanceOf(UnauthorizedException.class);
+
+        assertThat(jdbc.sql("select revoked_at is null and token_version = 1 from device where id = :id").param("id", deviceId)
+                        .query(Boolean.class).single())
+                .as("the current registration is untouched")
+                .isTrue();
+        assertThat(refresh(bearer(second)).getStatusCode().value()).isEqualTo(200);
+        // the current version can revoke
+        devices.revoke(new DevicePrincipal(APP, userId, deviceId, 1));
+        assertProblem(refresh(bearer(second)), 401);
     }
 
     @Test
