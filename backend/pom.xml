@@ -25,6 +25,11 @@
         <bucket4j.version>8.21.0</bucket4j.version>
         <nimbus-jose-jwt.version>10.10</nimbus-jose-jwt.version>
         <swagger-request-validator.version>2.46.1</swagger-request-validator.version>
+        <exec-maven-plugin.version>3.6.1</exec-maven-plugin.version>
+        <!-- JUnit tags: the default build never builds or runs the container image (profile "image" flips these). -->
+        <it.groups></it.groups>
+        <it.excludedGroups>image</it.excludedGroups>
+        <image.name>reliable-push-backend:${project.version}</image.name>
     </properties>
 
     <dependencies>
@@ -204,6 +209,11 @@
                 <artifactId>maven-failsafe-plugin</artifactId>
                 <configuration>
                     <argLine>@{argLine} -Xshare:off -javaagent:${org.mockito:mockito-core:jar}</argLine>
+                    <groups>${it.groups}</groups>
+                    <excludedGroups>${it.excludedGroups}</excludedGroups>
+                    <systemPropertyVariables>
+                        <image.name>${image.name}</image.name>
+                    </systemPropertyVariables>
                 </configuration>
                 <executions>
                     <execution>
@@ -261,4 +271,48 @@
             </plugin>
         </plugins>
     </build>
+
+    <profiles>
+        <!-- ./mvnw verify -Pimage: builds the container image with docker and runs only the @Tag("image") ITs. -->
+        <profile>
+            <id>image</id>
+            <properties>
+                <it.groups>image</it.groups>
+                <it.excludedGroups></it.excludedGroups>
+                <!-- only the image ITs run, so the line-coverage gate (fed by the regular ITs) does not apply -->
+                <jacoco.skip>true</jacoco.skip>
+            </properties>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.codehaus.mojo</groupId>
+                        <artifactId>exec-maven-plugin</artifactId>
+                        <version>${exec-maven-plugin.version}</version>
+                        <executions>
+                            <execution>
+                                <id>docker-build</id>
+                                <phase>pre-integration-test</phase>
+                                <goals>
+                                    <goal>exec</goal>
+                                </goals>
+                                <configuration>
+                                    <executable>docker</executable>
+                                    <workingDirectory>${project.basedir}</workingDirectory>
+                                    <arguments>
+                                        <argument>build</argument>
+                                        <argument>--quiet</argument>
+                                        <argument>-t</argument>
+                                        <argument>${image.name}</argument>
+                                        <argument>-f</argument>
+                                        <argument>Dockerfile</argument>
+                                        <argument>.</argument>
+                                    </arguments>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>

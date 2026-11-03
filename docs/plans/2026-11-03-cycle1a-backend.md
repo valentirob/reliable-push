@@ -296,11 +296,11 @@ Expected: `openjdk version "21...` and a server version. Export `JAVA_HOME=/opt/
 
 **Files:**
 - Create: `backend/Dockerfile`, `backend/.dockerignore`, `backend/src/test/java/io/reliablepush/ContainerImageIT.java` (tag `@Tag("image")`, excluded from default `verify`; run with `-Pimage`)
-- [ ] **Step 1: Write failing test** `ContainerImageIT.startsAsArbitraryNonRootUid()` — Testcontainers `GenericContainer` from the built image with `withCreateContainerCmdModifier(cmd -> cmd.withUser("1000870000:0"))`, Postgres network alias, env config for one app → `/actuator/health/readiness` 200 within 60 s; image size < 250 MB (`docker image inspect` via Testcontainers `DockerClient`).
-- [ ] **Step 2: Run** `./mvnw verify -Pimage` → FAIL (no image).
-- [ ] **Step 3: Dockerfile** — multi-stage: build with `eclipse-temurin:21-jdk` (`./mvnw -DskipTests package`, layertools extract); runtime `eclipse-temurin:21-jre-alpine` (or `ubi9/openjdk-21-runtime`), `USER 1001`, files group-owned by `0` with `g=u` permissions (OpenShift arbitrary UID), `EXPOSE 8080`, `JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=75`, no shell entrypoint scripts. The `-Pimage` Maven profile builds the image with `docker build` (exec plugin) before failsafe.
-- [ ] **Step 4: Run** `./mvnw verify -Pimage` → PASS.
-- [ ] **Step 5: Commit** `build(backend): openshift-compatible container image`
+- [x] **Step 1: Write failing test** `ContainerImageIT.startsAsArbitraryNonRootUid()` — Testcontainers `GenericContainer` from the built image with `withCreateContainerCmdModifier(cmd -> cmd.withUser("1000870000:0"))`, Postgres network alias, env config for one app → `/actuator/health/readiness` 200 within 60 s; image size < 250 MB (`docker image inspect` via Testcontainers `DockerClient`).
+- [x] **Step 2: Run** `./mvnw verify -Pimage` → FAIL (no image).
+- [x] **Step 3: Dockerfile** — multi-stage: build with `eclipse-temurin:21-jdk` (`./mvnw -DskipTests package`, layertools extract); runtime `eclipse-temurin:21-jre-alpine` (or `ubi9/openjdk-21-runtime`), `USER 1001`, files group-owned by `0` with `g=u` permissions (OpenShift arbitrary UID), `EXPOSE 8080`, `JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=75`, no shell entrypoint scripts. The `-Pimage` Maven profile builds the image with `docker build` (exec plugin) before failsafe.
+- [x] **Step 4: Run** `./mvnw verify -Pimage` → PASS.
+- [x] **Step 5: Commit** `build(backend): openshift-compatible container image`
 
 ### Task 17: CI pipeline
 
