@@ -48,7 +48,7 @@ Summary of how the backend protects data and authenticates callers. The binding 
   cache TTL. Refresh, revoke and event reporting are conditional on the presented token version, so a superseded token cannot
   refresh, revoke or report.
 - Every failure returns the same `401`; only the logged reason code (`missing_token`, `malformed`, `unknown_kid`,
-  `bad_signature`, `wrong_issuer`, `expired`, `revoked`) differs.
+  `bad_signature`, `wrong_issuer`, `expired`, `unknown_app` for a token of an app no longer configured, `revoked`) differs.
 
 ### Signing keys and rotation
 

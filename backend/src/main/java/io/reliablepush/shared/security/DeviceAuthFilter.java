@@ -1,5 +1,6 @@
 package io.reliablepush.shared.security;
 
+import io.reliablepush.apps.AppRegistry;
 import io.reliablepush.devices.DeviceClaims;
 import io.reliablepush.devices.DeviceService;
 import io.reliablepush.devices.DeviceTokenService;
@@ -21,7 +22,8 @@ import org.springframework.web.filter.OncePerRequestFilter;
 
 /**
  * Authenticates the device API: {@code /v1/devices/token:refresh}, {@code /v1/devices/me} and {@code /v1/events}.
- * {@code Authorization: Bearer <device token>} is verified ({@link DeviceTokenService}: signature, issuer, expiry) and
+ * {@code Authorization: Bearer <device token>} is verified ({@link DeviceTokenService}: signature, issuer, expiry),
+ * its app ({@code aud}) must still be configured ({@link AppRegistry}; reason {@code unknown_app} otherwise), and it is
  * then checked against the device row ({@link DeviceService#isActive}: exists for the token's app and user, not
  * revoked, same {@code token_version}; positive answers cached for {@code revocation-cache-ttl}, keyed by device id and
  * version, never by token). On success the {@link DevicePrincipal} is exposed as request attribute
@@ -37,14 +39,17 @@ public class DeviceAuthFilter extends OncePerRequestFilter {
     private static final String BEARER = "bearer ";
     private static final String REVOKED = "revoked";
     private static final String MISSING_TOKEN = "missing_token";
+    private static final String UNKNOWN_APP = "unknown_app";
 
     private final DeviceTokenService tokens;
     private final DeviceService devices;
+    private final AppRegistry apps;
     private final ProblemWriter problems;
 
-    public DeviceAuthFilter(DeviceTokenService tokens, DeviceService devices, ProblemWriter problems) {
+    public DeviceAuthFilter(DeviceTokenService tokens, DeviceService devices, AppRegistry apps, ProblemWriter problems) {
         this.tokens = tokens;
         this.devices = devices;
+        this.apps = apps;
         this.problems = problems;
     }
 
@@ -67,6 +72,11 @@ public class DeviceAuthFilter extends OncePerRequestFilter {
             claims = tokens.verify(token);
         } catch (InvalidDeviceTokenException e) {
             reject(request, response, e.reason());
+            return;
+        }
+        if (apps.byId(claims.appId()).isEmpty()) {
+            // validly signed, but its app was removed from the configuration since the token was issued
+            reject(request, response, UNKNOWN_APP);
             return;
         }
         if (!devices.isActive(claims)) {

@@ -488,6 +488,32 @@ class DeviceApiIT extends PostgresTestBase {
     // ---- device authentication ---------------------------------------------------------------------------------
 
     @Test
+    void tokenOfAnAppNoLongerConfiguredIsTheGeneric401(CapturedOutput output) {
+        // a device of app "removed-app" registered while the app was configured; the app was then removed from the
+        // configuration, but the token is still validly signed and the device row still active
+        String userId = uniqueUser();
+        UUID deviceId = UUID.randomUUID();
+        jdbc.sql("""
+                insert into device (id, app_id, user_id, platform, token_version, created_at, last_seen_at)
+                values (?, 'removed-app', ?, 'ANDROID', 0, now(), now())
+                """).params(deviceId, userId).update();
+        Instant now = Instant.now();
+        String token = tokens.issue(new DeviceClaims("removed-app", userId, deviceId, 0, now, now.plus(Duration.ofDays(1))))
+                .token();
+
+        for (ResponseEntity<String> response : List.of(refresh("Bearer " + token), revoke("Bearer " + token))) {
+            assertProblem(response, 401);
+            assertThat(response.getHeaders().getFirst(HttpHeaders.WWW_AUTHENTICATE)).startsWith("Bearer");
+            assertThat(JsonPath.<String>read(response.getBody(), "$.detail")).isEqualTo("A valid device token is required.");
+        }
+        await().atMost(Duration.ofSeconds(5)).untilAsserted(
+                () -> assertThat(reasonOfLastAuthFailure(output)).isEqualTo("unknown_app"));
+        assertThat(jdbc.sql("select revoked_at is null from device where id = ?").param(deviceId).query(Boolean.class).single())
+                .isTrue();
+        assertThat(output.getAll()).doesNotContain(token).doesNotContain("\"log.level\":\"ERROR\"");
+    }
+
+    @Test
     void unauthenticatedRequestsAreRejectedWithTheSameProblem(CapturedOutput output) {
         ResponseEntity<String> registered = registerUser(uniqueUser(), null);
         String valid = bearer(registered);

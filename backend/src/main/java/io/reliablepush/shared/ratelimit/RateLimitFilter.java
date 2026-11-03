@@ -1,5 +1,6 @@
 package io.reliablepush.shared.ratelimit;
 
+import io.reliablepush.apps.AppConfig;
 import io.reliablepush.apps.AppRegistry;
 import io.reliablepush.shared.logging.EventLog;
 import io.reliablepush.shared.security.DevicePrincipal;
@@ -12,6 +13,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Optional;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.filter.OncePerRequestFilter;
@@ -46,21 +48,26 @@ public class RateLimitFilter extends OncePerRequestFilter {
             throws ServletException, IOException {
         String appId;
         String bucket;
-        int perMinute;
+        boolean sender = request.getAttribute(SenderPrincipal.ATTR) instanceof SenderPrincipal;
         Map<String, String> fields = new HashMap<>();
-        if (request.getAttribute(SenderPrincipal.ATTR) instanceof SenderPrincipal sender) {
-            appId = sender.appId();
+        if (request.getAttribute(SenderPrincipal.ATTR) instanceof SenderPrincipal principal) {
+            appId = principal.appId();
             bucket = "sender:" + appId;
-            perMinute = apps.byId(appId).orElseThrow().rateLimits().senderPerMinute();
             fields.put("rate_limit.scope", "sender");
         } else {
             DevicePrincipal device = (DevicePrincipal) request.getAttribute(DevicePrincipal.ATTR);
             appId = device.appId();
             bucket = "device:" + device.deviceId();
-            perMinute = apps.byId(appId).orElseThrow().rateLimits().devicePerMinute();
             fields.put("rate_limit.scope", "device");
             fields.put("rp.device_id", device.deviceId().toString());
         }
+        Optional<AppConfig> app = apps.byId(appId);
+        if (app.isEmpty()) {
+            // the authentication filters only admit configured apps; never answer 500 if that ever changes
+            unknownApp(request, response, sender);
+            return;
+        }
+        int perMinute = sender ? app.get().rateLimits().senderPerMinute() : app.get().rateLimits().devicePerMinute();
         if (limiter.tryConsume(bucket, perMinute)) {
             chain.doFilter(request, response);
             return;
@@ -76,5 +83,17 @@ public class RateLimitFilter extends OncePerRequestFilter {
                 "Too Many Requests",
                 "Rate limit exceeded; retry after " + retryAfter + " seconds.",
                 Map.of(HttpHeaders.RETRY_AFTER, Long.toString(retryAfter)));
+    }
+
+    private void unknownApp(HttpServletRequest request, HttpServletResponse response, boolean sender) throws IOException {
+        EventLog.warn("auth.failed", Map.of("event.outcome", "failure", "reason", "unknown_app"));
+        problems.write(
+                request,
+                response,
+                HttpStatus.UNAUTHORIZED,
+                "Unauthorized",
+                sender ? "A valid API key is required." : "A valid device token is required.",
+                Map.of(HttpHeaders.WWW_AUTHENTICATE,
+                        sender ? "ApiKey realm=\"reliable-push\"" : "Bearer realm=\"reliable-push\""));
     }
 }

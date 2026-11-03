@@ -29,9 +29,9 @@ class SecurityFilterConfig {
 
     @Bean
     FilterRegistrationBean<DeviceAuthFilter> deviceAuthFilter(
-            DeviceTokenService tokens, DeviceService devices, ProblemWriter problems) {
+            DeviceTokenService tokens, DeviceService devices, AppRegistry apps, ProblemWriter problems) {
         FilterRegistrationBean<DeviceAuthFilter> registration =
-                new FilterRegistrationBean<>(new DeviceAuthFilter(tokens, devices, problems));
+                new FilterRegistrationBean<>(new DeviceAuthFilter(tokens, devices, apps, problems));
         registration.setOrder(DEVICE_AUTH_ORDER);
         return registration;
     }

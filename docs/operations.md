@@ -177,7 +177,7 @@ below, all top-level. ThreadContext entries `trace.id` and `rp.*` are top-level;
 | `device.revoked` | Device revoked | same |
 | `tracking.event_accepted` | An event was stored (also late ones) | `rp.event_type`, `rp.late`, `rp.tracking_id`, `rp.device_id`, `rp.app_id`, `rp.user_hash` |
 | `tracking.event_ignored` | Duplicate event (`reason=duplicate`) | same |
-| `auth.failed` (WARN) | Credential rejected | `reason` code only: `missing_key`, `unknown_key`, `missing_token`, `malformed`, `unknown_kid`, `bad_signature`, `wrong_issuer`, `wrong_audience`, `expired`, `not_yet_valid`, `missing_user_claim`, `lifetime_too_long`, `jwks_unavailable`, `revoked`; `rp.app_id` for device registration |
+| `auth.failed` (WARN) | Credential rejected | `reason` code only: `missing_key`, `unknown_key`, `missing_token`, `malformed`, `unknown_kid`, `bad_signature`, `wrong_issuer`, `wrong_audience`, `expired`, `not_yet_valid`, `missing_user_claim`, `lifetime_too_long`, `jwks_unavailable`, `revoked`, `unknown_app` (a valid device token of an app no longer configured); `rp.app_id` for device registration |
 | `authz.denied` (WARN) | Event for a `trackingId` of another user (`reason=tracking_id_of_another_user`) | `rp.app_id`, `rp.device_id`, `rp.user_hash`, `rp.tracking_id` |
 | `rate_limit.exceeded` (WARN) | A bucket ran empty | `rate_limit.scope` = `sender`, `device` or `register`, `rp.app_id`, `rp.device_id` or `rp.user_hash` |
 | `fallback.claimed` | The worker claimed a due row | `rp.app_id`, `rp.user_hash`, `rp.attempt` (number of the attempt about to be made) |

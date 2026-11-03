@@ -97,7 +97,9 @@ public class DeviceService {
             activeCache.evict(principal.deviceId());
             throw new UnauthorizedException(TOKEN_REJECTED, DEVICE_CHALLENGE);
         }
-        AppConfig app = apps.byId(principal.appId()).orElseThrow();
+        // DeviceAuthFilter only admits tokens of configured apps; the registry is immutable, so this never fires
+        AppConfig app = apps.byId(principal.appId())
+                .orElseThrow(() -> new UnauthorizedException(TOKEN_REJECTED, DEVICE_CHALLENGE));
         DeviceTokenService.IssuedToken token =
                 issue(app, principal.userId(), principal.deviceId(), principal.tokenVersion(), now);
         logDevice("device.token_refreshed", principal.appId(), principal.deviceId(), principal.userId());
