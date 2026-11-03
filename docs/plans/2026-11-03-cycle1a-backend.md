@@ -65,15 +65,15 @@ Expected: `openjdk version "21...` and a server version. Export `JAVA_HOME=/opt/
 **Interfaces:**
 - Produces: `PostgresTestBase` — abstract `@SpringBootTest(webEnvironment = RANDOM_PORT)` base with a static `PostgreSQLContainer("postgres:16-alpine")` and `@ServiceConnection`; field `protected TestRestTemplate http` (or `RestClient` bound to the random port). Every `*IT` extends it.
 
-- [ ] **Step 1: Generate wrapper** — `cd backend && mvn -N wrapper:wrapper` after writing `pom.xml` (parent `spring-boot-starter-parent` 4.x pinned; deps per Global Constraints; `spring-boot-starter-web` with `spring-boot-starter-logging` excluded; test deps: `spring-boot-starter-test`, `spring-boot-testcontainers`, `testcontainers:postgresql`, `wiremock-standalone`, `log4j-core-test`; plugins: surefire, failsafe, jacoco with line-coverage check `0.80` on `verify`).
-- [ ] **Step 2: Write failing test** `ApplicationStartsIT`:
+- [x] **Step 1: Generate wrapper** — `cd backend && mvn -N wrapper:wrapper` after writing `pom.xml` (parent `spring-boot-starter-parent` 4.x pinned; deps per Global Constraints; `spring-boot-starter-web` with `spring-boot-starter-logging` excluded; test deps: `spring-boot-starter-test`, `spring-boot-testcontainers`, `testcontainers:postgresql`, `wiremock-standalone`, `log4j-core-test`; plugins: surefire, failsafe, jacoco with line-coverage check `0.80` on `verify`).
+- [x] **Step 2: Write failing test** `ApplicationStartsIT`:
   - `healthIsUp()` — GET `/actuator/health` → 200, body `status` = `UP`.
   - `livenessAndReadinessExposed()` — GET `/actuator/health/liveness` and `/readiness` → 200.
   - `prometheusExposed()` — GET `/actuator/prometheus` → 200, contains `jvm_threads`.
-- [ ] **Step 3: Run** `./mvnw verify -Dit.test=ApplicationStartsIT` → FAIL (no application class).
-- [ ] **Step 4: Implement** `ReliablePushApplication` and `application.yml`: `spring.threads.virtual.enabled: true`, `spring.profiles.default: api,worker` plus active logging profile `json` by default, actuator exposure `health,prometheus`, probes enabled, `server.tomcat.max-swallow-size`/`spring.servlet` limits for 64 KB bodies, `spring.flyway.enabled: true`. `log4j2-spring.xml`: `<SpringProfile name="json">` console with `JsonTemplateLayout eventTemplateUri="classpath:EcsLayout.json"` and `EventTemplateAdditionalField`s `service.name=reliable-push`, `service.version=${project.version}` (resource-filtered); `<SpringProfile name="local">` `PatternLayout` `%d{ISO8601} %-5level [%t] %c{1.} [trace=%X{trace.id}] - %m%n%throwable`. Root level INFO.
-- [ ] **Step 5: Run** `./mvnw verify` → PASS.
-- [ ] **Step 6: Commit** `feat(backend): spring boot skeleton with log4j2 ecs logging`
+- [x] **Step 3: Run** `./mvnw verify -Dit.test=ApplicationStartsIT` → FAIL (no application class).
+- [x] **Step 4: Implement** `ReliablePushApplication` and `application.yml`: `spring.threads.virtual.enabled: true`, `spring.profiles.default: api,worker` plus active logging profile `json` by default, actuator exposure `health,prometheus`, probes enabled, `server.tomcat.max-swallow-size`/`spring.servlet` limits for 64 KB bodies, `spring.flyway.enabled: true`. `log4j2-spring.xml`: `<SpringProfile name="json">` console with `JsonTemplateLayout eventTemplateUri="classpath:EcsLayout.json"` and `EventTemplateAdditionalField`s `service.name=reliable-push`, `service.version=${project.version}` (resource-filtered); `<SpringProfile name="local">` `PatternLayout` `%d{ISO8601} %-5level [%t] %c{1.} [trace=%X{trace.id}] - %m%n%throwable`. Root level INFO.
+- [x] **Step 5: Run** `./mvnw verify` → PASS.
+- [x] **Step 6: Commit** `feat(backend): spring boot skeleton with log4j2 ecs logging`
 
 ### Task 3: Shared logging primitives — trace id, access log, event log
 

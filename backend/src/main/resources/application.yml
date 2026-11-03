@@ -1,0 +1,34 @@
+spring:
+  application:
+    name: reliable-push
+  # Runs both roles unless overridden (SPRING_PROFILES_ACTIVE=api or worker).
+  profiles:
+    default: api,worker
+  threads:
+    virtual:
+      enabled: true
+  servlet:
+    multipart:
+      max-request-size: 64KB
+      max-file-size: 64KB
+  flyway:
+    enabled: true
+
+server:
+  tomcat:
+    # Request bodies are capped at 64 KB (spec limits); the API filter enforces it per request.
+    max-swallow-size: 64KB
+    max-http-form-post-size: 64KB
+  max-http-request-header-size: 16KB
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+# Logging profile (json | local) is selected in log4j2-spring.xml: ECS JSON unless the "local" profile is active.
