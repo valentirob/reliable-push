@@ -229,13 +229,13 @@ Expected: `openjdk version "21...` and a server version. Export `JAVA_HOME=/opt/
 
 **Files:**
 - Create: `backend/src/main/java/io/reliablepush/tracking/{EventsController,TrackingService,EventRepository,DeviceEvent,EventBatchRequest,EventBatchResult}.java`
-- Test: `backend/src/test/java/io/reliablepush/tracking/TrackingServiceTest.java`, `EventsApiIT.java`
+- Test: `backend/src/test/java/io/reliablepush/tracking/TrackingServiceIT.java` (renamed from `TrackingServiceTest` in the final review: it runs against PostgreSQL), `TrackingServiceTest.java` (pure clamp unit test), `EventsApiIT.java`
 
 **Interfaces:**
 - Consumes: `DevicePrincipal`, `NotificationRepository.markDelivered/markRead/findById`, `Clock`.
 - Produces: `TrackingService.process(DevicePrincipal p, List<DeviceEvent> events) → EventBatchResult(int accepted, int ignored, List<ItemResult> items)`; `record DeviceEvent(UUID trackingId, EventType type, Instant occurredAt)`; `enum EventType { DELIVERED, READ }`; `ItemResult(trackingId, outcome: ACCEPTED|DUPLICATE|LATE|NOT_FOUND|FORBIDDEN)`.
 - [x] **Step 1: Failing tests**
-  - `TrackingServiceTest.deliveredSatisfiesNotDeliveredPolicy()` (state `DELIVERED`, `due_at` null); `.deliveredKeepsNotReadPolicyDue()`; `.readImpliesDelivered()` (`delivered_at = read_at` when unset); `.occurredAtClamped()` (future `occurredAt` stored as `received_at`; 30 days old stored as `received_at - 7d`).
+  - `TrackingServiceIT.deliveredSatisfiesNotDeliveredPolicy()` (state `DELIVERED`, `due_at` null); `.deliveredKeepsNotReadPolicyDue()`; `.readImpliesDelivered()` (`delivered_at = read_at` when unset); `.occurredAtClamped()` (future `occurredAt` stored as `received_at`; 30 days old stored as `received_at - 7d`).
   - `EventsApiIT.acceptsBatchAndUpdatesState()`; `.otherUsersTrackingIdForbiddenPerItem()` (item `FORBIDDEN`, other items still `ACCEPTED`, `authz.denied` logged); `.unknownTrackingIdNotFoundPerItem()`; `.duplicateInSameBatchCountedOnce()` (`accepted=1, ignored=1`); `.eventForCancelledIsLate200()` (state stays `CANCELLED`, event row `late=true`); `.eventAfterFallbackClaimedIsLate()`; `.batchOver50Is422()`; `.secondDeviceOfSameUserCounts()`; `.logsTrackingEvents()` (`tracking.event_accepted` with `rp.event_type`, `rp.late`).
 - [x] **Step 2: Run** → FAIL. **Step 3: Implement** (one transaction per item; batch result aggregated). **Step 4: Run** `./mvnw verify` → PASS.
 - [x] **Step 5: Commit** `feat(backend): tracking events api`
