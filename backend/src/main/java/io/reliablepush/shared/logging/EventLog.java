@@ -1,10 +1,12 @@
 package io.reliablepush.shared.logging;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.ThreadContext;
 import org.apache.logging.log4j.message.MapMessage;
 
 /**
@@ -17,6 +19,16 @@ public final class EventLog {
     /** Keys that can carry secrets, personal data or message content: never loggable. */
     private static final Set<String> DENIED_KEYS =
             Set.of("token", "idToken", "apiKey", "secret", "signature", "message", "body", "userId");
+
+    /** Fixed by the JSON template (or by Log4j itself): a MapMessage entry with this name would duplicate the key. */
+    private static final Set<String> RESERVED_KEYS = Set.of(
+            "@timestamp", "ecs.version", "log.level", "log.logger", "process.thread.name",
+            "service.name", "service.version", "tags", "trace.id");
+
+    private static final List<String> RESERVED_PREFIXES = List.of("error.", "labels.");
+
+    /** ThreadContext keys with this prefix are rendered at top level by the template, like MapMessage entries. */
+    private static final String CONTEXT_PREFIX = "rp.";
 
     private static final String ACTION_KEY = "event.action";
 
@@ -32,22 +44,57 @@ public final class EventLog {
         log(Level.WARN, action, fields);
     }
 
+    /**
+     * Each JSON key must appear once per line (duplicate names are undefined in RFC 8259 and strict
+     * ingesters drop the line). Rules, enforced before anything is logged:
+     * <ul>
+     *   <li>keys of the deny-list, and keys fixed by the template ({@code log.level}, {@code trace.id},
+     *       {@code error.*}, {@code labels.*}, ...), are rejected with {@link IllegalArgumentException};</li>
+     *   <li>an {@code rp.*} field that the ThreadContext already holds with an equal value is not repeated
+     *       (the context renders it);</li>
+     *   <li>an {@code rp.*} field whose value differs from the ThreadContext one is ambiguous and is
+     *       rejected with {@link IllegalArgumentException} (fail fast rather than silently pick one).</li>
+     * </ul>
+     */
     private static void log(Level level, String action, Map<String, ?> fields) {
         for (String key : fields.keySet()) {
             if (DENIED_KEYS.contains(key)) {
                 throw new IllegalArgumentException("Field is never logged: " + key);
             }
-        }
-        if (!LOGGER.isEnabled(level)) {
-            return;
+            if (isReserved(key)) {
+                throw new IllegalArgumentException("Field name is reserved by the log template: " + key);
+            }
         }
         EventMessage message = new EventMessage(action);
         fields.forEach((key, value) -> {
-            if (value != null && !ACTION_KEY.equals(key)) {
-                message.with(key, value);
+            if (value == null || ACTION_KEY.equals(key) || repeatsContext(key, value)) {
+                return;
             }
+            message.with(key, value);
         });
+        if (!LOGGER.isEnabled(level)) {
+            return;
+        }
         LOGGER.log(level, message);
+    }
+
+    private static boolean isReserved(String key) {
+        return RESERVED_KEYS.contains(key) || RESERVED_PREFIXES.stream().anyMatch(key::startsWith);
+    }
+
+    /** True when the ThreadContext already renders this key with the same value; throws if it differs. */
+    private static boolean repeatsContext(String key, Object value) {
+        if (!key.startsWith(CONTEXT_PREFIX)) {
+            return false;
+        }
+        String inContext = ThreadContext.get(key);
+        if (inContext == null) {
+            return false;
+        }
+        if (inContext.equals(String.valueOf(value))) {
+            return true;
+        }
+        throw new IllegalArgumentException("Field conflicts with a different ThreadContext value: " + key);
     }
 
     /** MapMessage whose human-readable form is just the action; typed values stay typed in JSON. */

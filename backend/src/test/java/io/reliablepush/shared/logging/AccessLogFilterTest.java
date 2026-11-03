@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import jakarta.servlet.FilterChain;
+import org.apache.logging.log4j.ThreadContext;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -46,6 +47,21 @@ class AccessLogFilterTest {
                 .containsEntry("http.response.status_code", 404)
                 .containsEntry("event.outcome", "failure")
                 .containsEntry("rp.app_id", "app-1");
+    }
+
+    @Test
+    void doesNotDuplicateAppIdAlreadyInThreadContext() throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/x");
+        request.setAttribute("rp.app_id", "app-1");
+        ThreadContext.put("rp.app_id", "app-1");
+        try {
+            filter.doFilter(request, new MockHttpServletResponse(), (req, res) -> {});
+        } finally {
+            ThreadContext.clearMap();
+        }
+
+        // rendered once by the ThreadContext, not repeated in the event
+        assertThat(data(capture.only())).doesNotContainKey("rp.app_id");
     }
 
     @Test

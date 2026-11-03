@@ -3,8 +3,10 @@ package io.reliablepush.shared.logging;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.jayway.jsonpath.JsonPath;
+import java.util.List;
 import java.util.Map;
 import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.ThreadContext;
 import org.apache.logging.log4j.core.config.DefaultConfiguration;
 import org.apache.logging.log4j.core.impl.Log4jLogEvent;
 import org.apache.logging.log4j.layout.template.json.JsonTemplateLayout;
@@ -56,5 +58,32 @@ class EcsTemplateTest {
 
         assertThat(JsonPath.<String>read(line, "$['message']")).isEqualTo("hello");
         assertThat(JsonPath.<Map<String, Object>>read(line, "$")).doesNotContainKey("event.action");
+    }
+
+    @Test
+    void everyKeyAppearsOnceEvenWhenContextAndFieldsOverlap() {
+        ThreadContext.put("trace.id", "abc");
+        ThreadContext.put("rp.tracking_id", "t1");
+        ThreadContext.put("rp.app_id", "app-1");
+        try (EventCapture capture = new EventCapture()) {
+            EventLog.info("api.request", Map.of("rp.tracking_id", "t1", "rp.app_id", "app-1", "rp.device_id", "d1"));
+            String line = render(capture.only().getMessage(), ThreadContext.getImmutableContext());
+
+            for (String key : List.of("trace.id", "rp.tracking_id", "rp.app_id", "rp.device_id", "event.action")) {
+                assertThat(occurrences(line, "\"" + key + "\":")).as(key).isEqualTo(1);
+            }
+            assertThat(JsonPath.<String>read(line, "$['rp.tracking_id']")).isEqualTo("t1");
+            assertThat(JsonPath.<String>read(line, "$['rp.device_id']")).isEqualTo("d1");
+        } finally {
+            ThreadContext.clearMap();
+        }
+    }
+
+    private static int occurrences(String text, String needle) {
+        int count = 0;
+        for (int i = text.indexOf(needle); i >= 0; i = text.indexOf(needle, i + 1)) {
+            count++;
+        }
+        return count;
     }
 }

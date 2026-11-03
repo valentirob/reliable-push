@@ -8,6 +8,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.ThreadContext;
 import org.apache.logging.log4j.core.LogEvent;
 import org.apache.logging.log4j.message.MapMessage;
 import org.junit.jupiter.api.AfterEach;
@@ -25,6 +26,7 @@ class EventLogTest {
 
     @AfterEach
     void stopCapture() {
+        ThreadContext.clearMap();
         capture.close();
     }
 
@@ -86,6 +88,38 @@ class EventLogTest {
                     .as(key)
                     .isInstanceOf(IllegalArgumentException.class);
         }
+        assertThat(capture.events()).isEmpty();
+    }
+
+    @Test
+    void rejectsKeysFixedByTheTemplate() {
+        for (String key : List.of("@timestamp", "ecs.version", "log.level", "log.logger", "process.thread.name",
+                "service.name", "service.version", "trace.id", "tags", "error.type", "error.message",
+                "error.stack_trace", "labels.other")) {
+            assertThatThrownBy(() -> EventLog.info("x", Map.of(key, "abc")))
+                    .as(key)
+                    .isInstanceOf(IllegalArgumentException.class);
+        }
+        assertThat(capture.events()).isEmpty();
+    }
+
+    @Test
+    void doesNotRepeatContextFieldWithSameValue() {
+        ThreadContext.put("rp.tracking_id", "t1");
+
+        EventLog.info("fallback.claimed", Map.of("rp.tracking_id", "t1", "rp.device_id", "d1"));
+
+        assertThat(data(capture.only()))
+                .doesNotContainKey("rp.tracking_id")
+                .containsEntry("rp.device_id", "d1");
+    }
+
+    @Test
+    void rejectsContextFieldWithDifferentValue() {
+        ThreadContext.put("rp.tracking_id", "t1");
+
+        assertThatThrownBy(() -> EventLog.info("fallback.claimed", Map.of("rp.tracking_id", "t2")))
+                .isInstanceOf(IllegalArgumentException.class);
         assertThat(capture.events()).isEmpty();
     }
 }
