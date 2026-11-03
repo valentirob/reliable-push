@@ -166,6 +166,20 @@ public final class FakeOidc implements AutoCloseable {
         return server.findAll(getRequestedFor(urlPathEqualTo("/jwks"))).size();
     }
 
+    /** The JWKS as served by default (public keys only). */
+    public String jwksJson() {
+        return new JWKSet(new ArrayList<>(published)).toString();
+    }
+
+    /** Another path serving the same valid JWKS, e.g. as a redirect target that must never be requested. */
+    public String jwksCopyUri() {
+        return issuer() + "/jwks-copy";
+    }
+
+    public int jwksCopyRequests() {
+        return server.findAll(getRequestedFor(urlPathEqualTo("/jwks-copy"))).size();
+    }
+
     public int discoveryRequests() {
         return server.findAll(getRequestedFor(urlPathEqualTo("/.well-known/openid-configuration"))).size();
     }
@@ -187,7 +201,9 @@ public final class FakeOidc implements AutoCloseable {
                         ? jwksOverride
                         : aResponse()
                                 .withHeader("Content-Type", "application/json")
-                                .withBody(new JWKSet(new ArrayList<>(published)).toString())));
+                                .withBody(jwksJson())));
+        server.stubFor(get(urlPathEqualTo("/jwks-copy"))
+                .willReturn(aResponse().withHeader("Content-Type", "application/json").withBody(jwksJson())));
     }
 
     @Override

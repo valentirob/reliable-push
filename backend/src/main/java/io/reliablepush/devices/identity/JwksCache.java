@@ -96,48 +96,61 @@ final class JwksCache {
      */
     JWK keyFor(String kid) {
         Snapshot current = snapshot;
-        if (current != null && clock.instant().isBefore(current.fetchedAt().plus(TTL))) {
+        if (current != null) {
             JWK key = select(current, kid);
             if (key != null) {
-                return key;
+                if (clock.instant().isBefore(current.fetchedAt().plus(TTL))) {
+                    return key;
+                }
+                // stale but usable: never queue behind a refresh that another request is already running
+                if (!lock.tryLock()) {
+                    return key;
+                }
+                try {
+                    return keyLocked(kid);
+                } finally {
+                    lock.unlock();
+                }
             }
         }
-        return keyForSlow(kid);
-    }
-
-    private JWK keyForSlow(String kid) {
+        // no usable key yet (nothing cached, or unknown kid): this request has to wait for the outcome of a refresh
         lock.lock();
         try {
-            Instant now = clock.instant();
-            Snapshot current = snapshot;
-            boolean fetchedNow = false;
-            if (current == null || !now.isBefore(current.fetchedAt().plus(TTL))) {
-                if (!now.isBefore(nextAttemptAt)) {
-                    fetchedNow = refresh(now);
-                    current = snapshot;
-                }
-                if (current == null) {
-                    throw new IdentityRejectedException(JWKS_UNAVAILABLE);
-                }
-            }
-            JWK key = select(current, kid);
-            if (key != null) {
-                return key;
-            }
-            if (fetchedNow || now.isBefore(nextKidRefreshAt) || now.isBefore(nextAttemptAt)) {
-                throw new IdentityRejectedException(UNKNOWN_KID);
-            }
-            // the kid may belong to a key published after the last fetch (rotation): refresh, at most every 30 s
-            nextKidRefreshAt = now.plus(MIN_REFRESH_INTERVAL);
-            boolean refreshed = refresh(now);
-            key = select(snapshot, kid);
-            if (key != null) {
-                return key;
-            }
-            throw new IdentityRejectedException(refreshed ? UNKNOWN_KID : JWKS_UNAVAILABLE);
+            return keyLocked(kid);
         } finally {
             lock.unlock();
         }
+    }
+
+    /** Caller holds the lock. */
+    private JWK keyLocked(String kid) {
+        Instant now = clock.instant();
+        Snapshot current = snapshot;
+        boolean fetchedNow = false;
+        if (current == null || !now.isBefore(current.fetchedAt().plus(TTL))) {
+            if (!now.isBefore(nextAttemptAt)) {
+                fetchedNow = refresh(now);
+                current = snapshot;
+            }
+            if (current == null) {
+                throw new IdentityRejectedException(JWKS_UNAVAILABLE);
+            }
+        }
+        JWK key = select(current, kid);
+        if (key != null) {
+            return key;
+        }
+        if (fetchedNow || now.isBefore(nextKidRefreshAt) || now.isBefore(nextAttemptAt)) {
+            throw new IdentityRejectedException(UNKNOWN_KID);
+        }
+        // the kid may belong to a key published after the last fetch (rotation): refresh, at most every 30 s
+        nextKidRefreshAt = now.plus(MIN_REFRESH_INTERVAL);
+        boolean refreshed = refresh(now);
+        key = select(snapshot, kid);
+        if (key != null) {
+            return key;
+        }
+        throw new IdentityRejectedException(refreshed ? UNKNOWN_KID : JWKS_UNAVAILABLE);
     }
 
     /** The key for {@code kid}, or the only key when there is no {@code kid}; {@code null} if there is none. */
@@ -164,8 +177,8 @@ final class JwksCache {
             snapshot = new Snapshot(parseKeys(get(jwksUri)), now);
             return true;
         } catch (IOException | RuntimeException e) {
-            // deliberately no logging of the cause here: it may echo provider-controlled text
-            discoveredJwksUri = null;
+            // deliberately no logging of the cause here: it may echo provider-controlled text. A discovered
+            // jwks_uri is kept: when only the JWKS fetch failed, the next attempt must not repeat discovery.
             nextAttemptAt = now.plus(MIN_REFRESH_INTERVAL);
             return false;
         }

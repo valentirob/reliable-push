@@ -22,6 +22,8 @@ import java.util.Base64;
 import java.util.Date;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -231,9 +233,49 @@ class OidcIdTokenVerifierIT {
 
     @Test
     void redirectsAreNotFollowed() {
-        idp.respondToJwksWith(aResponse().withStatus(302).withHeader("Location", "http://localhost:1/jwks"));
+        idp.respondToJwksWith(aResponse().withStatus(302).withHeader("Location", idp.jwksCopyUri()));
 
         assertThat(reasonOf(idp.idToken("u1", AUDIENCE, Duration.ofMinutes(10)))).isEqualTo("jwks_unavailable");
+        // the target serves a valid JWKS: had the redirect been followed, the token would have verified
+        assertThat(idp.jwksCopyRequests()).isZero();
+    }
+
+    @Test
+    void knownKeyIsServedWithoutWaitingForARunningRefresh() throws Exception {
+        String token = idp.idToken("u1", AUDIENCE, Duration.ofHours(2));
+        verifier.verify(token);
+        idp.respondToJwksWith(aResponse().withFixedDelay(3_000).withBody(idp.jwksJson()));
+        clock.advance(Duration.ofMinutes(16)); // cached keys are now stale
+        idp.resetRequests();
+
+        CompletableFuture<VerifiedIdentity> refreshing = CompletableFuture.supplyAsync(() -> verifier.verify(token));
+        long deadline = System.nanoTime() + Duration.ofSeconds(3).toNanos();
+        while (idp.jwksRequests() == 0 && System.nanoTime() < deadline) {
+            Thread.sleep(10);
+        }
+        assertThat(idp.jwksRequests()).as("refresh in flight").isEqualTo(1);
+
+        long start = System.nanoTime();
+        VerifiedIdentity second = verifier.verify(token);
+
+        assertThat(second.userId()).isEqualTo("u1");
+        assertThat(Duration.ofNanos(System.nanoTime() - start)).isLessThan(Duration.ofSeconds(1));
+        assertThat(refreshing.get(10, TimeUnit.SECONDS).userId()).isEqualTo("u1");
+        assertThat(idp.jwksRequests()).isEqualTo(1);
+    }
+
+    @Test
+    void discoveredJwksUriSurvivesAFailedJwksFetch() {
+        verifier.verify(idp.idToken("u1", AUDIENCE, Duration.ofMinutes(10)));
+        idp.respondToJwksWith(aResponse().withStatus(500));
+        reasonOf(FakeOidc.sign(idp.newRsaKey(), JWSAlgorithm.RS256, idp.claims("a", AUDIENCE, Duration.ofMinutes(10)).build()));
+        idp.restoreJwks();
+        idp.rotate();
+        clock.advance(Duration.ofSeconds(31));
+
+        assertThat(verifier.verify(idp.idToken("u2", AUDIENCE, Duration.ofMinutes(10))).userId()).isEqualTo("u2");
+        assertThat(idp.jwksRequests()).isEqualTo(3);
+        assertThat(idp.discoveryRequests()).isEqualTo(1);
     }
 
     @Test
