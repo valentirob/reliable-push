@@ -189,9 +189,9 @@ Expected: `openjdk version "21...` and a server version. Export `JAVA_HOME=/opt/
   - `DeviceTokenService` — `IssuedToken issue(DeviceClaims c)` (`record IssuedToken(String token, Instant expiresAt)`), `DeviceClaims verify(String token)` throwing `InvalidDeviceTokenException(reason)` with reasons `malformed|bad_signature|expired|unknown_kid|wrong_issuer`. JWT: header `alg=ES256`, `kid`; claims `iss=reliable-push`, `aud=appId`, `sub=userId`, `did`, `ver`, `iat`, `exp`.
   - `SigningKeys` — loads all configured keys (PEM P-256), `current()` for signing, `byKid(String)` for verification.
   - `TestKeys.newEcPem()` — generates a P-256 private key PEM for tests.
-- [ ] **Step 1: Failing tests** — `issueThenVerifyRoundTrip()`; `expiredRejected()` (clock +91 d → `expired`); `tamperedRejected()` (`bad_signature`); `oldKidStillValidAfterRotation()` (issue with kid `k1`, reconfigure current `k2` keeping `k1` → verifies; new token header `kid=k2`); `removedKidRejected()` (`unknown_kid`).
-- [ ] **Step 2: Run** → FAIL. **Step 3: Implement** with `nimbus-jose-jwt` (`ECDSASigner`/`ECDSAVerifier`, clock skew 60 s). **Step 4: Run** → PASS.
-- [ ] **Step 5: Commit** `feat(backend): device token service with key rotation`
+- [x] **Step 1: Failing tests** — `issueThenVerifyRoundTrip()`; `expiredRejected()` (clock +91 d → `expired`); `tamperedRejected()` (`bad_signature`); `oldKidStillValidAfterRotation()` (issue with kid `k1`, reconfigure current `k2` keeping `k1` → verifies; new token header `kid=k2`); `removedKidRejected()` (`unknown_kid`).
+- [x] **Step 2: Run** → FAIL. **Step 3: Implement** with `nimbus-jose-jwt` (`ECDSASigner`/`ECDSAVerifier`, clock skew 60 s). **Step 4: Run** → PASS.
+- [x] **Step 5: Commit** `feat(backend): device token service with key rotation`
 
 ### Task 9: Identity verifiers (OIDC default, signed grant)
 

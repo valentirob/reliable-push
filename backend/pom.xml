@@ -23,6 +23,7 @@
         <wiremock.version>3.13.2</wiremock.version>
         <jacoco.version>0.8.16</jacoco.version>
         <bucket4j.version>8.21.0</bucket4j.version>
+        <nimbus-jose-jwt.version>10.10</nimbus-jose-jwt.version>
         <swagger-request-validator.version>2.46.1</swagger-request-validator.version>
     </properties>
 
@@ -104,6 +105,12 @@
             <groupId>com.bucket4j</groupId>
             <artifactId>bucket4j_jdk17-core</artifactId>
             <version>${bucket4j.version}</version>
+        </dependency>
+        <!-- device tokens (ES256 JWT) -->
+        <dependency>
+            <groupId>com.nimbusds</groupId>
+            <artifactId>nimbus-jose-jwt</artifactId>
+            <version>${nimbus-jose-jwt.version}</version>
         </dependency>
 
         <!-- test -->

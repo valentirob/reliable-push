@@ -5,6 +5,8 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.testcontainers.postgresql.PostgreSQLContainer;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.web.client.RestClient;
 
 /**
@@ -20,6 +22,14 @@ public abstract class PostgresTestBase {
 
     static {
         POSTGRES.start();
+    }
+
+    /** Generated once per JVM; never written to disk. Referenced by {@code env:RP_TEST_DEVICE_KEY_K1} in application-test.yml. */
+    private static final String DEVICE_KEY_K1_PEM = TestKeys.newEcPem();
+
+    @DynamicPropertySource
+    static void deviceTokenKey(DynamicPropertyRegistry registry) {
+        registry.add("RP_TEST_DEVICE_KEY_K1", () -> DEVICE_KEY_K1_PEM);
     }
 
     @LocalServerPort

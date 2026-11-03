@@ -2,6 +2,8 @@ package io.reliablepush.apps;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import io.reliablepush.devices.SigningKeys;
+import io.reliablepush.support.TestKeys;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.test.context.ConfigDataApplicationContextInitializer;
@@ -14,7 +16,7 @@ class TestProfileConfigTest {
 
     @Configuration(proxyBeanMethods = false)
     @EnableConfigurationProperties(ReliablePushProperties.class)
-    @Import(AppRegistry.class)
+    @Import({AppRegistry.class, SigningKeys.class})
     static class Config {}
 
     @Test
@@ -22,12 +24,13 @@ class TestProfileConfigTest {
         new ApplicationContextRunner()
                 .withUserConfiguration(Config.class)
                 .withInitializer(new ConfigDataApplicationContextInitializer())
-                .withPropertyValues("spring.profiles.active=test")
+                .withPropertyValues("spring.profiles.active=test", "RP_TEST_DEVICE_KEY_K1=" + TestKeys.newEcPem())
                 .run(context -> {
                     assertThat(context).hasNotFailed();
                     AppConfig shop = context.getBean(AppRegistry.class).bySenderApiKey("test-sender-key-shop").orElseThrow();
                     assertThat(shop.appId()).isEqualTo("shop");
                     assertThat(shop.fallback().hmacSecret().value()).isEqualTo("test-only-hook-secret-shop");
+                    assertThat(context.getBean(SigningKeys.class).current().kid()).isEqualTo("test-k1");
                 });
     }
 }
