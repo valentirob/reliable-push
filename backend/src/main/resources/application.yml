@@ -7,19 +7,17 @@ spring:
   threads:
     virtual:
       enabled: true
-  servlet:
-    multipart:
-      max-request-size: 64KB
-      max-file-size: 64KB
+  main:
+    # stdout carries only JSON log lines (spec 9.1)
+    banner-mode: off
   flyway:
     enabled: true
 
 server:
   tomcat:
-    # Request bodies are capped at 64 KB (spec limits); the API filter enforces it per request.
+    # JSON request bodies are limited to 64 KB by a filter added in the sender-API task
+    # (plan Task 6, test bodyOver64KbIs413); this only bounds how much Tomcat swallows of an aborted upload.
     max-swallow-size: 64KB
-    max-http-form-post-size: 64KB
-  max-http-request-header-size: 16KB
 
 management:
   endpoints:
