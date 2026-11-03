@@ -260,6 +260,15 @@ class NotificationApiIT extends PostgresTestBase {
         assertThat(over.getBody()).doesNotContain("xxxx");
     }
 
+    @Test
+    void multiByteFallbackOver4KbIs422() {
+        // 2100 characters but about 4200 UTF-8 bytes
+        String fallback = "{\"k\":\"" + "\u00e9".repeat(2100) + "\"}";
+        ResponseEntity<String> response = post(SHOP_KEY, "{\"userId\":\"" + uniqueUser() + "\",\"fallback\":" + fallback + "}");
+        assertProblem(response, 422);
+        assertThat(errorFields(response)).containsExactly("fallback");
+    }
+
     // ---- get ---------------------------------------------------------------------------------------------------
 
     @Test
@@ -334,6 +343,38 @@ class NotificationApiIT extends PostgresTestBase {
     }
 
     @Test
+    void pagingWithIdenticalCreatedAtSeesEveryRowOnce() {
+        String userId = uniqueUser();
+        Instant sameInstant = Instant.parse("2026-01-01T00:00:00.123456Z");
+        List<String> ids = new ArrayList<>();
+        for (int i = 0; i < 4; i++) {
+            UUID id = UUID.randomUUID();
+            ids.add(id.toString());
+            jdbc.sql("""
+                            insert into notification (id, app_id, user_id, policy, timeout_minutes, fallback_payload, state, created_at, due_at)
+                            values (:id, 'shop', :u, 'NOT_DELIVERED', 10, '{}'::jsonb, 'PENDING', :t, :t)
+                            """)
+                    .param("id", id)
+                    .param("u", userId)
+                    .param("t", sameInstant.atOffset(java.time.ZoneOffset.UTC))
+                    .update();
+        }
+        List<String> expected = ids.stream().sorted(java.util.Comparator.reverseOrder()).toList();
+
+        List<String> seen = new ArrayList<>();
+        String cursor = null;
+        for (int page = 0; page < 5; page++) {
+            ResponseEntity<String> response = get(SHOP_KEY, BASE + "?userId=" + userId + "&limit=2" + (cursor == null ? "" : "&cursor=" + cursor));
+            seen.addAll(ids(response));
+            cursor = JsonPath.read(response.getBody(), "$.nextCursor");
+            if (cursor == null) {
+                break;
+            }
+        }
+        assertThat(seen).containsExactlyElementsOf(expected);
+    }
+
+    @Test
     void listIsScopedToTheApp() {
         String userId = uniqueUser();
         register(userId);
@@ -393,6 +434,12 @@ class NotificationApiIT extends PostgresTestBase {
         assertThat(errorFields(state)).containsExactly("state");
 
         assertThat(errorFields(get(SHOP_KEY, BASE + "?since=yesterday"))).containsExactly("since");
+        // well-formed but outside what PostgreSQL stores: 422, not a 500
+        assertThat(errorFields(get(SHOP_KEY, BASE + "?since=%2B999999999-01-01T00:00:00Z"))).containsExactly("since");
+        assertThat(errorFields(get(SHOP_KEY, BASE + "?since=1969-12-31T23:59:59Z"))).containsExactly("since");
+        String forged = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(
+                ("+999999999-01-01T00:00:00Z|" + UUID.randomUUID()).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        assertThat(errorFields(get(SHOP_KEY, BASE + "?cursor=" + forged))).containsExactly("cursor");
         assertThat(errorFields(get(SHOP_KEY, BASE + "?userId=" + "u".repeat(257)))).containsExactly("userId");
     }
 

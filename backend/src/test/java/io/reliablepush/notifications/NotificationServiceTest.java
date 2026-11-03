@@ -105,7 +105,11 @@ class NotificationServiceTest {
         assertThat(decoded.createdAt()).isEqualTo(createdAt);
         assertThat(decoded.id()).isEqualTo(ID);
 
-        for (String garbage : new String[] {"", "!!!", "bm90LWEtY3Vyc29y", "MjAyNnxub3QtYS11dWlk"}) {
+        String outOfRange = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(
+                ("+999999999-01-01T00:00:00Z|" + ID).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        String beforeEpoch = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(
+                ("1969-12-31T23:59:59Z|" + ID).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        for (String garbage : new String[] {"", "!!!", "bm90LWEtY3Vyc29y", "MjAyNnxub3QtYS11dWlk", outOfRange, beforeEpoch}) {
             assertThatThrownBy(() -> PageCursor.decode(garbage))
                     .isInstanceOf(InvalidRequestException.class)
                     .hasMessageContaining("cursor");

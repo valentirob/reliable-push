@@ -94,10 +94,14 @@ class NotificationController {
             return null;
         }
         try {
-            return OffsetDateTime.parse(since).toInstant();
+            Instant parsed = OffsetDateTime.parse(since).toInstant();
+            if (PageCursor.inSaneRange(parsed)) {
+                return parsed;
+            }
         } catch (DateTimeParseException e) {
-            throw new InvalidRequestException("since", "must be an ISO-8601 date-time");
+            // falls through to the common rejection
         }
+        throw new InvalidRequestException("since", "must be an ISO-8601 date-time between years 1970 and 9999");
     }
 
     private static int parseLimit(String limit) {
