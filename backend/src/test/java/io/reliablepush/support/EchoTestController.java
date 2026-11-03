@@ -7,8 +7,11 @@ import jakarta.validation.ConstraintViolationException;
 import jakarta.validation.Valid;
 import jakarta.validation.Validation;
 import jakarta.validation.constraints.NotBlank;
+import java.sql.SQLTransientConnectionException;
 import java.util.Map;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.CannotGetJdbcConnectionException;
+import org.springframework.transaction.CannotCreateTransactionException;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -61,6 +64,11 @@ class EchoTestController {
                     .getValidator()
                     .validate(new Probe("")));
             case "other" -> throw new IllegalStateException("secret-internal-detail");
+            // what JdbcClient / TransactionTemplate throw when the Hikari pool has no connection within connection-timeout
+            case "db-pool" -> throw new CannotGetJdbcConnectionException("Failed to obtain JDBC Connection",
+                    new SQLTransientConnectionException("HikariPool-1 - pool-timeout-marker request timed out after 5000ms"));
+            case "db-tx" -> throw new CannotCreateTransactionException("Could not open JDBC Connection for transaction",
+                    new SQLTransientConnectionException("HikariPool-1 - pool-timeout-marker request timed out after 5000ms"));
             default -> throw new IllegalArgumentException(kind);
         }
     }

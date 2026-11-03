@@ -12,6 +12,11 @@ spring:
     banner-mode: off
   flyway:
     enabled: true
+  datasource:
+    hikari:
+      # milliseconds a request waits for a pooled connection before failing with 503 + Retry-After (Hikari's default is
+      # 30 s); override with SPRING_DATASOURCE_HIKARI_CONNECTIONTIMEOUT
+      connection-timeout: 5000
   servlet:
     multipart:
       # the API is JSON-only: with multipart handling on, the container would parse (and spool to disk) any

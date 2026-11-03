@@ -4,7 +4,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.jayway.jsonpath.JsonPath;
 import io.reliablepush.support.PostgresTestBase;
+import com.zaxxer.hikari.HikariDataSource;
+import javax.sql.DataSource;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.TestPropertySource;
@@ -13,6 +16,15 @@ import org.springframework.test.context.TestPropertySource;
 @ActiveProfiles({"api", "worker", "test"})
 @TestPropertySource(properties = "reliable-push.worker.poll-interval=1d")
 class ApplicationStartsIT extends PostgresTestBase {
+
+    @Autowired
+    DataSource dataSource;
+
+    @Test
+    void connectionPoolWaitIsBoundedToFiveSeconds() throws Exception {
+        // a request waiting longer for a connection fails fast with 503 + Retry-After instead of hanging 30 s
+        assertThat(dataSource.unwrap(HikariDataSource.class).getConnectionTimeout()).isEqualTo(5_000L);
+    }
 
     private ResponseEntity<String> get(String path) {
         return http.get().uri(path).retrieve().toEntity(String.class);

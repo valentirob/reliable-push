@@ -119,7 +119,8 @@ reliable-push:
 
 Other useful standard settings: `SERVER_PORT` (default 8080), `LOGGING_LEVEL_<LOGGER>` (for example
 `LOGGING_LEVEL_IO_RELIABLEPUSH=DEBUG`; DEBUG output never contains secrets but is noisy),
-`SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE`.
+`SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE` (default 10) and `SPRING_DATASOURCE_HIKARI_CONNECTIONTIMEOUT` (milliseconds;
+the application sets 5000 instead of Hikari's 30000, see "Database pool" below).
 
 ## Health and metrics
 
@@ -193,7 +194,8 @@ Webhook failure `reason` codes: `http_<status>`, `timeout`, `io_error`, `interru
 Other log lines (not catalogue events): ERROR with stack trace for unexpected exceptions (`Unhandled exception`, `Fallback
 processing failed; the row is retried when its lease ends`, `Webhook client failed unexpectedly`); WARN `Fallback outcome ...
 dropped: this worker's lease ran out and another worker re-claimed the row` (a stale worker's outcome was discarded; the
-row keeps one final state); WARN `Due backlog refresh failed`; Log4j status-logger messages on stderr if logging itself
+row keeps one final state); WARN `Due backlog refresh failed`; WARN `Database connection unavailable (<exception type>); answered 503 with Retry-After 5`
+(no stack trace: the pool had no free connection within `connection-timeout`, see "Database pool" below); Log4j status-logger messages on stderr if logging itself
 fails (logging never breaks a request).
 
 Regenerate the list from the code with
@@ -213,6 +215,14 @@ is harmless. It logs `retention.purged` with the count. Devices are not purged b
 - **Rate limits are per instance** (in-memory buckets): with N replicas a caller can use up to N times the configured
   rate. Unauthenticated floods (garbage credentials on `POST /v1/devices`, invalid API keys) are not limited by the
   application; set **per-IP limits at the ingress**.
+- **Database pool (API role):** each request holds one connection only for its SQL statements (a few milliseconds), but
+  requests run on virtual threads, so concurrency is not bounded by a thread pool: under a burst they queue for the Hikari
+  pool. A request that gets no connection within `spring.datasource.hikari.connection-timeout` (5 s here, Hikari's
+  default is 30 s) is answered `503` with `Retry-After: 5` (logged as one WARN line, not ERROR), so clients back off
+  instead of piling up. Size the pool as `maximum-pool-size ≈ peak requests per second × average connection time per
+  request` with headroom (10 connections at ~5 ms each serve about 2,000 requests/s), and keep
+  `replicas × maximum-pool-size` (plus the worker replicas' pools) below PostgreSQL `max_connections`. Frequent 503s with a
+  healthy database mean the pool is too small or the replicas too few.
 - **Database pool vs. worker batch:** every claimed row runs on its own virtual thread (up to `batch-size`). The webhook
   call holds no database connection, but writing the outcome needs one, so a batch of 100 rows can queue behind Spring's
   default Hikari pool of 10 connections (default wait 30 s). Raise `SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE` (check

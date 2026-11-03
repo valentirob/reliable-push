@@ -39,12 +39,19 @@ public class ProblemHandler extends ResponseEntityExceptionHandler {
     /**
      * Last resort for exceptions no other handler claims: ERROR with stack trace (spec 9.1; never the request body)
      * and a generic 500 problem that does not leak the exception message. Exceptions with an explicit
-     * {@code @ResponseStatus} keep their own handling.
+     * {@code @ResponseStatus} keep their own handling. A connection-pool timeout is load, not a bug: 503 with
+     * {@code Retry-After} and a WARN without trace ({@link DatabaseUnavailable}).
      */
     @ExceptionHandler(Exception.class)
     ResponseEntity<Object> unexpected(Exception ex, WebRequest request) throws Exception {
         if (AnnotatedElementUtils.hasAnnotation(ex.getClass(), ResponseStatus.class)) {
             throw ex;
+        }
+        if (DatabaseUnavailable.isPoolTimeout(ex)) {
+            DatabaseUnavailable.logWarning(ex);
+            HttpHeaders headers = new HttpHeaders();
+            headers.set(HttpHeaders.RETRY_AFTER, Long.toString(DatabaseUnavailable.RETRY_AFTER_SECONDS));
+            return problem(HttpStatus.SERVICE_UNAVAILABLE, DatabaseUnavailable.TITLE, DatabaseUnavailable.DETAIL, headers, ex, request);
         }
         LOGGER.error("Unhandled exception", ex);
         return problem(HttpStatus.INTERNAL_SERVER_ERROR, "Internal Server Error", ProblemErrorController.UNEXPECTED_DETAIL, ex, request);

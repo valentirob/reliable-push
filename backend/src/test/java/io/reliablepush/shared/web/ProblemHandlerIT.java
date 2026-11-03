@@ -119,6 +119,23 @@ class ProblemHandlerIT extends PostgresTestBase {
     }
 
     @Test
+    void connectionPoolTimeoutIs503WithRetryAfterAndAWarningWithoutStackTrace(CapturedOutput output) {
+        for (String kind : java.util.List.of("db-pool", "db-tx")) {
+            ResponseEntity<String> response = get(BASE + "/throw/" + kind);
+
+            assertProblem(response, 503, "Service Unavailable");
+            assertThat(response.getHeaders().getFirst("Retry-After")).isEqualTo("5");
+            assertThat(response.getBody()).doesNotContain("pool-timeout-marker").doesNotContain("Hikari");
+        }
+        await().atMost(Duration.ofSeconds(5)).untilAsserted(() -> assertThat(output.getAll().lines()
+                        .filter(line -> line.contains("Database connection unavailable")))
+                .hasSizeGreaterThanOrEqualTo(2)
+                .allSatisfy(line -> assertThat(line).contains("\"log.level\":\"WARN\"").doesNotContain("error.stack_trace")));
+        // neither the exception message nor a stack trace is logged, and nothing at ERROR
+        assertThat(output.getAll()).doesNotContain("pool-timeout-marker").doesNotContain("CannotGetJdbcConnectionException:");
+    }
+
+    @Test
     void directRequestToErrorPathIsA404Problem() {
         assertProblem(get("/error"), 404, "Not Found");
     }

@@ -7,6 +7,7 @@ import io.reliablepush.devices.DeviceTokenService;
 import io.reliablepush.devices.InvalidDeviceTokenException;
 import io.reliablepush.shared.logging.AccessLogFilter;
 import io.reliablepush.shared.logging.EventLog;
+import io.reliablepush.shared.web.DatabaseUnavailable;
 import io.reliablepush.shared.web.ProblemWriter;
 import io.reliablepush.shared.web.RequestPaths;
 import jakarta.servlet.FilterChain;
@@ -16,8 +17,10 @@ import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.util.List;
 import java.util.Map;
+import org.springframework.dao.DataAccessException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.transaction.TransactionException;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 /**
@@ -29,7 +32,8 @@ import org.springframework.web.filter.OncePerRequestFilter;
  * version, never by token). On success the {@link DevicePrincipal} is exposed as request attribute
  * {@link DevicePrincipal#ATTR} plus {@code rp.app_id} and {@code rp.device_id} for the access log.
  *
- * <p>Every failure gets the very same 401 problem ({@code WWW-Authenticate: Bearer}); only the logged {@code reason}
+ * <p>A connection-pool timeout during the device lookup is answered 503 with {@code Retry-After}
+ * ({@link DatabaseUnavailable}). Every authentication failure gets the very same 401 problem ({@code WWW-Authenticate: Bearer}); only the logged {@code reason}
  * code differs. The token is never logged.
  */
 public class DeviceAuthFilter extends OncePerRequestFilter {
@@ -79,7 +83,21 @@ public class DeviceAuthFilter extends OncePerRequestFilter {
             reject(request, response, UNKNOWN_APP);
             return;
         }
-        if (!devices.isActive(claims)) {
+        boolean active;
+        try {
+            active = devices.isActive(claims);
+        } catch (DataAccessException | TransactionException e) {
+            if (!DatabaseUnavailable.isPoolTimeout(e)) {
+                throw e;
+            }
+            // backpressure, answered here: an exception leaving a filter is logged at ERROR by the container
+            DatabaseUnavailable.logWarning(e);
+            problems.write(request, response, HttpStatus.SERVICE_UNAVAILABLE, DatabaseUnavailable.TITLE,
+                    DatabaseUnavailable.DETAIL,
+                    Map.of(HttpHeaders.RETRY_AFTER, Long.toString(DatabaseUnavailable.RETRY_AFTER_SECONDS)));
+            return;
+        }
+        if (!active) {
             reject(request, response, REVOKED);
             return;
         }

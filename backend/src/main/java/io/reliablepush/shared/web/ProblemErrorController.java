@@ -4,7 +4,9 @@ import jakarta.servlet.RequestDispatcher;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
+import java.util.Map;
 import org.springframework.boot.webmvc.error.ErrorController;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -13,7 +15,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
  * Replaces Boot's {@code BasicErrorController}: failures that never reach {@link ProblemHandler} (an unexpected
  * exception in a servlet filter, errors raised by the container itself) are dispatched to {@code /error} and
  * answered here with the same {@code application/problem+json} shape as {@link ProblemWriter} writes. Status comes
- * from the container; the detail is generic - no exception message and no trace is ever included.
+ * from the container; the detail is generic - no exception message and no trace is ever included. A connection-pool
+ * timeout ({@link DatabaseUnavailable}) is answered 503 with {@code Retry-After} instead of 500.
  */
 @Controller
 public class ProblemErrorController implements ErrorController {
@@ -29,6 +32,14 @@ public class ProblemErrorController implements ErrorController {
 
     @RequestMapping("/error")
     void error(HttpServletRequest request, HttpServletResponse response) throws IOException {
+        Object exception = request.getAttribute(RequestDispatcher.ERROR_EXCEPTION);
+        if (exception instanceof Throwable failure && DatabaseUnavailable.isPoolTimeout(failure)) {
+            DatabaseUnavailable.logWarning(failure);
+            problems.write(request, response, HttpStatus.SERVICE_UNAVAILABLE, DatabaseUnavailable.TITLE,
+                    DatabaseUnavailable.DETAIL,
+                    Map.of(HttpHeaders.RETRY_AFTER, Long.toString(DatabaseUnavailable.RETRY_AFTER_SECONDS)));
+            return;
+        }
         HttpStatus status = statusOf(request);
         String detail = status.is5xxServerError() ? UNEXPECTED_DETAIL : REQUEST_DETAIL;
         problems.write(request, response, status, status.getReasonPhrase(), detail);

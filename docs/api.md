@@ -173,7 +173,7 @@ Errors are RFC 9457 `application/problem+json` documents; rejected values are ne
 | `415` | Unsupported media type (for example multipart) |
 | `422` | A field is invalid; `errors` names each field |
 | `429` | Rate limit exceeded; `Retry-After` in seconds |
-| `503` | Identity provider key set unavailable on `POST /v1/devices`; `Retry-After: 30` |
+| `503` | Temporarily overloaded: no database connection within 5 s (any endpoint, `Retry-After: 5`), or the identity provider key set is unavailable on `POST /v1/devices` (`Retry-After: 30`). Retry after the given seconds |
 | `500` | Unexpected error; generic body, details only in the server log |
 
 Rate limits are token buckets per instance: per sender app (default 6,000 requests per minute) and per device (default 60

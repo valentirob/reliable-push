@@ -64,6 +64,8 @@ paths:
           $ref: '#/components/responses/ValidationFailed'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
     get:
       tags: [notifications]
       operationId: listNotifications
@@ -118,6 +120,8 @@ paths:
           $ref: '#/components/responses/ValidationFailed'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
 
   /v1/notifications/{trackingId}:
     parameters:
@@ -144,6 +148,8 @@ paths:
           $ref: '#/components/responses/NotFound'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
     delete:
       tags: [notifications]
       operationId: cancelNotification
@@ -165,6 +171,8 @@ paths:
           $ref: '#/components/responses/Conflict'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
 
   /v1/devices:
     post:
@@ -231,6 +239,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
 
   /v1/devices/me:
     delete:
@@ -247,6 +257,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
 
   /v1/events:
     post:
@@ -283,6 +295,8 @@ paths:
           $ref: '#/components/responses/ValidationFailed'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
 
 components:
   securitySchemes:
@@ -582,7 +596,9 @@ components:
           schema:
             $ref: '#/components/schemas/Problem'
     ServiceUnavailable:
-      description: A dependency (for example the identity provider's key set) is temporarily unavailable.
+      description: |
+        A dependency is temporarily unavailable: the database connection pool is exhausted (any operation,
+        `Retry-After: 5`) or the identity provider's key set cannot be fetched (device registration, `Retry-After: 30`).
       headers:
         Retry-After:
           description: Seconds to wait before retrying.
