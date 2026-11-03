@@ -1,5 +1,6 @@
 package io.reliablepush.support;
 
+import io.reliablepush.devices.SigningKeys;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
@@ -24,12 +25,13 @@ public abstract class PostgresTestBase {
         POSTGRES.start();
     }
 
-    /** Generated once per JVM; never written to disk. Referenced by {@code env:RP_TEST_DEVICE_KEY_K1} in application-test.yml. */
-    private static final String DEVICE_KEY_K1_PEM = TestKeys.newEcPem();
+    /** Generated once per JVM; never written to disk. Referenced by {@code env:RP_TEST_DEVICE_KEY_K1/PUB_K1} in application-test.yml. */
+    private static final SigningKeys.PemPair DEVICE_KEY_K1 = TestKeys.newEcPemPair();
 
     @DynamicPropertySource
     static void deviceTokenKey(DynamicPropertyRegistry registry) {
-        registry.add("RP_TEST_DEVICE_KEY_K1", () -> DEVICE_KEY_K1_PEM);
+        registry.add("RP_TEST_DEVICE_KEY_K1", DEVICE_KEY_K1::privateKeyPem);
+        registry.add("RP_TEST_DEVICE_PUB_K1", DEVICE_KEY_K1::publicKeyPem);
     }
 
     @LocalServerPort

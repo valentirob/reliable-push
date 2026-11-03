@@ -52,6 +52,8 @@ public record ReliablePushProperties(
                     }
                     SecretRefs.requireEnvRef("reliable-push.device-token.signing-keys[" + key.kid() + "].private-key-pem-ref",
                             key.privateKeyPemRef());
+                    SecretRefs.requireEnvRef("reliable-push.device-token.signing-keys[" + key.kid() + "].public-key-pem-ref",
+                            key.publicKeyPemRef());
                 }
                 if (currentKid == null || !kids.contains(currentKid)) {
                     throw new IllegalStateException(
@@ -61,7 +63,8 @@ public record ReliablePushProperties(
         }
     }
 
-    public record SigningKey(@NotBlank String kid, @NotBlank String privateKeyPemRef) {}
+    /** A P-256 key pair: {@code private-key-pem-ref} is PKCS#8, {@code public-key-pem-ref} is SPKI; both {@code env:NAME}. */
+    public record SigningKey(@NotBlank String kid, @NotBlank String privateKeyPemRef, @NotBlank String publicKeyPemRef) {}
 
     public record Worker(
             @DefaultValue("5s") @NotNull Duration pollInterval,

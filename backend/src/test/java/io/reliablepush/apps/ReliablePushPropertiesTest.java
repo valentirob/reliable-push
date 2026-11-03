@@ -241,6 +241,7 @@ class ReliablePushPropertiesTest {
         runner.withPropertyValues(
                         "reliable-push.device-token.signing-keys[0].kid=k1",
                         "reliable-push.device-token.signing-keys[0].private-key-pem-ref=env:" + AppFixtures.HOOK_SECRET_ENV,
+                        "reliable-push.device-token.signing-keys[0].public-key-pem-ref=env:" + AppFixtures.HOOK_SECRET_ENV,
                         "reliable-push.device-token.current-kid=k2")
                 .run(context -> {
                     assertThat(context).hasFailed();
@@ -253,12 +254,32 @@ class ReliablePushPropertiesTest {
         runner.withPropertyValues(
                         "reliable-push.device-token.signing-keys[0].kid=k1",
                         "reliable-push.device-token.signing-keys[0].private-key-pem-ref=-----BEGIN PRIVATE KEY-----",
+                        "reliable-push.device-token.signing-keys[0].public-key-pem-ref=env:" + AppFixtures.HOOK_SECRET_ENV,
                         "reliable-push.device-token.current-kid=k1")
                 .run(context -> {
                     assertThat(context).hasFailed();
                     String message = rootMessage(context.getStartupFailure());
                     assertThat(message).contains("private-key-pem-ref").doesNotContain("BEGIN PRIVATE KEY");
                 });
+    }
+
+    @Test
+    void rejectsInlineOrMissingPublicKey() {
+        runner.withPropertyValues(
+                        "reliable-push.device-token.signing-keys[0].kid=k1",
+                        "reliable-push.device-token.signing-keys[0].private-key-pem-ref=env:" + AppFixtures.HOOK_SECRET_ENV,
+                        "reliable-push.device-token.signing-keys[0].public-key-pem-ref=-----BEGIN PUBLIC KEY-----",
+                        "reliable-push.device-token.current-kid=k1")
+                .run(context -> {
+                    assertThat(context).hasFailed();
+                    String message = rootMessage(context.getStartupFailure());
+                    assertThat(message).contains("public-key-pem-ref").doesNotContain("BEGIN PUBLIC KEY");
+                });
+        runner.withPropertyValues(
+                        "reliable-push.device-token.signing-keys[0].kid=k1",
+                        "reliable-push.device-token.signing-keys[0].private-key-pem-ref=env:" + AppFixtures.HOOK_SECRET_ENV,
+                        "reliable-push.device-token.current-kid=k1")
+                .run(context -> assertThat(context).hasFailed());
     }
 
     private static String rootMessage(Throwable failure) {

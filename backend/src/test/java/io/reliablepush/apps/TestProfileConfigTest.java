@@ -21,10 +21,12 @@ class TestProfileConfigTest {
 
     @Test
     void shopAppIsAvailableUnderTestProfile() {
+        SigningKeys.PemPair pair = TestKeys.newEcPemPair();
         new ApplicationContextRunner()
                 .withUserConfiguration(Config.class)
                 .withInitializer(new ConfigDataApplicationContextInitializer())
-                .withPropertyValues("spring.profiles.active=test", "RP_TEST_DEVICE_KEY_K1=" + TestKeys.newEcPem())
+                .withPropertyValues("spring.profiles.active=test", "RP_TEST_DEVICE_KEY_K1=" + pair.privateKeyPem(),
+                        "RP_TEST_DEVICE_PUB_K1=" + pair.publicKeyPem())
                 .run(context -> {
                     assertThat(context).hasNotFailed();
                     AppConfig shop = context.getBean(AppRegistry.class).bySenderApiKey("test-sender-key-shop").orElseThrow();

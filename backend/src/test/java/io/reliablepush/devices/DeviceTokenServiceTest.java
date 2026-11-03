@@ -12,12 +12,14 @@ import com.nimbusds.jose.jwk.gen.ECKeyGenerator;
 import com.nimbusds.jose.util.Base64URL;
 import io.reliablepush.devices.DeviceTokenService.IssuedToken;
 import io.reliablepush.support.TestKeys;
+import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
 import java.security.interfaces.ECPrivateKey;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.Arrays;
 import java.util.Base64;
 import java.util.Map;
 import java.util.UUID;
@@ -31,8 +33,8 @@ class DeviceTokenServiceTest {
     private static final Instant T0 = Instant.parse("2026-11-03T10:00:00Z");
     private static final UUID DEVICE = UUID.fromString("0b0f5c1e-6a4e-4a43-9d7d-2f1d6c2d9a10");
 
-    private final String pem1 = TestKeys.newEcPem();
-    private final String pem2 = TestKeys.newEcPem();
+    private final SigningKeys.PemPair pem1 = TestKeys.newEcPemPair();
+    private final SigningKeys.PemPair pem2 = TestKeys.newEcPemPair();
     private MutableClock clock;
     private DeviceTokenService service;
 
@@ -42,7 +44,7 @@ class DeviceTokenServiceTest {
         service = serviceWith("k1", Map.of("k1", pem1));
     }
 
-    private DeviceTokenService serviceWith(String current, Map<String, String> keys) {
+    private DeviceTokenService serviceWith(String current, Map<String, SigningKeys.PemPair> keys) {
         return new DeviceTokenService(SigningKeys.fromPem(current, keys), clock);
     }
 
@@ -216,7 +218,7 @@ class DeviceTokenServiceTest {
 
     @Test
     void critHeaderRejected() throws Exception {
-        ECPrivateKey signer = TestKeys.privateKey(pem1);
+        ECPrivateKey signer = TestKeys.privateKey(pem1.privateKeyPem());
         String header = "{\"alg\":\"ES256\",\"kid\":\"k1\",\"crit\":[\"exp\"],\"exp\":1}";
 
         assertReason(signRaw(header, validClaims(), signer), "malformed");
@@ -224,14 +226,14 @@ class DeviceTokenServiceTest {
 
     @Test
     void missingKidIsMalformed() throws Exception {
-        ECPrivateKey signer = TestKeys.privateKey(pem1);
+        ECPrivateKey signer = TestKeys.privateKey(pem1.privateKeyPem());
 
         assertReason(signRaw("{\"alg\":\"ES256\"}", validClaims(), signer), "malformed");
     }
 
     @Test
     void unknownKidRejected() throws Exception {
-        ECPrivateKey signer = TestKeys.privateKey(pem1);
+        ECPrivateKey signer = TestKeys.privateKey(pem1.privateKeyPem());
 
         assertReason(signRaw("{\"alg\":\"ES256\",\"kid\":\"nope\"}", validClaims(), signer), "unknown_kid");
     }
@@ -250,6 +252,41 @@ class DeviceTokenServiceTest {
         String shortSig = parts[0] + "." + parts[1] + "." + parts[2].substring(0, 20);
 
         assertReason(shortSig, "bad_signature");
+    }
+
+    /** "Psychic signatures" (CVE-2022-21449) class: degenerate or non-JOSE ECDSA signatures must never verify. */
+    @ParameterizedTest
+    @ValueSource(strings = {"zeros", "r-zero", "s-zero", "r-equals-n", "s-equals-n", "r-and-s-equal-n", "der-encoded"})
+    void invalidEcdsaSignaturesRejected(String variant) throws Exception {
+        ECPrivateKey key = TestKeys.privateKey(pem1.privateKeyPem());
+        String input = b64("{\"alg\":\"ES256\",\"kid\":\"k1\"}") + "." + b64(validClaims());
+        byte[] inputBytes = input.getBytes(StandardCharsets.US_ASCII);
+        byte[] valid = new ECDSASigner(key).sign(new JWSHeader(JWSAlgorithm.ES256), inputBytes).decode();
+        assertThat(valid).hasSize(64);
+        byte[] n = fixedLength(key.getParams().getOrder(), 32);
+        byte[] zero = new byte[32];
+        byte[] r = Arrays.copyOfRange(valid, 0, 32);
+        byte[] s = Arrays.copyOfRange(valid, 32, 64);
+
+        byte[] signature = switch (variant) {
+            case "zeros" -> new byte[64];
+            case "r-zero" -> concat(zero, s);
+            case "s-zero" -> concat(r, zero);
+            case "r-equals-n" -> concat(n, s);
+            case "s-equals-n" -> concat(r, n);
+            case "r-and-s-equal-n" -> concat(n, n);
+            case "der-encoded" -> {
+                java.security.Signature der = java.security.Signature.getInstance("SHA256withECDSA");
+                der.initSign(key);
+                der.update(inputBytes);
+                byte[] encoded = der.sign();
+                assertThat(encoded.length).isBetween(68, 72);
+                yield encoded;
+            }
+            default -> throw new IllegalArgumentException(variant);
+        };
+
+        assertReason(input + "." + Base64URL.encode(signature), "bad_signature");
     }
 
     @Test
@@ -392,7 +429,7 @@ class DeviceTokenServiceTest {
     }
 
     private String signWithK1(String claimsJson) throws Exception {
-        return signRaw("{\"alg\":\"ES256\",\"kid\":\"k1\"}", claimsJson, TestKeys.privateKey(pem1));
+        return signRaw("{\"alg\":\"ES256\",\"kid\":\"k1\"}", claimsJson, TestKeys.privateKey(pem1.privateKeyPem()));
     }
 
     private static String sign(JWSHeader header, String claimsJson, ECKey key) throws Exception {
@@ -404,6 +441,19 @@ class DeviceTokenServiceTest {
         String input = b64(headerJson) + "." + b64(claimsJson);
         Base64URL signature = new ECDSASigner(key).sign(new JWSHeader(JWSAlgorithm.ES256), input.getBytes(StandardCharsets.US_ASCII));
         return input + "." + signature;
+    }
+
+    private static byte[] concat(byte[] a, byte[] b) {
+        byte[] out = Arrays.copyOf(a, a.length + b.length);
+        System.arraycopy(b, 0, out, a.length, b.length);
+        return out;
+    }
+
+    private static byte[] fixedLength(BigInteger value, int length) {
+        byte[] raw = value.toByteArray();
+        byte[] out = new byte[length];
+        System.arraycopy(raw, Math.max(0, raw.length - length), out, Math.max(0, length - raw.length), Math.min(raw.length, length));
+        return out;
     }
 
     private static String b64(String text) {

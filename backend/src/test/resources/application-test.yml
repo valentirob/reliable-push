@@ -3,12 +3,13 @@
 # in tests NAME is satisfied by the plain property at the bottom of this file instead of a real environment variable.
 reliable-push:
   device-token:
-    # No key is committed: the PEM behind this ref is generated per JVM (TestKeys.newEcPem) and supplied by
+    # No key is committed: the PEMs behind these refs are generated per JVM (TestKeys.newEcPemPair) and supplied by
     # PostgresTestBase (ITs) or the test itself (see TestProfileConfigTest). A second key for rotation tests is
     # configured per test.
     signing-keys:
       - kid: test-k1
         private-key-pem-ref: env:RP_TEST_DEVICE_KEY_K1
+        public-key-pem-ref: env:RP_TEST_DEVICE_PUB_K1
     current-kid: test-k1
   worker:
     poll-interval: 200ms
