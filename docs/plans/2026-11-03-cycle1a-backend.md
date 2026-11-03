@@ -306,9 +306,9 @@ Expected: `openjdk version "21...` and a server version. Export `JAVA_HOME=/opt/
 
 **Files:**
 - Create: `.github/workflows/backend-ci.yml`, `.github/workflows/codeql.yml`, `.github/dependabot.yml`, `.github/pull_request_template.md`
-- [ ] **Step 1: Write workflows.** `backend-ci.yml`: on `push` (branches `develop`, `main`, `release/**`, `hotfix/**`) and `pull_request`; paths `backend/**`, `.github/workflows/backend-ci.yml`; jobs: `build` (temurin 21, Maven cache, `./mvnw -B verify`, upload JaCoCo + surefire/failsafe reports), `image` (needs build; `./mvnw -B verify -Pimage`; Trivy `aquasecurity/trivy-action` on the image, fail on CRITICAL/HIGH), `dependency-review` (PRs only, `actions/dependency-review-action`). All actions pinned to full commit SHAs; `permissions: contents: read` by default. `codeql.yml`: Java, weekly + PR. Dependabot: maven (`/backend`), github-actions, weekly. PR template: summary, linked requirement ids, checklist (tests, review-loop result, **E2E local result line**, docs updated).
-- [ ] **Step 2: Validate** — Run: `docker run --rm -v "$PWD":/repo -w /repo rhysd/actionlint:latest` → no errors.
-- [ ] **Step 3: Commit** `ci: backend build, image scan, codeql, dependabot`
+- [x] **Step 1: Write workflows.** `backend-ci.yml`: on `push` (branches `develop`, `main`, `release/**`, `hotfix/**`) and `pull_request`; paths `backend/**`, `.github/workflows/backend-ci.yml`; jobs: `build` (temurin 21, Maven cache, `./mvnw -B verify`, upload JaCoCo + surefire/failsafe reports), `image` (needs build; `./mvnw -B verify -Pimage`; Trivy `aquasecurity/trivy-action` on the image, fail on CRITICAL/HIGH), `dependency-review` (PRs only, `actions/dependency-review-action`). All actions pinned to full commit SHAs; `permissions: contents: read` by default. `codeql.yml`: Java, weekly + PR. Dependabot: maven (`/backend`), github-actions, weekly. PR template: summary, linked requirement ids, checklist (tests, review-loop result, **E2E local result line**, docs updated).
+- [x] **Step 2: Validate** — Run: `docker run --rm -v "$PWD":/repo -w /repo rhysd/actionlint:latest` → no errors.
+- [x] **Step 3: Commit** `ci: backend build, image scan, codeql, dependabot`
 
 ### Task 18: Backend documentation and handoff
 
