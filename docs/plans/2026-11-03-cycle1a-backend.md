@@ -88,16 +88,16 @@ Expected: `openjdk version "21...` and a server version. Export `JAVA_HOME=/opt/
   - `TraceIdFilter` (order highest) — reads W3C `traceparent` (trace-id part) or `X-Request-Id`; else generates 32-hex id; sets `ThreadContext` key `trace.id`; sets response header `X-Request-Id`; clears context after the request.
   - `AccessLogFilter` — after each request logs `api.request` with `http.request.method`, `url.path` (Spring best-matching **pattern**, e.g. `/v1/notifications/{trackingId}`), `http.response.status_code`, `event.duration` (ns), `event.outcome` (`success` < 400, else `failure`), `rp.app_id` if a request attribute `rp.app_id` was set by auth.
 
-- [ ] **Step 1: Failing tests**
+- [x] **Step 1: Failing tests**
   - `UserHashTest.hashesDeterministically()` — `UserHash.of("alice")` equals `"2bd806c97f0e00af"` (first 16 of SHA-256("alice")), length 16.
   - `EventLogTest.emitsActionAndFields()` — with a `ListAppender`, `EventLog.info("notification.registered", Map.of("rp.tracking_id","t1"))` → one event, map has `event.action`=`notification.registered`, `rp.tracking_id`=`t1`.
   - `EventLogTest.rejectsSensitiveKeys()` — `EventLog.info("x", Map.of("token","abc"))` throws `IllegalArgumentException`.
   - `TraceIdFilterTest.usesTraceparent()` — header `traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01` → `X-Request-Id` = `4bf92f3577b34da6a3ce929d0e0e4736`; `generatesWhenMissing()` → 32 hex chars.
   - `AccessLogIT.logsEveryRequestWithPathTemplate()` — GET `/actuator/health` → captured `api.request` event with `url.path`=`/actuator/health`, status `200`, numeric `event.duration`; and the JSON output line parses as JSON with `@timestamp`, `log.level`, `trace.id`.
-- [ ] **Step 2: Run** `./mvnw test -Dtest='UserHashTest,EventLogTest,TraceIdFilterTest'` → FAIL.
-- [ ] **Step 3: Implement** the four classes; register filters as `FilterRegistrationBean`s in `shared/logging/LoggingConfig.java`.
-- [ ] **Step 4: Run** `./mvnw verify` → PASS.
-- [ ] **Step 5: Commit** `feat(backend): trace id, access log and event log`
+- [x] **Step 2: Run** `./mvnw test -Dtest='UserHashTest,EventLogTest,TraceIdFilterTest'` → FAIL.
+- [x] **Step 3: Implement** the four classes; register filters as `FilterRegistrationBean`s in `shared/logging/LoggingConfig.java`.
+- [x] **Step 4: Run** `./mvnw verify` → PASS.
+- [x] **Step 5: Commit** `feat(backend): trace id, access log and event log`
 
 ### Task 4: App registry, configuration validation and time scale
 
