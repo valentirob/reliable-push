@@ -200,15 +200,46 @@ class SenderApiKeyIT extends PostgresTestBase {
         assertProblem(response, 413);
     }
 
-    /** Sends the body with {@code Transfer-Encoding: chunked} (no Content-Length) and returns {status}. */
+    @Test
+    void chunkedMultipartBodyIsNeverParsedOrSpooled() throws IOException {
+        String boundary = "rpTestBoundary";
+        String body = "--" + boundary + "\r\nContent-Disposition: form-data; name=\"file\"; filename=\"f.bin\"\r\n"
+                + "Content-Type: application/octet-stream\r\n\r\n" + "x".repeat(100 * 1024) + "\r\n--" + boundary + "--\r\n";
+        String type = "multipart/form-data; boundary=" + boundary;
+
+        // unauthenticated, unmapped-for-multipart path under /v1
+        int open = postChunked("/v1/devices", type, body, null)[0];
+        // handler that would answer 200 if the container had parsed the multipart body
+        int echo = postChunked(ECHO + "/multipart", type, body, SHOP_KEY)[0];
+
+        assertThat(open).isBetween(400, 499);
+        assertThat(echo).isBetween(400, 499);
+    }
+
+    @Test
+    void chunkedFormBodyOver64KbIsNotParsed() throws IOException {
+        String body = "a=" + "x".repeat(100 * 1024);
+
+        int status = postChunked(ECHO + "/form", "application/x-www-form-urlencoded", body, SHOP_KEY)[0];
+
+        assertThat(status).isBetween(400, 499);
+    }
+
     private int[] postChunked(String body) throws IOException {
+        return postChunked(ECHO, "application/json", body, SHOP_KEY);
+    }
+
+    /** Sends the body with {@code Transfer-Encoding: chunked} (no Content-Length) and returns {status}. */
+    private int[] postChunked(String path, String contentType, String body, String apiKey) throws IOException {
         HttpURLConnection connection =
-                (HttpURLConnection) URI.create("http://localhost:" + port + ECHO).toURL().openConnection();
+                (HttpURLConnection) URI.create("http://localhost:" + port + path).toURL().openConnection();
         connection.setRequestMethod("POST");
         connection.setDoOutput(true);
         connection.setChunkedStreamingMode(4096);
-        connection.setRequestProperty("Content-Type", "application/json");
-        connection.setRequestProperty("X-Api-Key", SHOP_KEY);
+        connection.setRequestProperty("Content-Type", contentType);
+        if (apiKey != null) {
+            connection.setRequestProperty("X-Api-Key", apiKey);
+        }
         try (OutputStream out = connection.getOutputStream()) {
             out.write(body.getBytes(StandardCharsets.UTF_8));
         } catch (IOException e) {

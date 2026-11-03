@@ -4,7 +4,11 @@ import jakarta.validation.ConstraintViolation;
 import jakarta.validation.ConstraintViolationException;
 import java.util.List;
 import java.util.Map;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+import org.apache.tomcat.util.http.InvalidParameterException;
 import org.springframework.context.MessageSourceResolvable;
+import org.springframework.core.annotation.AnnotatedElementUtils;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
@@ -14,9 +18,11 @@ import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.context.request.WebRequest;
 import org.springframework.web.method.annotation.HandlerMethodValidationException;
+import org.springframework.web.multipart.MultipartException;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
 
 /**
@@ -27,6 +33,34 @@ import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExcep
  */
 @RestControllerAdvice
 public class ProblemHandler extends ResponseEntityExceptionHandler {
+
+    private static final Logger LOGGER = LogManager.getLogger(ProblemHandler.class);
+
+    /**
+     * Last resort for exceptions no other handler claims: ERROR with stack trace (spec 9.1; never the request body)
+     * and a generic 500 problem that does not leak the exception message. Exceptions with an explicit
+     * {@code @ResponseStatus} keep their own handling.
+     */
+    @ExceptionHandler(Exception.class)
+    ResponseEntity<Object> unexpected(Exception ex, WebRequest request) throws Exception {
+        if (AnnotatedElementUtils.hasAnnotation(ex.getClass(), ResponseStatus.class)) {
+            throw ex;
+        }
+        LOGGER.error("Unhandled exception", ex);
+        return problem(HttpStatus.INTERNAL_SERVER_ERROR, "Internal Server Error", ProblemErrorController.UNEXPECTED_DETAIL, ex, request);
+    }
+
+    /** The API is JSON-only: multipart handling is disabled, a controller asking for parts gets a client error. */
+    @ExceptionHandler(MultipartException.class)
+    ResponseEntity<Object> multipart(MultipartException ex, WebRequest request) {
+        return problem(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "Unsupported Media Type", "multipart requests are not supported.", ex, request);
+    }
+
+    /** Tomcat refused to parse request parameters (e.g. a form body above max-http-form-post-size): a client error. */
+    @ExceptionHandler(InvalidParameterException.class)
+    ResponseEntity<Object> invalidParameters(InvalidParameterException ex, WebRequest request) {
+        return problem(HttpStatus.BAD_REQUEST, "Bad Request", "The request parameters could not be parsed.", ex, request);
+    }
 
     @ExceptionHandler(NotFoundException.class)
     ResponseEntity<Object> notFound(NotFoundException ex, WebRequest request) {

@@ -1,5 +1,6 @@
 package io.reliablepush.shared.web;
 
+import jakarta.servlet.RequestDispatcher;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
@@ -51,9 +52,13 @@ public class ProblemWriter {
         response.getOutputStream().write(mapper.writeValueAsBytes(problem));
     }
 
-    /** The path (no query), percent-encoded so that it is always a valid URI reference. */
+    /**
+     * The path (no query), percent-encoded so that it is always a valid URI reference. During a container error
+     * dispatch ({@code /error}) it is the path of the original request.
+     */
     private static String instanceOf(HttpServletRequest request) {
-        String uri = request.getRequestURI();
+        Object original = request.getAttribute(RequestDispatcher.ERROR_REQUEST_URI);
+        String uri = original instanceof String path ? path : request.getRequestURI();
         try {
             return URI.create(uri).getRawPath();
         } catch (IllegalArgumentException e) {

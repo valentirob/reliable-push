@@ -1,18 +1,24 @@
 package io.reliablepush.shared.web;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
 
 import com.jayway.jsonpath.JsonPath;
 import io.reliablepush.support.PostgresTestBase;
+import java.time.Duration;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.test.context.ActiveProfiles;
 
 @ActiveProfiles("test")
+@ExtendWith(OutputCaptureExtension.class)
 class ProblemHandlerIT extends PostgresTestBase {
 
     private static final String BASE = "/v1/notifications/_test-echo";
@@ -89,5 +95,31 @@ class ProblemHandlerIT extends PostgresTestBase {
         Set<String> filterKeys = JsonPath.<Map<String, Object>>read(fromFilter.getBody(), "$").keySet();
         assertThat(filterKeys).isEqualTo(adviceKeys).contains("status", "title", "detail", "instance");
         assertThat(JsonPath.<String>read(fromFilter.getBody(), "$.instance")).startsWith("/v1/notifications/");
+    }
+
+    @Test
+    void unexpectedControllerExceptionIsA500ProblemWithoutLeakingTheMessage(CapturedOutput output) {
+        ResponseEntity<String> response = get(BASE + "/throw/other");
+
+        assertProblem(response, 500, "Internal Server Error");
+        assertThat(response.getBody()).doesNotContain("secret-internal-detail");
+        assertThat(JsonPath.<String>read(response.getBody(), "$.detail")).isNotBlank();
+        await().atMost(Duration.ofSeconds(5)).untilAsserted(() -> assertThat(output.getAll().lines())
+                .anySatisfy(line -> assertThat(line).contains("\"log.level\":\"ERROR\"").contains("secret-internal-detail")));
+    }
+
+    @Test
+    void unexpectedFilterExceptionIsA500ProblemToo() {
+        ResponseEntity<String> response = get("/_test-filter-boom");
+
+        assertProblem(response, 500, "Internal Server Error");
+        assertThat(response.getBody()).doesNotContain("secret-filter-detail").doesNotContain("IllegalStateException");
+        assertThat(JsonPath.<String>read(response.getBody(), "$.detail")).isNotBlank();
+        assertThat(response.getHeaders().getFirst("X-Request-Id")).isNotBlank();
+    }
+
+    @Test
+    void directRequestToErrorPathIsA404Problem() {
+        assertProblem(get("/error"), 404, "Not Found");
     }
 }

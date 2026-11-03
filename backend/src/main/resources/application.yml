@@ -12,12 +12,19 @@ spring:
     banner-mode: off
   flyway:
     enabled: true
+  servlet:
+    multipart:
+      # the API is JSON-only: with multipart handling on, the container would parse (and spool to disk) any
+      # multipart/* body of up to 10 MB before BodySizeLimitFilter's stream wrapper ever sees it
+      enabled: false
 
 server:
   tomcat:
     # JSON request bodies are limited to 64 KB by BodySizeLimitFilter (/v1/**);
     # this only bounds how much Tomcat swallows of an upload the filter rejected unread.
     max-swallow-size: 64KB
+    # same reason for application/x-www-form-urlencoded: bounded like every other body (default is 2 MB)
+    max-http-form-post-size: 64KB
 
 management:
   endpoints:

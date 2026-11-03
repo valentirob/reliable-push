@@ -14,7 +14,9 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
 /**
  * Test-only endpoints under the sender-API prefix, so the body-size limit, the sender filters and the problem
@@ -37,6 +39,18 @@ class EchoTestController {
         return Map.of("name", probe.name());
     }
 
+    /** Answers 200 only if the container parsed a multipart body, which the API must never do. */
+    @PostMapping(path = "/multipart", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    Map<String, Long> multipart(@RequestParam("file") MultipartFile file) {
+        return Map.of("size", file.getSize());
+    }
+
+    /** Answers 200 only if the container parsed a form body, which the API must never do. */
+    @PostMapping(path = "/form", consumes = MediaType.APPLICATION_FORM_URLENCODED_VALUE)
+    Map<String, Integer> form(@RequestParam("a") String a) {
+        return Map.of("length", a.length());
+    }
+
     @GetMapping("/throw/{kind}")
     void fail(@PathVariable String kind) {
         switch (kind) {
@@ -46,6 +60,7 @@ class EchoTestController {
             case "constraint" -> throw new ConstraintViolationException(Validation.buildDefaultValidatorFactory()
                     .getValidator()
                     .validate(new Probe("")));
+            case "other" -> throw new IllegalStateException("secret-internal-detail");
             default -> throw new IllegalArgumentException(kind);
         }
     }
