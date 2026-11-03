@@ -39,8 +39,70 @@ exists today.
 
 ## Quick start
 
-Coming soon. Step-by-step integration instructions will live in the
-[integration guide](docs/integration-guide.md).
+Run the backend locally with Docker (no JDK needed for this path) and register your first notification. The values below
+are placeholders generated on the spot with `openssl`; use your own secret management for anything real.
+
+```sh
+# 1. Build the image (a jlink-trimmed JRE image, about 105 MB)
+docker build -t reliable-push-backend:dev backend
+
+# 2. Secrets: sender API key (+ its SHA-256), webhook HMAC secret, database password, device-token signing key pair
+#    (run steps 2-3 in a scratch directory: it receives k1.pem, k1.pub.pem and rp.yml, which must not be committed)
+export RP_SENDER_KEY=$(openssl rand -hex 32)
+export RP_SENDER_KEY_SHA256=$(printf '%s' "$RP_SENDER_KEY" | openssl dgst -sha256 -hex | sed 's/^.* //')
+export RP_SHOP_HOOK_SECRET=$(openssl rand -hex 32)
+export RP_DB_PASSWORD=$(openssl rand -hex 16)
+openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -pkeyopt ec_param_enc:named_curve -out k1.pem
+openssl pkey -in k1.pem -pubout -out k1.pub.pem
+
+# 3. App configuration (placeholders: set your own identity provider and fallback receiver)
+cat > rp.yml <<EOF
+reliable-push:
+  device-token:
+    signing-keys:
+      - kid: k1
+        private-key-pem-ref: env:RP_DEVICE_KEY_K1
+        public-key-pem-ref: env:RP_DEVICE_PUB_K1
+    current-kid: k1
+  apps:
+    shop:
+      sender-api-key-sha256: "${RP_SENDER_KEY_SHA256}"
+      identity:
+        type: oidc
+        issuer: https://idp.example.com        # placeholder: your OIDC issuer
+        audience: shop-mobile
+      fallback:
+        url: https://fallback.example.com/hook # placeholder: your fallback receiver
+        hmac-secret-ref: env:RP_SHOP_HOOK_SECRET
+EOF
+
+# 4. PostgreSQL and the backend (Flyway creates the schema at startup)
+docker network create rp-net
+docker run -d --name rp-db --network rp-net -e POSTGRES_DB=reliablepush -e POSTGRES_USER=rp \
+  -e POSTGRES_PASSWORD="$RP_DB_PASSWORD" postgres:16
+docker run -d --name rp-app --network rp-net -p 8080:8080 \
+  -v "$PWD/rp.yml:/config/application.yml:ro" -e SPRING_CONFIG_ADDITIONAL_LOCATION=optional:file:/config/ \
+  -e SPRING_DATASOURCE_URL=jdbc:postgresql://rp-db:5432/reliablepush \
+  -e SPRING_DATASOURCE_USERNAME=rp -e SPRING_DATASOURCE_PASSWORD="$RP_DB_PASSWORD" \
+  -e RP_SHOP_HOOK_SECRET -e RP_DEVICE_KEY_K1="$(cat k1.pem)" -e RP_DEVICE_PUB_K1="$(cat k1.pub.pem)" \
+  reliable-push-backend:dev
+
+# 5. Check health, then register a notification (fallback unless it is read within 10 minutes)
+curl -s http://localhost:8080/actuator/health/readiness
+curl -s -X POST http://localhost:8080/v1/notifications \
+  -H "X-Api-Key: $RP_SENDER_KEY" -H 'Content-Type: application/json' \
+  -d '{"userId":"user-42","policy":"NOT_READ","timeoutMinutes":10,"fallback":{"sms":"Your order has shipped."}}'
+# => 201 {"trackingId":"...","state":"PENDING","dueAt":"...", ...}
+```
+
+Put the returned `trackingId` into your push payload as `rp_tid`, and implement the fallback receiver that verifies the
+`X-RP-Signature`: see the [integration guide](docs/integration-guide.md). The worker calls the receiver when the policy is
+still unmet at `dueAt` (with the placeholder URL above the call fails and is retried, which you can watch in the JSON logs
+with `docker logs rp-app`). Cleanup: `docker rm -f rp-app rp-db && docker network rm rp-net`.
+
+Building from source needs JDK 21 and Docker: `cd backend && ./mvnw -B verify` (tests) and
+`./mvnw -B verify -Pimage` (image tests), see [docs/testing.md](docs/testing.md). All configuration keys, the log format and
+the metrics are in [docs/operations.md](docs/operations.md).
 
 ## Documentation
 

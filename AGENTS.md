@@ -66,10 +66,17 @@ sending pushes itself.
 
 ## Commands
 
-Filled in as components land; keep this section accurate.
+Environment: JDK 21 and Docker (Testcontainers; the image tests build the container image). On a Mac with Homebrew OpenJDK 21
+and Colima, export `JAVA_HOME=/opt/homebrew/opt/openjdk@21`, put its `bin` first on `PATH`, and set
+`DOCKER_HOST=unix://$HOME/.colima/default/docker.sock` and `TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock` before
+running the Maven commands. Details: `docs/testing.md`.
 
 | Task | Command |
 |---|---|
-| Backend build + unit tests | `cd backend && ./mvnw verify` *(after backend scaffold)* |
-| Demo / manual-test web console (local only) | `./scripts/demo.sh` → http://localhost:8090 *(after harness)* |
-| E2E (local only, manual or agent) | `./scripts/e2e.sh` — details in `.agents/skills/run-e2e/SKILL.md` *(after harness)* |
+| Backend build + unit + integration tests + coverage gate (80% line) | `cd backend && ./mvnw -B verify` |
+| Backend container image + image tests | `cd backend && ./mvnw -B verify -Pimage` |
+| Backend unit tests only / one class | `cd backend && ./mvnw -B test` / `./mvnw -B test -Dtest=FallbackDecisionTest` |
+| Backend one integration test | `cd backend && ./mvnw -B verify -Dit.test=NotificationApiIT -Dtest=NoSuchTest -Dsurefire.failIfNoSpecifiedTests=false -Djacoco.skip=true` |
+| Backend image build only | `docker build -t reliable-push-backend:dev backend` |
+| Demo / manual-test web console (local only) | `./scripts/demo.sh` → http://localhost:8090 *(arrives with plan 1B)* |
+| E2E (local only, manual or agent) | `./scripts/e2e.sh` — details in `.agents/skills/run-e2e/SKILL.md` *(arrives with plan 1B)* |
