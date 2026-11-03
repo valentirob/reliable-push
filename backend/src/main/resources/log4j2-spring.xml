@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Logging profiles (spec 9.1): "json" (default) = ECS JSON on stdout; "local" = human-readable pattern.
+     follow="true" re-resolves System.out on every write, so stdout capture in tests also works for
+     application contexts that reuse an already-initialised Log4j (the logging system is JVM-wide).
+     ${project.version} is injected by Maven resource filtering (@...@ delimiters). -->
+<Configuration status="WARN">
+    <Appenders>
+        <SpringProfile name="json | !local">
+            <Console name="Console" target="SYSTEM_OUT" follow="true">
+                <JsonTemplateLayout eventTemplateUri="classpath:log4j2/ecs-reliable-push.json">
+                    <EventTemplateAdditionalField key="service.name" value="reliable-push"/>
+                    <EventTemplateAdditionalField key="service.version" value="@project.version@"/>
+                </JsonTemplateLayout>
+            </Console>
+        </SpringProfile>
+        <SpringProfile name="local &amp; !json">
+            <Console name="Console" target="SYSTEM_OUT" follow="true">
+                <PatternLayout pattern="%d{ISO8601} %-5level [%t] %c{1.} [trace=%X{trace.id}] - %m%n%throwable"/>
+            </Console>
+        </SpringProfile>
+    </Appenders>
+    <Loggers>
+        <Root level="INFO">
+            <AppenderRef ref="Console"/>
+        </Root>
+    </Loggers>
+</Configuration>

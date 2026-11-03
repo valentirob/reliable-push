@@ -7,6 +7,21 @@
   2. Android SDK.
   3. iOS SDK.
 
+> **Changes during implementation (plan 1A, 2026-11-03).** Decisions taken while building the backend; the sections
+> below were updated to match (the code is the reference where wording differs):
+>
+> - §2: `closed_at` is the moment no further fallback processing is needed; the claim uses `FOR NO KEY UPDATE SKIP LOCKED`;
+>   a `lease_until` marker identifies re-claimed rows and fences outcome writes; rows of an app missing from the
+>   configuration expire after `due_at` + 20 min (`app_not_configured`).
+> - §3: `notification.lease_until` (V3), CHECK constraints and indexes of V1 to V3, foreign-key behaviour of `notification_event`.
+> - §4.3, §5 / `openapi.yaml`: event authorisation failures (`FORBIDDEN`) and unknown ids (`NOT_FOUND`) are reported per item in the `200` response of `POST /v1/events`.
+> - §5: device signing keys are PEM pairs per `kid` (`current-kid`, `revocation-cache-ttl`); secret refs are `env:NAME`, read literally;
+>   registration is rate limited per user after credential verification; identity-verification details (JWKS cache, timeouts, limits).
+> - §8: configuration example matches the implemented keys.
+> - §9, §9.1: container is a jlink-trimmed Temurin 21 JRE on a pinned Alpine (about 105 MB uncompressed); logging uses the project
+>   template `log4j2/ecs-reliable-push.json` derived from `EcsLayout.json`.
+> - §10.1: the fast clock also scales the lease and the webhook backoff.
+
 ## 1. Architecture
 
 ```
@@ -21,12 +36,13 @@ Device SDK (iOS NSE / Android FCM service)                                    �
                                                                               
 reliable-push worker
   (5) every few seconds: claim PENDING rows with due_at <= now (SKIP LOCKED)
-      ──► POST <app fallback webhook> {trackingId, userId, message, reason}  (HMAC-signed)
+      ──► POST <app fallback webhook> {trackingId, userId, fallback, reason, attempt}  (HMAC-signed)
 ```
 
 **Shape:** a modular monolith (one Spring Boot application, one container image).
 Spring profiles select the role: `api` (HTTP endpoints), `worker` (scheduler +
-webhook dispatcher), or both (default). PostgreSQL is the only stateful
+webhook dispatcher), or both (default). Implementation note: only `worker` gates beans (scheduler, webhook client, retention and backlog jobs);
+the HTTP endpoints are served by every instance, so `api` means "without `worker`" (see `docs/operations.md`). PostgreSQL is the only stateful
 dependency. Integration is **sidecar**: the existing backend keeps sending pushes
 and holds the FCM/APNs credentials; reliable-push never does.
 
@@ -62,8 +78,10 @@ PENDING / DELIVERED ──sender cancel──► CANCELLED
 
 - **Policy** `NOT_DELIVERED`: satisfied by `DELIVERED` or `READ`. Policy `NOT_READ`: satisfied only by `READ`.
 - **Due time:** `due_at = created_at + timeoutMinutes`. Rows whose policy is satisfied get `due_at = NULL` (removed from the partial index).
-- **Race safety:** events update with `UPDATE ... WHERE id = ? AND state IN (<allowed>)`; the worker claims rows with `SELECT ... FOR UPDATE SKIP LOCKED LIMIT n` and sets `state = 'DISPATCHING'` in the same transaction. Exactly one of "policy satisfied" and "fallback claimed" wins.
-- **Claim query:** `(state IN ('PENDING','DELIVERED') AND due_at <= now()) OR (state = 'DISPATCHING' AND next_attempt_at <= now())`. On claim, `next_attempt_at = now() + lease` (default 2 min) so a worker that crashes mid-dispatch releases the row automatically; on webhook failure `next_attempt_at = now() + backoff`; on success or final failure the row is closed. A crash after the webhook succeeded but before commit can re-send once; receivers de-duplicate with `Idempotency-Key`.
+- **`closed_at`** is the moment no further fallback processing is needed: the policy was satisfied (`DELIVERED` under `NOT_DELIVERED`), `READ`, `CANCELLED`, or a final fallback state. A closed row never has `due_at` (CHECK constraint). A `DELIVERED` row closed under `NOT_DELIVERED` can still become `READ`; its `closed_at` is kept.
+- **Race safety:** events update with `UPDATE ... WHERE id = ? AND state IN (<allowed>)`; the worker claims rows with one statement, `SELECT ... FOR NO KEY UPDATE SKIP LOCKED LIMIT n` followed by `UPDATE ... SET state = 'DISPATCHING'` (a single transaction; `FOR NO KEY UPDATE` does not block event inserts that reference the row). Exactly one of "policy satisfied" and "fallback claimed" wins.
+- **Claim query:** `(state IN ('PENDING','DELIVERED') AND due_at <= now()) OR (state = 'DISPATCHING' AND next_attempt_at <= now())`. On claim, `next_attempt_at = lease_until = now() + lease` (default 2 min) so a worker that crashes mid-dispatch releases the row automatically; on webhook failure `next_attempt_at = now() + backoff` and `lease_until` is cleared; on success or final failure the row is closed. A row is **reclaimed** when it is claimed while its previous `lease_until` is still set (the previous holder never persisted an outcome: crash, or a call that outlasted the lease); it is logged as `fallback.reclaimed`. Outcome writes (retry scheduled, closed) are **fenced** on the `lease_until` the worker claimed with, so a stale worker can never overwrite the outcome of the worker that re-claimed the row. A crash after the webhook succeeded but before the outcome was written can re-send once; receivers de-duplicate with `Idempotency-Key`. Re-sends after a crash are not counted against `max-attempts` (the attempt count is persisted only with an outcome).
+- **Apps missing from the configuration:** a due row whose `appId` is not configured on this instance (for example during a rolling deploy that adds an app) is left for later (re-claimable after one lease, attempts unchanged) until `due_at` + 20 min, then closed as `FALLBACK_EXPIRED` with reason `app_not_configured`.
 - **Trigger window (stale-fallback guard):** a fallback may only be dispatched while `now() <= due_at + triggerWindowMinutes` (per app, default 20; must be ≥ the cumulative retry backoff). This applies to every attempt — the first one, retries, and re-claims after a worker crash or outage. A row claimed outside the window is closed as `FALLBACK_EXPIRED` without calling the webhook, and logged as `fallback.expired`. Retries whose next backoff would fall outside the window are not scheduled; the row expires instead. The original `due_at` is kept (not moved by retries) so the window is measured from when the trigger should have started.
 - **Late events** (after fallback claimed) are stored in `notification_event` with `late = true`; the state does not change.
 - **Duplicates** (same `trackingId` + type) are no-ops returning success.
@@ -87,12 +105,24 @@ notification(
   read_at timestamptz null,
   fallback_attempts int not null default 0,
   next_attempt_at timestamptz null,
+  lease_until timestamptz null,     -- V3: set by a claim, cleared when the worker persists an outcome
   closed_at timestamptz null
 )
+check (closed_at is null or due_at is null)                 -- V2: a closed row never waits for the worker
+check (lease_until is null or state = 'DISPATCHING')        -- V3: only a claimed row holds a lease
 index notification_due on notification(due_at) where due_at is not null
+index notification_retry on notification(next_attempt_at) where state = 'DISPATCHING'
+index notification_app_user_created on notification(app_id, user_id, created_at desc)
+index notification_closed on notification(closed_at) where closed_at is not null
 unique (app_id, external_id) where external_id is not null
 
-notification_event(id bigserial, notification_id uuid, device_id uuid, type text, occurred_at timestamptz, received_at timestamptz, late bool)
+notification_event(
+  id bigserial,
+  notification_id uuid not null references notification(id) on delete cascade,
+  device_id uuid null references device(id) on delete set null,   -- history survives a purged device
+  type text, occurred_at timestamptz, received_at timestamptz, late bool,
+  unique (notification_id, type)                                  -- V2: duplicates are ON CONFLICT DO NOTHING
+)
 device(id uuid pk, app_id, user_id, platform text, token_version int, created_at, last_seen_at, revoked_at null)
 ```
 
@@ -123,16 +153,19 @@ Retention: a daily job deletes closed notifications and their events older than
 | `POST` | `/v1/events` | device JWT | `{events:[{trackingId, type, occurredAt}]}` (max 50) → `200 {accepted, ignored}` |
 
 ### 4.3 Errors
-RFC 9457 problem+json. `401` invalid credentials, `403` trackingId of another
-user/app, `404` unknown id, `409` invalid state, `413`/`422` validation, `429`
-rate limited with `Retry-After`.
+RFC 9457 problem+json. `401` invalid credentials, `404` unknown id (also an id of
+another app), `409` invalid state, `413`/`422` validation, `429` rate limited with
+`Retry-After`, `503` identity provider keys unavailable (with `Retry-After`).
+For `POST /v1/events` the outcome is reported per item in the `200` response
+(`ACCEPTED`, `DUPLICATE`, `LATE`, `NOT_FOUND`, `FORBIDDEN`): a trackingId of another
+user is `FORBIDDEN` (logged as `authz.denied`), one of another app is `NOT_FOUND`.
 
 ## 5. Security
 
-- **Device identity:** `IdentityVerifier` SPI. Default `OidcIdTokenVerifier` validates signature (issuer JWKS, cached), `iss`, `aud`, `exp`, and maps a configured claim (default `sub`) to `userId`. Alternative `SignedGrantVerifier`: short-lived JWT signed by the customer backend (shared HMAC secret or public key).
-- **Device JWT:** ES256, signed with a backend key (key id rotation via JWKS-style config). Claims: `iss`, `aud=appId`, `sub=userId`, `did=deviceId`, `ver=token_version`, `iat`, `exp`. Validity per app (default 90 days). Revocation: `device.revoked_at` or bumped `token_version`, checked with a short in-memory cache.
-- **Event authorisation:** `notification.app_id = jwt.aud AND notification.user_id = jwt.sub`, else `403` (counted, not detailed).
-- **Rate limiting:** Bucket4j in-memory token buckets per device and per app API key (defaults: device 60 req/min, sender key 6,000 req/min). Interface allows a shared store later.
+- **Device identity:** `IdentityVerifier` SPI. Default `OidcIdTokenVerifier` accepts RS256 and ES256 only, with keys taken only from the issuer's JWKS (never from token headers; `azp` is ignored by design), and validates `iss`, `aud`, `exp` (`iat`/`nbf` with 60 s skew); it maps a configured claim (default `sub`, at most 256 characters) to `userId`. ID tokens larger than 8 KB are rejected. The JWKS URL is `jwks-uri` or the `jwks_uri` of the discovery document; it must be https (http only when the issuer host is `localhost`/`127.0.0.1`); redirects are not followed. The key set is cached for 15 minutes, a token with an unknown `kid` may refresh it at most once per 30 s, stale keys keep being served during an identity provider outage, fetches have a 5 s deadline and a 64 KB limit. If no key set can be obtained, `POST /v1/devices` answers `503` with `Retry-After: 30`. Alternative `SignedGrantVerifier`: short-lived HS256 grant signed by the customer backend with a shared secret of at least 32 bytes; lifetime (`exp - iat`) at most 5 minutes, so a leaked grant can be replayed for at most about 7 minutes (no `jti` store).
+- **Device JWT:** ES256, signed with a backend key; keys are PEM pairs per `kid` (rotation: see §8). Claims: `iss`, `aud=appId`, `sub=userId`, `did=deviceId`, `ver=token_version`, `iat`, `exp`. Validity per app (default 90 days). Verification is strict (algorithm, `kid` from configuration only, single `aud`). Revocation: `device.revoked_at` or bumped `token_version`, checked with a short in-memory cache (`revocation-cache-ttl`, default 60 s).
+- **Event authorisation:** `notification.app_id = jwt.aud AND notification.user_id = jwt.sub`, else the event is reported per item as `FORBIDDEN` (another user's notification; logged as `authz.denied`) or `NOT_FOUND` (unknown id or another app) inside the `200` response (see §4.3).
+- **Rate limiting:** Bucket4j in-memory token buckets per `deviceId` and per app API key (defaults: device 60 req/min, sender key 6,000 req/min). Registration has no device token yet and is limited per user (`register:<appId>:<userHash>`, the device-per-minute limit), counted only after the credential was verified, so unauthenticated traffic cannot exhaust a legitimate user's bucket. Limits are per instance (N replicas allow N times the rate); per-IP limits for unauthenticated traffic belong at the ingress. Interface allows a shared store later.
 - **Webhook:** headers `X-RP-Timestamp`, `X-RP-Signature: v1=<hex HMAC-SHA256(secret, timestamp + "." + body)>`, `Idempotency-Key: <trackingId>`. Retries: max 5 attempts with exponential backoff between them (1, 2, 4, 8 min), configurable; per-attempt HTTP timeout 10 s. Only `2xx` is success; `4xx` other than `408/429` is final failure.
 - **Hygiene:** Bean Validation on all inputs, `fallback` payload ≤ 4 KB, request body ≤ 64 KB, no tokens or payloads in logs, TLS terminated at ingress.
 
@@ -184,10 +217,17 @@ in fallback.
 ```yaml
 reliable-push:
   device-token:
-    signing-key-ref: env:RP_DEVICE_JWT_KEY   # PEM, ES256
+    signing-keys:                             # ES256 (P-256) key pairs, PEM in environment variables
+      - kid: k1
+        private-key-pem-ref: env:RP_DEVICE_KEY_K1      # PKCS#8 ("BEGIN PRIVATE KEY")
+        public-key-pem-ref: env:RP_DEVICE_PUB_K1       # SPKI ("BEGIN PUBLIC KEY")
+    current-kid: k1                           # signs new tokens; older kids still verify
+    revocation-cache-ttl: 60s
   worker:
     poll-interval: 5s
-    batch-size: 100
+    batch-size: 100                         # rows per claim; a tick claims again while claims come back full (≤ lease/2)
+    max-concurrency: 100                    # webhook calls in flight per worker (default: batch-size)
+    lease: 2m
   retention-days: 30
   apps:
     shop:
@@ -199,6 +239,12 @@ reliable-push:
       fallback: { url: "https://fallback.example.com/hook", hmac-secret-ref: env:RP_SHOP_HOOK_SECRET, max-attempts: 5, trigger-window-minutes: 20 }
 ```
 
+Secret and key references are always `env:NAME`, read literally from the environment (no `${...}` indirection; inline
+secrets are rejected at startup). Generate a key pair with
+`openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -pkeyopt ec_param_enc:named_curve -out k1.pem` (private key, PKCS#8; `ec_param_enc:named_curve` is required with macOS LibreSSL 3.3.x, which otherwise writes explicit EC parameters that the backend rejects at startup)
+and `openssl pkey -in k1.pem -pubout -out k1.pub.pem`. Rotation: add a new pair, switch `current-kid`, keep the old pair
+until the longest `device-token-validity` has elapsed, then remove it. The full reference is `docs/operations.md`.
+
 ## 9. Operations
 
 - Java 21 (virtual threads), Spring Boot 4.x, Maven wrapper, Flyway, Actuator (`/actuator/health/{liveness,readiness}`), Micrometer Prometheus.
@@ -208,7 +254,7 @@ reliable-push:
 
 - **Framework:** Log4j 2 via `spring-boot-starter-log4j2` (Logback excluded); application code logs through the Log4j 2 API (or SLF4J bound to Log4j 2). Async loggers are not required; keep the default synchronous appender unless load tests show otherwise.
 - **Format:** profile-selected in `log4j2-spring.xml`:
-  - `json` (default in containers): one JSON object per line on stdout, `JsonTemplateLayout` with the bundled **Elastic Common Schema** template (`EcsLayout.json`), ready for Cloud Logging, OpenShift logging / EFK, Loki.
+  - `json` (default in containers): one JSON object per line on stdout, `JsonTemplateLayout` with the project template `log4j2/ecs-reliable-push.json`, derived from the bundled **Elastic Common Schema** `EcsLayout.json` (catalogue fields such as `event.action` and `rp.*` are top-level keys; any other ThreadContext entry goes under `labels.*`), ready for Cloud Logging, OpenShift logging / EFK, Loki.
   - `local`: `PatternLayout` `%d{ISO8601} %-5level [%t] %c{1.} [trace=%X{trace.id}] - %m%n%throwable`.
 - **Correlation:** a servlet filter reads the W3C `traceparent` header (or `X-Request-Id`), otherwise generates an id, puts it in the `ThreadContext` (`trace.id`) and returns it as `X-Request-Id`. The worker sets a new `trace.id` per claimed row and adds `rp.tracking_id`, so one notification can be followed across API and worker logs.
 - **Common fields** (ECS names, plus an `rp.*` namespace): `@timestamp`, `log.level`, `log.logger`, `message`, `service.name`, `service.version`, `trace.id`, `event.action`, `event.outcome` (`success|failure|unknown`), `event.duration` (ns), `http.request.method`, `url.path` (template, e.g. `/v1/notifications/{id}`), `http.response.status_code`, `rp.app_id`, `rp.tracking_id`, `rp.device_id`, `rp.user_hash` (truncated SHA-256 of `userId`; raw user ids are not logged).
@@ -222,9 +268,10 @@ reliable-push:
 | `device.registered` / `device.token_refreshed` / `device.revoked` | device API |
 | `tracking.event_accepted` (with `rp.event_type`, `rp.late`) / `tracking.event_ignored` (duplicate) | `/v1/events` |
 | `auth.failed` (WARN, reason code only) / `authz.denied` (WARN) / `rate_limit.exceeded` (WARN) | security filters |
-| `fallback.claimed` / `fallback.dispatched` / `fallback.retry_scheduled` / `fallback.failed` (WARN) / `fallback.expired` (WARN) / `fallback.reclaimed` (WARN, lease expired → previous worker crashed) | worker |
+| `fallback.claimed` / `fallback.dispatched` / `fallback.retry_scheduled` (WARN for an app missing from the configuration) / `fallback.failed` (WARN) / `fallback.expired` (WARN) / `fallback.reclaimed` (WARN, lease expired → previous worker crashed) | worker |
 | `retention.purged` | retention job (count only) |
 
+- `EventLog` throws only for programming errors (deny-listed keys such as `token`, `userId`, `message`, or keys reserved by the template); data-dependent conflicts (for example an `rp.*` field that differs from the ThreadContext value) never break a request: the ThreadContext value wins and a warning naming only the key goes to Log4j's status logger.
 - Levels: INFO for the catalogue, WARN for security and degraded outcomes, ERROR only for unexpected exceptions (with stack trace), DEBUG off by default. Log levels configurable at runtime via environment (`LOGGING_LEVEL_*`).
 
 ### 9.2 Dependency budget ("lightweight")
@@ -241,7 +288,7 @@ The backend, the sender client and the mobile SDKs avoid heavy frameworks. Any n
 Size targets (checked in CI from cycle 2/3): Android AAR < 100 KB, iOS framework < 300 KB; backend container image < 250 MB.
 
 Authentication filters are implemented as small servlet filters on top of `nimbus-jose-jwt` instead of Spring Security; they are covered by dedicated unit and integration tests and by the security reviewer role.
-- Container: distroless or UBI-minimal JRE, non-root, writable dirs only under `/tmp`, works with OpenShift arbitrary UIDs.
+- Container: a jlink-trimmed Temurin 21 JRE on a pinned Alpine (about 105 MB uncompressed; the budget is measured as the sum of the uncompressed layer sizes), non-root, writable dirs only under `/tmp`, works with OpenShift arbitrary UIDs.
 - Deploy: Helm chart (`deploy/helm/reliable-push`) with values for GKE and OpenShift (Route instead of Ingress, no fixed UID); separate `api`/`worker` deployments optional.
 
 ## 10. Testing strategy
@@ -282,7 +329,9 @@ tests only.
   simulator; those scenarios run against the same local harness.
 - **Fast clock:** the `e2e` and `demo` Spring profiles enable
   `reliable-push.testing.minute-duration` (e.g. `1s`), so a "10 minute" timeout
-  takes 10 s and the full suite runs in a few minutes. The property is rejected
+  takes 10 s and the full suite runs in a few minutes. It scales the notification timeout,
+  the trigger window, the webhook backoff and the worker lease alike; the webhook
+  `http-timeout` is a literal duration and is never scaled (outside the fast clock the lease must exceed it). The property is rejected
   at startup in any other profile, so it cannot leak into production. The same
   two profiles also write the backend JSON log to a shared volume for the
   harness (stdout logging is unchanged).

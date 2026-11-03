@@ -10,13 +10,13 @@ description: Java / Spring Boot conventions for the backend and harness.
 - Package by module: `notifications`, `devices`, `tracking`, `fallback`, `apps`, `shared`. Modules talk through public services/interfaces, not each other's repositories.
 - API contract first: update `backend/src/main/resources/openapi.yaml`, then code.
 - Persistence: PostgreSQL + Flyway + `JdbcClient` (no ORM) (`V<n>__<desc>.sql`). Never edit an applied migration.
-- Fallback scheduling: claim due rows with `SELECT ... FOR UPDATE SKIP LOCKED`; state changes are conditional updates (`WHERE state = 'PENDING'`).
+- Fallback scheduling: claim due rows with `SELECT ... FOR NO KEY UPDATE SKIP LOCKED`; state changes are conditional updates (`WHERE state = 'PENDING'`).
 - Tests: JUnit 5 + AssertJ for units; Testcontainers PostgreSQL and WireMock for integration (`*IT.java`). No mocking of the database.
 - Config via `@ConfigurationProperties` with validation; everything must run with `api`, `worker` or both profiles.
 - Container: non-root user, works with OpenShift arbitrary UIDs.
 
 ## Logging (spec §9.1)
-- Log4j 2 via `spring-boot-starter-log4j2` (exclude Logback). Profiles: `json` = ECS JSON (`JsonTemplateLayout` + `EcsLayout.json`), `local` = pattern layout.
+- Log4j 2 via `spring-boot-starter-log4j2` (exclude Logback). Profiles: `json` = ECS JSON (`JsonTemplateLayout` with the project template `log4j2/ecs-reliable-push.json`, derived from `EcsLayout.json`; catalogue fields top-level, other MDC under `labels.*`), `local` = pattern layout.
 - Every HTTP request emits `api.request`; every business and trigger step emits its catalogue `event.action` (see spec §9.1). Add new events to the catalogue in the spec first.
 - Correlation id in `ThreadContext` as `trace.id`; worker sets one per claimed row plus `rp.tracking_id`.
 - Never log keys, tokens, secrets, raw user ids (use `rp.user_hash`) or message content. Tests assert this.
