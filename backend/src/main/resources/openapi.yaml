@@ -149,8 +149,9 @@ paths:
       operationId: cancelNotification
       summary: Cancel a notification
       description: |
-        Only a notification in state `PENDING` or `DELIVERED` can be cancelled; it becomes `CANCELLED` and no
-        fallback is sent. Any other state (including an already cancelled one) is `409`.
+        Only an open notification (`closedAt` null) in state `PENDING` or `DELIVERED` can be cancelled; it becomes
+        `CANCELLED` and no fallback is sent. Any other state (including an already cancelled one) is `409`, and so is
+        a `DELIVERED` notification already closed by its `NOT_DELIVERED` policy.
       security:
         - SenderApiKey: []
       responses:

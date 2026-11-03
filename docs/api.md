@@ -88,8 +88,9 @@ curl -sS 'http://localhost:8080/v1/notifications?userId=user-42&state=FALLBACK_T
 
 ### `DELETE /v1/notifications/{trackingId}` — cancel
 
-Only `PENDING` and `DELIVERED` notifications can be cancelled: they become `CANCELLED` and no fallback is sent. `204`; any
-other state (including an already cancelled one) is `409`; unknown id or other app `404`.
+Only open `PENDING` and `DELIVERED` notifications can be cancelled: they become `CANCELLED` and no fallback is sent. `204`;
+any other state (including an already cancelled one) is `409`, and so is a `DELIVERED` notification whose policy
+`NOT_DELIVERED` is already satisfied (it is closed: `closedAt` set); unknown id or other app `404`.
 
 ```sh
 curl -sS -X DELETE http://localhost:8080/v1/notifications/6f1c2b9e-5d1a-4c55-9a38-0c1f3a7d9e11 -H "X-Api-Key: $RP_SENDER_KEY"

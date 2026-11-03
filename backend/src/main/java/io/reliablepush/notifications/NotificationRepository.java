@@ -112,16 +112,17 @@ public class NotificationRepository {
     }
 
     /**
-     * Cancels a notification of {@code appId} that is still {@code PENDING} or {@code DELIVERED}: state
-     * {@code CANCELLED}, {@code closed_at = at}, {@code due_at} cleared.
+     * Cancels a notification of {@code appId} that is still {@code PENDING} or {@code DELIVERED} and not closed: state
+     * {@code CANCELLED}, {@code closed_at = at}, {@code due_at} cleared. A {@code DELIVERED} row closed by its policy
+     * ({@code NOT_DELIVERED} satisfied) is final and keeps its outcome (spec 4.1: 409 if already closed).
      *
-     * @return {@code false} if no row matched (unknown id, other app, or a state that cannot be cancelled)
+     * @return {@code false} if no row matched (unknown id, other app, closed, or a state that cannot be cancelled)
      */
     public boolean cancel(UUID id, String appId, Instant at) {
         return jdbc.sql("""
                         update notification
                            set state = 'CANCELLED', closed_at = :at, due_at = null, next_attempt_at = null
-                         where id = :id and app_id = :appId and state in ('PENDING', 'DELIVERED')
+                         where id = :id and app_id = :appId and state in ('PENDING', 'DELIVERED') and closed_at is null
                         """)
                         .param("at", timestamp(at))
                         .param("id", id)

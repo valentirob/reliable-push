@@ -114,7 +114,7 @@ public class NotificationService {
     }
 
     /**
-     * Cancels a {@code PENDING} or {@code DELIVERED} notification. A missing notification, or one of another app, is
+     * Cancels a {@code PENDING} or {@code DELIVERED} notification that is not closed yet. A missing notification, or one of another app, is
      * {@link NotFoundException}; any other state is {@link ConflictException}.
      */
     public void cancel(String appId, UUID id) {

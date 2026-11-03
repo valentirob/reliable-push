@@ -487,6 +487,33 @@ class NotificationApiIT extends PostgresTestBase {
     }
 
     @Test
+    void cancelOfADeliveredRowClosedByItsPolicyIs409AndKeepsTheOutcome() {
+        // NOT_DELIVERED satisfied by the delivery: DELIVERED and already closed (spec 4.1: 409 if already closed)
+        String satisfied = register(uniqueUser());
+        jdbc.sql("""
+                        update notification set state = 'DELIVERED', delivered_at = now(), closed_at = now(), due_at = null
+                         where id = :id and policy = 'NOT_DELIVERED'
+                        """)
+                .param("id", UUID.fromString(satisfied))
+                .update();
+        String closedAt = jdbc.sql("select closed_at::text from notification where id = :id")
+                .param("id", UUID.fromString(satisfied))
+                .query(String.class)
+                .single();
+
+        assertProblem(delete(SHOP_KEY, BASE + "/" + satisfied), 409);
+
+        ResponseEntity<String> view = get(SHOP_KEY, BASE + "/" + satisfied);
+        assertThat(JsonPath.<String>read(view.getBody(), "$.state")).isEqualTo("DELIVERED");
+        assertThat(jdbc.sql("select closed_at::text from notification where id = :id")
+                        .param("id", UUID.fromString(satisfied))
+                        .query(String.class)
+                        .single())
+                .isNotNull()
+                .isEqualTo(closedAt);
+    }
+
+    @Test
     void cancelLogsEvent(CapturedOutput output) {
         String trackingId = register(uniqueUser());
 
