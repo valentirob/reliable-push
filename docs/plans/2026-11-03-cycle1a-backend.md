@@ -288,9 +288,9 @@ Expected: `openjdk version "21...` and a server version. Export `JAVA_HOME=/opt/
 
 **Interfaces:**
 - Produces: `RpMetrics` — `notificationRegistered()`, `event(EventType type, boolean late)`, `fallback(String outcome)` (`triggered|failed|expired`), `Timer webhookLatency()`, gauge `rp_due_backlog` (count of rows with `due_at <= now()`, refreshed every 30 s by worker).
-- [ ] **Step 1: Failing test** `exposesSpecMetrics()` — after one register, one DELIVERED event and one triggered fallback, `/actuator/prometheus` contains `rp_notifications_registered_total 1.0`, `rp_events_total{late="false",type="DELIVERED"} 1.0`, `rp_fallback_total{outcome="triggered"} 1.0`, `rp_webhook_latency_seconds_count`, `rp_due_backlog`.
-- [ ] **Step 2: Run** → FAIL. **Step 3: Implement.** **Step 4: Run** `./mvnw verify` → PASS.
-- [ ] **Step 5: Commit** `feat(backend): prometheus metrics`
+- [x] **Step 1: Failing test** `exposesSpecMetrics()` — after one register, one DELIVERED event and one triggered fallback, `/actuator/prometheus` contains `rp_notifications_registered_total 1.0`, `rp_events_total{late="false",type="DELIVERED"} 1.0`, `rp_fallback_total{outcome="triggered"} 1.0`, `rp_webhook_latency_seconds_count`, `rp_due_backlog`.
+- [x] **Step 2: Run** → FAIL. **Step 3: Implement.** **Step 4: Run** `./mvnw verify` → PASS.
+- [x] **Step 5: Commit** `feat(backend): prometheus metrics`
 
 ### Task 16: Container image
 

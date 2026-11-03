@@ -4,6 +4,7 @@ import io.reliablepush.apps.AppConfig;
 import io.reliablepush.apps.AppRegistry;
 import io.reliablepush.shared.logging.EventLog;
 import io.reliablepush.shared.logging.UserHash;
+import io.reliablepush.shared.metrics.RpMetrics;
 import io.reliablepush.shared.time.TimeScale;
 import io.reliablepush.shared.web.ConflictException;
 import io.reliablepush.shared.web.InvalidRequestException;
@@ -32,12 +33,15 @@ public class NotificationService {
     private final AppRegistry apps;
     private final TimeScale timeScale;
     private final Clock clock;
+    private final RpMetrics metrics;
 
-    public NotificationService(NotificationRepository repository, AppRegistry apps, TimeScale timeScale, Clock clock) {
+    public NotificationService(
+            NotificationRepository repository, AppRegistry apps, TimeScale timeScale, Clock clock, RpMetrics metrics) {
         this.repository = repository;
         this.apps = apps;
         this.timeScale = timeScale;
         this.clock = clock;
+        this.metrics = metrics;
     }
 
     /**
@@ -51,6 +55,7 @@ public class NotificationService {
         Notification notification = newNotification(UUID.randomUUID(), app, request, now, timeScale);
 
         if (repository.insert(notification)) {
+            metrics.notificationRegistered();
             logEvent("notification.registered", notification);
             return NotificationView.of(notification);
         }

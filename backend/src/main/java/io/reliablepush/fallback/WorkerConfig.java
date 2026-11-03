@@ -1,10 +1,10 @@
 package io.reliablepush.fallback;
 
-import io.micrometer.core.instrument.MeterRegistry;
 import io.reliablepush.apps.AppConfig;
 import io.reliablepush.apps.AppRegistry;
 import io.reliablepush.apps.ReliablePushProperties;
 import io.reliablepush.notifications.NotificationRepository;
+import io.reliablepush.shared.metrics.RpMetrics;
 import io.reliablepush.shared.time.TimeScale;
 import java.time.Clock;
 import java.time.Duration;
@@ -32,8 +32,8 @@ class WorkerConfig {
     /** The production webhook client; present wherever the fallback worker runs. Closed with the context. */
     @Bean
     HttpWebhookClient webhookClient(
-            Clock clock, JsonMapper json, MeterRegistry meters, @Value("${info.app.version:dev}") String version) {
-        return new HttpWebhookClient(clock, json, meters, version);
+            Clock clock, JsonMapper json, RpMetrics metrics, @Value("${info.app.version:dev}") String version) {
+        return new HttpWebhookClient(clock, json, metrics, version);
     }
 
     @Bean
@@ -45,14 +45,14 @@ class WorkerConfig {
             ReliablePushProperties properties,
             WebhookClient webhookClient,
             JsonMapper json,
-            MeterRegistry meters) {
+            RpMetrics metrics) {
         // the lease is a product duration (2 "minutes"): scaled by the fast clock like backoff and trigger window
         Duration lease = timeScale.scale(properties.worker().lease());
         boolean fastClock = !timeScale.minuteDuration().equals(Duration.ofMinutes(1));
         checkLease(lease, fastClock, apps.all()).ifPresent(LOG::warn);
 
         FallbackDispatcher dispatcher =
-                new FallbackDispatcher(notifications, apps, timeScale, clock, webhookClient, json, meters, lease);
+                new FallbackDispatcher(notifications, apps, timeScale, clock, webhookClient, json, metrics, lease);
         return new FallbackScheduler(notifications, dispatcher, clock, lease, properties.worker().batchSize());
     }
 

@@ -280,6 +280,21 @@ public class NotificationRepository {
     }
 
     /**
+     * The backlog of the fallback worker: the rows {@link #claimDue} would consider at {@code now} (same predicate,
+     * without lock or limit).
+     */
+    public long countDue(Instant now) {
+        return jdbc.sql("""
+                        select count(*) from notification
+                         where (state in ('PENDING', 'DELIVERED') and due_at <= :now)
+                            or (state = 'DISPATCHING' and next_attempt_at <= :now)
+                        """)
+                .param("now", timestamp(now))
+                .query(Long.class)
+                .single();
+    }
+
+    /**
      * Retention: deletes up to {@code chunk} closed rows whose {@code closed_at} is before {@code cutoff}, oldest
      * first (the events go with them, ON DELETE CASCADE). Rows with {@code closed_at} null are never matched. Uses the
      * partial index on {@code closed_at}.

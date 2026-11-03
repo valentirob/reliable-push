@@ -5,6 +5,7 @@ import io.reliablepush.notifications.Notification;
 import io.reliablepush.notifications.NotificationRepository;
 import io.reliablepush.shared.logging.EventLog;
 import io.reliablepush.shared.logging.UserHash;
+import io.reliablepush.shared.metrics.RpMetrics;
 import io.reliablepush.shared.security.DevicePrincipal;
 import io.reliablepush.tracking.EventBatchResult.ItemResult;
 import io.reliablepush.tracking.EventBatchResult.Outcome;
@@ -37,18 +38,21 @@ public class TrackingService {
     private final DeviceService devices;
     private final TransactionTemplate transactions;
     private final Clock clock;
+    private final RpMetrics metrics;
 
     TrackingService(
             NotificationRepository notifications,
             EventRepository events,
             DeviceService devices,
             TransactionTemplate transactions,
-            Clock clock) {
+            Clock clock,
+            RpMetrics metrics) {
         this.notifications = notifications;
         this.events = events;
         this.devices = devices;
         this.transactions = transactions;
         this.clock = clock;
+        this.metrics = metrics;
     }
 
     /**
@@ -63,6 +67,10 @@ public class TrackingService {
         List<ItemResult> results = new ArrayList<>(batch.size());
         for (DeviceEvent event : batch) {
             Outcome outcome = transactions.execute(status -> processOne(principal, event, receivedAt));
+            if (outcome == Outcome.ACCEPTED || outcome == Outcome.LATE) {
+                // counted once the item's transaction has committed, and only for stored rows (not DUPLICATE etc.)
+                metrics.event(event.type(), outcome == Outcome.LATE);
+            }
             log(principal, event, outcome);
             results.add(new ItemResult(event.trackingId(), outcome));
         }

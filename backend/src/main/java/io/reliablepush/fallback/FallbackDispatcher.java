@@ -1,6 +1,5 @@
 package io.reliablepush.fallback;
 
-import io.micrometer.core.instrument.MeterRegistry;
 import io.reliablepush.apps.AppConfig;
 import io.reliablepush.apps.AppRegistry;
 import io.reliablepush.fallback.FallbackDecision.Outcome;
@@ -9,6 +8,7 @@ import io.reliablepush.notifications.NotificationRepository;
 import io.reliablepush.notifications.NotificationState;
 import io.reliablepush.shared.logging.EventLog;
 import io.reliablepush.shared.logging.UserHash;
+import io.reliablepush.shared.metrics.RpMetrics;
 import io.reliablepush.shared.time.TimeScale;
 import java.time.Clock;
 import java.time.Duration;
@@ -55,7 +55,7 @@ final class FallbackDispatcher {
     private final Clock clock;
     private final WebhookClient webhook;
     private final JsonMapper json;
-    private final MeterRegistry meters;
+    private final RpMetrics metrics;
     private final Duration lease;
 
     FallbackDispatcher(
@@ -65,7 +65,7 @@ final class FallbackDispatcher {
             Clock clock,
             WebhookClient webhook,
             JsonMapper json,
-            MeterRegistry meters,
+            RpMetrics metrics,
             Duration lease) {
         this.notifications = notifications;
         this.apps = apps;
@@ -73,7 +73,7 @@ final class FallbackDispatcher {
         this.clock = clock;
         this.webhook = webhook;
         this.json = json;
-        this.meters = meters;
+        this.metrics = metrics;
         this.lease = lease;
     }
 
@@ -141,7 +141,7 @@ final class FallbackDispatcher {
                         f.put("http.response.status_code", success.status());
                     }
                     EventLog.info("fallback.dispatched", f);
-                    count("triggered");
+                    metrics.fallback("triggered");
                 }
             }
             case Outcome.Fail fail -> {
@@ -151,7 +151,7 @@ final class FallbackDispatcher {
                     f.put("event.duration", duration);
                     f.put("reason", reason(result));
                     EventLog.warn("fallback.failed", f);
-                    count("failed");
+                    metrics.fallback("failed");
                 }
             }
             case Outcome.RetryAt retry -> {
@@ -200,7 +200,7 @@ final class FallbackDispatcher {
             f.put("rp.attempt", attempts);
             f.put("reason", reason);
             EventLog.warn("fallback.expired", f);
-            count("expired");
+            metrics.fallback("expired");
         }
     }
 
@@ -240,11 +240,6 @@ final class FallbackDispatcher {
         f.put("rp.app_id", row.appId());
         f.put("rp.user_hash", UserHash.of(row.userId()));
         return f;
-    }
-
-    private void count(String outcome) {
-        // Task 15 moves this into RpMetrics
-        meters.counter("rp.fallback", "outcome", outcome).increment();
     }
 
     private Instant now() {

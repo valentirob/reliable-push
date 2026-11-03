@@ -1,8 +1,7 @@
 package io.reliablepush.fallback;
 
-import io.micrometer.core.instrument.MeterRegistry;
-import io.micrometer.core.instrument.Timer;
 import io.reliablepush.apps.AppConfig;
+import io.reliablepush.shared.metrics.RpMetrics;
 import java.io.IOException;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -39,18 +38,16 @@ public class HttpWebhookClient implements WebhookClient, AutoCloseable {
 
     private static final Logger LOG = LogManager.getLogger(HttpWebhookClient.class);
 
-    static final String LATENCY_TIMER = "rp.webhook.latency";
-
     private final Clock clock;
     private final JsonMapper json;
-    private final MeterRegistry meters;
+    private final RpMetrics metrics;
     private final String userAgent;
     private final Map<Duration, HttpClient> clients = new ConcurrentHashMap<>();
 
-    public HttpWebhookClient(Clock clock, JsonMapper json, MeterRegistry meters, String version) {
+    public HttpWebhookClient(Clock clock, JsonMapper json, RpMetrics metrics, String version) {
         this.clock = clock;
         this.json = json;
-        this.meters = meters;
+        this.metrics = metrics;
         this.userAgent = "reliable-push/" + version;
     }
 
@@ -85,7 +82,7 @@ public class HttpWebhookClient implements WebhookClient, AutoCloseable {
             Thread.currentThread().interrupt();
             return new WebhookResult.Retryable("interrupted");
         } finally {
-            Timer.builder(LATENCY_TIMER).register(meters).record(Duration.ofNanos(System.nanoTime() - started));
+            metrics.webhookLatency().record(Duration.ofNanos(System.nanoTime() - started));
         }
     }
 
