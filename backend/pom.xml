@@ -22,6 +22,7 @@
         <maven.compiler.release>21</maven.compiler.release>
         <wiremock.version>3.13.2</wiremock.version>
         <jacoco.version>0.8.16</jacoco.version>
+        <bucket4j.version>8.21.0</bucket4j.version>
     </properties>
 
     <dependencies>
@@ -96,6 +97,12 @@
         <dependency>
             <groupId>org.apache.logging.log4j</groupId>
             <artifactId>log4j-layout-template-json</artifactId>
+        </dependency>
+        <!-- in-memory token buckets for rate limiting (spec 9.2: Bucket4j core only, no Caffeine) -->
+        <dependency>
+            <groupId>com.bucket4j</groupId>
+            <artifactId>bucket4j_jdk17-core</artifactId>
+            <version>${bucket4j.version}</version>
         </dependency>
 
         <!-- test -->

@@ -151,11 +151,11 @@ Expected: `openjdk version "21...` and a server version. Export `JAVA_HOME=/opt/
   - `interface RateLimiter { boolean tryConsume(String bucketKey, int perMinute); long retryAfterSeconds(String bucketKey); }` — Bucket4j in-memory implementation `InMemoryRateLimiter` (Caffeine-free: `ConcurrentHashMap` with idle eviction every 10 min).
   - `RateLimitFilter` — keys `sender:<appId>` (after API-key filter) and `device:<deviceId>` (after device filter, Task 10); 429 problem with `Retry-After`, `rate_limit.exceeded` WARN.
   - `ProblemHandler` — `@RestControllerAdvice` mapping: `MethodArgumentNotValidException`/`ConstraintViolationException` → 422, payload too large → 413, `NotFoundException` → 404, `ConflictException` → 409, `ForbiddenException` → 403 (defined in `shared/web`), all as `ProblemDetail`.
-- [ ] **Step 1: Failing tests**
+- [x] **Step 1: Failing tests**
   - `RateLimiterTest.allowsUpToLimitThenRejects()` — 60/min: 60 × true, 61st false, `retryAfterSeconds` in `1..60`.
   - `SenderApiKeyIT.missingKey401()`, `.unknownKey401()` (both `application/problem+json`, `auth.failed` logged without the key value — assert raw key absent from captured logs), `.validKeyPasses()` (GET `/v1/notifications/<random uuid>` → 404, not 401), `.rateLimited429()` (app with `sender-per-minute: 2` in test config → third call 429 with `Retry-After`), `.bodyOver64KbIs413()` (POST `/v1/notifications` with a 65 KB body → 413 problem).
-- [ ] **Step 2: Run** → FAIL. **Step 3: Implement.** **Step 4: Run** `./mvnw verify` → PASS.
-- [ ] **Step 5: Commit** `feat(backend): sender api key auth, rate limiting, problem details`
+- [x] **Step 2: Run** → FAIL. **Step 3: Implement.** **Step 4: Run** `./mvnw verify` → PASS.
+- [x] **Step 5: Commit** `feat(backend): sender api key auth, rate limiting, problem details`
 
 ### Task 7: Notifications module (sender API, contract-first)
 

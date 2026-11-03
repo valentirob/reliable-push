@@ -15,8 +15,8 @@ spring:
 
 server:
   tomcat:
-    # JSON request bodies are limited to 64 KB by a filter added in the sender-API task
-    # (plan Task 6, test bodyOver64KbIs413); this only bounds how much Tomcat swallows of an aborted upload.
+    # JSON request bodies are limited to 64 KB by BodySizeLimitFilter (/v1/**);
+    # this only bounds how much Tomcat swallows of an upload the filter rejected unread.
     max-swallow-size: 64KB
 
 management:

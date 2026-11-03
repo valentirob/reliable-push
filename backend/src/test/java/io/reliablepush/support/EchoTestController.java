@@ -1,0 +1,52 @@
+package io.reliablepush.support;
+
+import io.reliablepush.shared.web.ConflictException;
+import io.reliablepush.shared.web.ForbiddenException;
+import io.reliablepush.shared.web.NotFoundException;
+import jakarta.validation.ConstraintViolationException;
+import jakarta.validation.Valid;
+import jakarta.validation.Validation;
+import jakarta.validation.constraints.NotBlank;
+import java.util.Map;
+import org.springframework.http.MediaType;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+/**
+ * Test-only endpoints under the sender-API prefix, so the body-size limit, the sender filters and the problem
+ * mapping can be exercised before the real notifications controller exists.
+ */
+@RestController
+@RequestMapping("/v1/notifications/_test-echo")
+class EchoTestController {
+
+    record Probe(@NotBlank String name) {}
+
+    /** Reads (and thereby consumes) the JSON body. */
+    @PostMapping(consumes = MediaType.APPLICATION_JSON_VALUE)
+    Map<String, Integer> echo(@RequestBody Map<String, Object> body) {
+        return Map.of("fields", body.size());
+    }
+
+    @PostMapping(path = "/validated", consumes = MediaType.APPLICATION_JSON_VALUE)
+    Map<String, String> validated(@Valid @RequestBody Probe probe) {
+        return Map.of("name", probe.name());
+    }
+
+    @GetMapping("/throw/{kind}")
+    void fail(@PathVariable String kind) {
+        switch (kind) {
+            case "not-found" -> throw new NotFoundException("no such thing");
+            case "conflict" -> throw new ConflictException("wrong state");
+            case "forbidden" -> throw new ForbiddenException("not yours");
+            case "constraint" -> throw new ConstraintViolationException(Validation.buildDefaultValidatorFactory()
+                    .getValidator()
+                    .validate(new Probe("")));
+            default -> throw new IllegalArgumentException(kind);
+        }
+    }
+}
