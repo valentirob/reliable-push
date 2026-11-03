@@ -53,7 +53,8 @@ class WorkerConfig {
 
         FallbackDispatcher dispatcher =
                 new FallbackDispatcher(notifications, apps, timeScale, clock, webhookClient, json, metrics, lease);
-        return new FallbackScheduler(notifications, dispatcher, clock, lease, properties.worker().batchSize());
+        return new FallbackScheduler(notifications, dispatcher, clock, lease, properties.worker().batchSize(),
+                properties.worker().maxConcurrency());
     }
 
     /**

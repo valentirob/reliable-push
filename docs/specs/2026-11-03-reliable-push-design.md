@@ -225,7 +225,8 @@ reliable-push:
     revocation-cache-ttl: 60s
   worker:
     poll-interval: 5s
-    batch-size: 100
+    batch-size: 100                         # rows per claim; a tick claims again while claims come back full (≤ lease/2)
+    max-concurrency: 100                    # webhook calls in flight per worker (default: batch-size)
     lease: 2m
   retention-days: 30
   apps:

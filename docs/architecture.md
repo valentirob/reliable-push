@@ -87,7 +87,9 @@ request body and is rate limited per user after that check.
 
 ### Claim
 
-Every `poll-interval` (default 5 s) the scheduler claims up to `batch-size` rows with one statement, in one transaction:
+Every `poll-interval` (default 5 s) a tick of the scheduler claims due rows, each claim one statement in one transaction
+taking at most `min(batch-size, free slots)` rows (at most `max-concurrency` webhook calls are in flight). The tick keeps
+claiming while claims come back full, for at most half the lease, so a backlog drains at the receivers' speed:
 
 ```sql
 with due as (
@@ -106,7 +108,8 @@ update notification n set state = 'DISPATCHING', next_attempt_at = :leaseUntil, 
   the row, so a device event racing with the claim is decided by the conditional updates: exactly one of "policy
   satisfied" and "fallback claimed" wins.
 - Each claimed row is processed on its own virtual thread, outside any transaction (no row lock is held during the HTTP
-  call); the tick returns when all rows of the batch are done. Each row gets a fresh `trace.id` and `rp.tracking_id`.
+  call); a new claim starts as soon as a slot is free, and the tick returns when all its rows are done (ticks of one
+  instance never overlap). Each row gets a fresh `trace.id` and `rp.tracking_id`.
 
 ### Lease
 

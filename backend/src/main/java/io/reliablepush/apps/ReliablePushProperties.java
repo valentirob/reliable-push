@@ -72,10 +72,22 @@ public record ReliablePushProperties(
     /** A P-256 key pair: {@code private-key-pem-ref} is PKCS#8, {@code public-key-pem-ref} is SPKI; both {@code env:NAME}. */
     public record SigningKey(@NotBlank String kid, @NotBlank String privateKeyPemRef, @NotBlank String publicKeyPemRef) {}
 
+    /**
+     * {@code batchSize} bounds one claim, {@code maxConcurrency} the webhook calls in flight (default: the batch size).
+     * A tick keeps claiming while claims come back full, for at most half the lease.
+     */
     public record Worker(
             @DefaultValue("5s") @NotNull Duration pollInterval,
             @DefaultValue("100") @Min(1) @Max(10_000) int batchSize,
-            @DefaultValue("2m") @DurationUnit(ChronoUnit.MINUTES) @NotNull Duration lease) {}
+            @DefaultValue("2m") @DurationUnit(ChronoUnit.MINUTES) @NotNull Duration lease,
+            @Min(1) @Max(10_000) Integer maxConcurrency) {
+
+        public Worker {
+            if (maxConcurrency == null) {
+                maxConcurrency = batchSize;
+            }
+        }
+    }
 
     /** {@code minuteDuration} is null unless the fast clock is requested; allowed only in profiles e2e or demo. */
     public record Testing(@Nullable Duration minuteDuration) {}

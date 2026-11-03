@@ -216,6 +216,20 @@ class ReliablePushPropertiesTest {
     }
 
     @Test
+    void workerMaxConcurrencyDefaultsToTheBatchSizeAndMustBePositive() {
+        Map<String, Object> p = AppFixtures.minimalApp("shop", "k-123");
+
+        runner.withPropertyValues(asProperties(p)).withPropertyValues("reliable-push.worker.batch-size=40").run(context ->
+                assertThat(context.getBean(ReliablePushProperties.class).worker().maxConcurrency()).isEqualTo(40));
+        runner.withPropertyValues(asProperties(p)).withPropertyValues("reliable-push.worker.max-concurrency=7").run(context ->
+                assertThat(context.getBean(ReliablePushProperties.class).worker().maxConcurrency()).isEqualTo(7));
+        runner.withPropertyValues(asProperties(p)).withPropertyValues("reliable-push.worker.max-concurrency=0").run(context -> {
+            assertThat(context).hasFailed();
+            assertThat(rootMessage(context.getStartupFailure())).contains("maxConcurrency");
+        });
+    }
+
+    @Test
     void zeroAppsFailTheStart() {
         runner.run(context -> {
             assertThat(context).hasFailed();

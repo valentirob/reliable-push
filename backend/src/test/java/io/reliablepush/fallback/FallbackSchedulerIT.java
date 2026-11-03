@@ -67,6 +67,9 @@ import org.springframework.test.context.TestPropertySource;
     "reliable-push.testing.minute-duration=1s",
     // the test calls tick() itself; the scheduled poll (first run after one interval) never fires during the class
     "reliable-push.worker.poll-interval=1d",
+    // small claims, fewer webhook calls in flight than one claim: the drain loop and its bound are exercised
+    "reliable-push.worker.batch-size=" + FallbackSchedulerIT.BATCH,
+    "reliable-push.worker.max-concurrency=" + FallbackSchedulerIT.MAX_CONCURRENCY,
     "reliable-push.apps.fbit.sender-api-key-sha256=a2cd39316c98ea096773f14854fd45f790f78b9df744dc4be3555cd2f662ba99",
     "reliable-push.apps.fbit.identity.type=oidc",
     "reliable-push.apps.fbit.identity.issuer=https://idp.test.example",
@@ -85,6 +88,8 @@ import org.springframework.test.context.TestPropertySource;
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 class FallbackSchedulerIT extends PostgresTestBase {
 
+    static final int BATCH = 4;
+    static final int MAX_CONCURRENCY = 3;
     private static final String APP = "fbit";
     private static final String RACE_APP = "fbrace";
     private static final Instant T0 = Instant.parse("2100-01-01T00:00:00Z");
@@ -282,6 +287,66 @@ class FallbackSchedulerIT extends PostgresTestBase {
     }
 
     // ---- tests -------------------------------------------------------------------------------------------------
+
+    @Test
+    void backlogLargerThanTheBatchIsDispatchedInOneTickExactlyOnce() {
+        scheduler.tick(); // leftovers of other tests out of the way
+        Instant due = now().minusSeconds(1);
+        List<UUID> ids = new ArrayList<>();
+        for (int i = 0; i < 3 * BATCH + 1; i++) {
+            ids.add(insert(FallbackPolicy.NOT_DELIVERED, due));
+        }
+        AtomicInteger inFlight = new AtomicInteger();
+        AtomicInteger maxInFlight = new AtomicInteger();
+        ids.forEach(id -> webhook.script.put(id, call -> {
+            maxInFlight.accumulateAndGet(inFlight.incrementAndGet(), Math::max);
+            try {
+                Thread.sleep(30);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            inFlight.decrementAndGet();
+            return new WebhookResult.Success(200);
+        }));
+
+        int claimed = scheduler.tick();
+
+        assertThat(claimed).isEqualTo(ids.size());
+        assertThat(ids).allSatisfy(id -> {
+            assertThat(webhook.count(id)).isEqualTo(1);
+            assertClosed(id, NotificationState.FALLBACK_TRIGGERED);
+        });
+        // in parallel, but never more calls in flight than max-concurrency
+        assertThat(maxInFlight.get()).isBetween(2, MAX_CONCURRENCY);
+        assertThat(scheduler.tick()).isZero();
+    }
+
+    @Test
+    void oneTickStopsClaimingAfterHalfTheLease() {
+        scheduler.tick(); // leftovers of other tests out of the way
+        Instant due = now().minusSeconds(1);
+        List<UUID> ids = new ArrayList<>();
+        for (int i = 0; i < 3 * BATCH; i++) {
+            ids.add(insert(FallbackPolicy.NOT_DELIVERED, due));
+        }
+        // every call takes one product minute = half the lease (2 product minutes)
+        ids.forEach(id -> webhook.script.put(id, call -> {
+            clock.advance(minutes(1));
+            return new WebhookResult.Success(200);
+        }));
+
+        int first = scheduler.tick();
+
+        // the first claim (as many rows as calls may run at once) is dispatched; the next claim would start after
+        // half the lease has passed, so the tick ends and the poll interval passes before the next one
+        assertThat(first).isEqualTo(MAX_CONCURRENCY);
+        assertThat(ids.stream().filter(id -> webhook.count(id) == 1)).hasSize(MAX_CONCURRENCY);
+        int total = first;
+        for (int tick = 0; tick < ids.size() && total < ids.size(); tick++) {
+            total += scheduler.tick();
+        }
+        assertThat(ids).allSatisfy(id -> assertThat(webhook.count(id)).isEqualTo(1));
+    }
 
     @Test
     void notDeliveredFiresExactlyOnce() {

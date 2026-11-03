@@ -57,7 +57,8 @@ says so (minutes for `worker.lease` and `fallback.backoff`, days for `device-tok
 | `device-token.current-kid` | none | Required when keys exist; must be one of the `kid`s. Signs new tokens; every configured kid still verifies |
 | `device-token.revocation-cache-ttl` | `60s` | How long a "device is active" answer is cached per instance (revocation latency on other instances) |
 | `worker.poll-interval` | `5s` | Time between fallback claim ticks |
-| `worker.batch-size` | `100` | 1-10000 rows claimed per tick (each on its own virtual thread) |
+| `worker.batch-size` | `100` | 1-10000; at most this many rows per claim. A tick keeps claiming while claims come back full, for up to half the lease |
+| `worker.max-concurrency` | `batch-size` | 1-10000; webhook calls in flight per worker instance (one virtual thread each). A row is claimed only when a slot is free |
 | `worker.lease` | `2m` | A product duration (scaled by the fast clock); a bare number means minutes. Must be longer than every app's `fallback.http-timeout`; otherwise startup fails (a warning only with the fast clock) |
 | `worker.backlog-refresh-interval` | `30s` | Optional; how often `rp_due_backlog` is recomputed |
 | `retention-days` | `30` | At least 1. Closed notifications older than this are deleted daily |
@@ -223,11 +224,22 @@ is harmless. It logs `retention.purged` with the count. Devices are not purged b
   request` with headroom (10 connections at ~5 ms each serve about 2,000 requests/s), and keep
   `replicas × maximum-pool-size` (plus the worker replicas' pools) below PostgreSQL `max_connections`. Frequent 503s with a
   healthy database mean the pool is too small or the replicas too few.
-- **Database pool vs. worker batch:** every claimed row runs on its own virtual thread (up to `batch-size`). The webhook
-  call holds no database connection, but writing the outcome needs one, so a batch of 100 rows can queue behind Spring's
-  default Hikari pool of 10 connections (default wait 30 s). Raise `SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE` (check
-  PostgreSQL `max_connections` times the number of replicas) or lower `batch-size`. A slow receiver occupies virtual
-  threads, not connections; one tick lasts about one `http-timeout` at most.
+- **Database pool vs. worker batch:** every claimed row runs on its own virtual thread (up to `max-concurrency` at a
+  time). The webhook call holds no database connection, but writing the outcome needs one, so up to `max-concurrency`
+  rows can queue behind the Hikari pool (default 10 connections). A row that waits longer than `connection-timeout`
+  (5 s) fails that write, is logged at ERROR and is re-sent after its lease, so on worker replicas raise
+  `SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE` towards `max-concurrency / 10` or more (each write takes milliseconds;
+  check PostgreSQL `max_connections` times the number of replicas), or lower `max-concurrency`. A slow receiver occupies
+  virtual threads, not connections.
+- **Worker throughput:** one tick claims for up to `lease / 2` (1 minute by default) while claims come back full, then
+  waits for its calls in flight (at most one `http-timeout`) and the `poll-interval`. While a backlog lasts, one worker
+  replica dispatches about `max-concurrency / average webhook latency` rows per second, times the duty cycle
+  `(lease/2) / (lease/2 + http-timeout + poll-interval)` (about 80 % with the defaults). Examples with the defaults
+  (`max-concurrency` 100): a 200 ms receiver gives about 400 rows/s, so a 90,000-row campaign that falls due at once
+  is dispatched in about 4 minutes; a 2 s receiver gives about 40 rows/s, about 38 minutes, which is longer than the
+  20-minute trigger window, so most of it would expire. Size for `backlog / (rows per second x replicas)` well inside
+  `trigger-window-minutes`: raise `max-concurrency` (and the receiver's capacity), add worker replicas, or both.
+  `rp_due_backlog` shows how far behind the workers are.
 - **Crash re-sends:** if a worker dies after the receiver accepted a call but before the outcome was written, another
   worker re-sends once after the lease ends. Such re-sends are not counted against `max-attempts`. Receivers must
   de-duplicate on `Idempotency-Key` ([integration-guide.md](integration-guide.md)).
