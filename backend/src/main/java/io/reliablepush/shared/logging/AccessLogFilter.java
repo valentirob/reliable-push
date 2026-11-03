@@ -7,6 +7,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
+import org.apache.logging.log4j.status.StatusLogger;
 import org.springframework.web.filter.OncePerRequestFilter;
 import org.springframework.web.servlet.HandlerMapping;
 
@@ -23,20 +24,31 @@ public class AccessLogFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws ServletException, IOException {
         long start = System.nanoTime();
-        Integer failedStatus = null;
         try {
             chain.doFilter(request, response);
         } catch (ServletException | IOException | RuntimeException e) {
             // the container turns this into a 500 only after the filter chain has unwound
-            failedStatus = HttpServletResponse.SC_INTERNAL_SERVER_ERROR;
+            try {
+                log(request, response, HttpServletResponse.SC_INTERNAL_SERVER_ERROR, System.nanoTime() - start);
+            } catch (RuntimeException loggingFailure) {
+                // the original exception must reach the container unchanged
+                e.addSuppressed(loggingFailure);
+            }
             throw e;
-        } finally {
-            log(request, response, failedStatus, System.nanoTime() - start);
+        }
+        logSafely(request, response, response.getStatus(), System.nanoTime() - start);
+    }
+
+    /** Logging must never break request handling: a failure here is reported to Log4j's status logger only. */
+    private void logSafely(HttpServletRequest request, HttpServletResponse response, int status, long nanos) {
+        try {
+            log(request, response, status, nanos);
+        } catch (RuntimeException e) {
+            StatusLogger.getLogger().error("api.request access log failed", e);
         }
     }
 
-    private static void log(HttpServletRequest request, HttpServletResponse response, Integer failedStatus, long nanos) {
-        int status = failedStatus != null ? failedStatus : response.getStatus();
+    private void log(HttpServletRequest request, HttpServletResponse response, int status, long nanos) {
         Map<String, Object> fields = new HashMap<>();
         fields.put("http.request.method", request.getMethod());
         fields.put("url.path", pathOf(request));
@@ -47,6 +59,11 @@ public class AccessLogFilter extends OncePerRequestFilter {
         if (appId != null) {
             fields.put("rp.app_id", appId.toString());
         }
+        emit(fields);
+    }
+
+    /** Seam for tests: writes the {@code api.request} event. */
+    void emit(Map<String, Object> fields) {
         EventLog.info("api.request", fields);
     }
 

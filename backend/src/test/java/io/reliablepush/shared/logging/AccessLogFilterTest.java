@@ -5,7 +5,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import jakarta.servlet.FilterChain;
+import java.util.Map;
+import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.ThreadContext;
+import org.apache.logging.log4j.status.StatusLogger;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -98,5 +101,44 @@ class AccessLogFilterTest {
         assertThat(data(capture.only()))
                 .containsEntry("event.outcome", "failure")
                 .containsEntry("http.response.status_code", 500);
+    }
+
+    /** Filter whose event writing fails, to prove that logging never breaks request handling. */
+    private static final class FailingAccessLogFilter extends AccessLogFilter {
+        @Override
+        void emit(Map<String, Object> fields) {
+            throw new IllegalStateException("log pipeline down");
+        }
+    }
+
+    @Test
+    void loggingFailureDoesNotChangeSuccessfulResponse() throws Exception {
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        StatusLogger statusLogger = StatusLogger.getLogger();
+        Level original = statusLogger.getLevel();
+        statusLogger.setLevel(Level.OFF); // the expected failure report would only clutter the test output
+        try {
+            new FailingAccessLogFilter().doFilter(new MockHttpServletRequest("GET", "/x"), response, (req, res) -> {
+                ((MockHttpServletResponse) res).setStatus(200);
+            });
+        } finally {
+            statusLogger.setLevel(original);
+        }
+
+        assertThat(response.getStatus()).isEqualTo(200);
+    }
+
+    @Test
+    void loggingFailureDoesNotMaskChainException() {
+        IllegalArgumentException original = new IllegalArgumentException("original failure");
+        FilterChain chain = (req, res) -> {
+            throw original;
+        };
+
+        assertThatThrownBy(() -> new FailingAccessLogFilter()
+                        .doFilter(new MockHttpServletRequest("GET", "/x"), new MockHttpServletResponse(), chain))
+                .isSameAs(original)
+                .hasMessage("original failure")
+                .hasSuppressedException(new IllegalStateException("log pipeline down"));
     }
 }

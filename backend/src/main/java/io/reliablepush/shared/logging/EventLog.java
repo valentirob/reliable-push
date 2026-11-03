@@ -8,6 +8,7 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.logging.log4j.ThreadContext;
 import org.apache.logging.log4j.message.MapMessage;
+import org.apache.logging.log4j.status.StatusLogger;
 
 /**
  * Emits the catalogue events of spec 9.1. Every event is a Log4j {@link MapMessage} whose entries
@@ -46,14 +47,16 @@ public final class EventLog {
 
     /**
      * Each JSON key must appear once per line (duplicate names are undefined in RFC 8259 and strict
-     * ingesters drop the line). Rules, enforced before anything is logged:
+     * ingesters drop the line). Logging must never break request handling, so only static programming
+     * errors throw:
      * <ul>
      *   <li>keys of the deny-list, and keys fixed by the template ({@code log.level}, {@code trace.id},
      *       {@code error.*}, {@code labels.*}, ...), are rejected with {@link IllegalArgumentException};</li>
      *   <li>an {@code rp.*} field that the ThreadContext already holds with an equal value is not repeated
      *       (the context renders it);</li>
-     *   <li>an {@code rp.*} field whose value differs from the ThreadContext one is ambiguous and is
-     *       rejected with {@link IllegalArgumentException} (fail fast rather than silently pick one).</li>
+     *   <li>an {@code rp.*} field whose value differs from the ThreadContext one is data dependent, so it
+     *       never throws: the ThreadContext value wins, the explicit field is dropped, and a warning naming
+     *       only the key goes to Log4j's StatusLogger.</li>
      * </ul>
      */
     private static void log(Level level, String action, Map<String, ?> fields) {
@@ -82,7 +85,7 @@ public final class EventLog {
         return RESERVED_KEYS.contains(key) || RESERVED_PREFIXES.stream().anyMatch(key::startsWith);
     }
 
-    /** True when the ThreadContext already renders this key with the same value; throws if it differs. */
+    /** True when the ThreadContext already renders this key, so the explicit field must be dropped. */
     private static boolean repeatsContext(String key, Object value) {
         if (!key.startsWith(CONTEXT_PREFIX)) {
             return false;
@@ -91,10 +94,12 @@ public final class EventLog {
         if (inContext == null) {
             return false;
         }
-        if (inContext.equals(String.valueOf(value))) {
-            return true;
+        if (!inContext.equals(String.valueOf(value))) {
+            // never log the values: they may be identifiers
+            StatusLogger.getLogger()
+                    .warn("Event field {} differs from the ThreadContext value; keeping the ThreadContext value", key);
         }
-        throw new IllegalArgumentException("Field conflicts with a different ThreadContext value: " + key);
+        return true;
     }
 
     /** MapMessage whose human-readable form is just the action; typed values stay typed in JSON. */

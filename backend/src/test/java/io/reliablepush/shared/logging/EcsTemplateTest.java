@@ -79,6 +79,20 @@ class EcsTemplateTest {
         }
     }
 
+    @Test
+    void conflictingContextAndFieldRenderOnceWithContextValue() {
+        ThreadContext.put("rp.tracking_id", "ctx");
+        try (EventCapture capture = new EventCapture()) {
+            EventLog.info("fallback.claimed", Map.of("rp.tracking_id", "field"));
+            String line = render(capture.only().getMessage(), ThreadContext.getImmutableContext());
+
+            assertThat(occurrences(line, "\"rp.tracking_id\":")).isEqualTo(1);
+            assertThat(JsonPath.<String>read(line, "$['rp.tracking_id']")).isEqualTo("ctx");
+        } finally {
+            ThreadContext.clearMap();
+        }
+    }
+
     private static int occurrences(String text, String needle) {
         int count = 0;
         for (int i = text.indexOf(needle); i >= 0; i = text.indexOf(needle, i + 1)) {

@@ -115,11 +115,12 @@ class EventLogTest {
     }
 
     @Test
-    void rejectsContextFieldWithDifferentValue() {
+    void contextValueWinsWithoutThrowingWhenFieldDiffers() {
         ThreadContext.put("rp.tracking_id", "t1");
 
-        assertThatThrownBy(() -> EventLog.info("fallback.claimed", Map.of("rp.tracking_id", "t2")))
-                .isInstanceOf(IllegalArgumentException.class);
-        assertThat(capture.events()).isEmpty();
+        EventLog.info("fallback.claimed", Map.of("rp.tracking_id", "t2"));
+
+        // dropped from the event, so the single rendered key carries the ThreadContext value
+        assertThat(data(capture.only())).doesNotContainKey("rp.tracking_id");
     }
 }
