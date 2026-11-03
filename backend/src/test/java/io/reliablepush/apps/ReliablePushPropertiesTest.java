@@ -1,0 +1,219 @@
+package io.reliablepush.apps;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+import java.time.Duration;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.function.Consumer;
+import org.junit.jupiter.api.Test;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Import;
+
+class ReliablePushPropertiesTest {
+
+    @Configuration(proxyBeanMethods = false)
+    @EnableConfigurationProperties(ReliablePushProperties.class)
+    @Import(AppRegistry.class)
+    static class Config {}
+
+    private final ApplicationContextRunner runner = new ApplicationContextRunner()
+            .withUserConfiguration(Config.class)
+            .withPropertyValues(AppFixtures.HOOK_SECRET_ENV + "=generated-test-hook-secret");
+
+    private String[] asProperties(Map<String, Object> map) {
+        return map.entrySet().stream().map(e -> e.getKey() + "=" + e.getValue()).toArray(String[]::new);
+    }
+
+    private Map<String, Object> shop(Consumer<Map<String, Object>> customizer) {
+        Map<String, Object> p = new HashMap<>(AppFixtures.minimalApp("shop", "k-123"));
+        customizer.accept(p);
+        return p;
+    }
+
+    private static final String SHOP = "reliable-push.apps.shop.";
+
+    @Test
+    void rejectsWindowShorterThanBackoff() {
+        Map<String, Object> p = shop(m -> {
+            m.put(SHOP + "fallback.backoff", "1m,2m,4m,8m");
+            m.put(SHOP + "fallback.trigger-window-minutes", "14");
+        });
+
+        runner.withPropertyValues(asProperties(p)).run(context -> {
+            assertThat(context).hasFailed();
+            assertThat(rootMessage(context.getStartupFailure())).contains("trigger-window-minutes");
+        });
+    }
+
+    @Test
+    void acceptsWindowEqualToCumulativeBackoff() {
+        Map<String, Object> p = shop(m -> {
+            m.put(SHOP + "fallback.backoff", "1m,2m,4m,8m");
+            m.put(SHOP + "fallback.trigger-window-minutes", "15");
+        });
+
+        runner.withPropertyValues(asProperties(p)).run(context -> assertThat(context).hasNotFailed());
+    }
+
+    @Test
+    void shortBackoffListRepeatsItsLastDelay() {
+        // 5 attempts = 4 gaps: 1m + 2m + 2m + 2m = 7m
+        Map<String, Object> p = shop(m -> {
+            m.put(SHOP + "fallback.backoff", "1m,2m");
+            m.put(SHOP + "fallback.trigger-window-minutes", "6");
+        });
+
+        runner.withPropertyValues(asProperties(p)).run(context -> {
+            assertThat(context).hasFailed();
+            assertThat(rootMessage(context.getStartupFailure())).contains("trigger-window-minutes");
+        });
+    }
+
+    @Test
+    void defaultsApplied() {
+        runner.withPropertyValues(asProperties(AppFixtures.minimalApp("shop", "k-123"))).run(context -> {
+            assertThat(context).hasNotFailed();
+            AppConfig app = context.getBean(AppRegistry.class).byId("shop").orElseThrow();
+            assertThat(app.deviceTokenValidity()).isEqualTo(Duration.ofDays(90));
+            assertThat(app.defaultTimeoutMinutes()).isEqualTo(10);
+            assertThat(app.defaultPolicy()).isEqualTo("NOT_DELIVERED");
+            assertThat(app.identity().userClaim()).isEqualTo("sub");
+            assertThat(app.fallback().maxAttempts()).isEqualTo(5);
+            assertThat(app.fallback().triggerWindowMinutes()).isEqualTo(20);
+            assertThat(app.fallback().backoff())
+                    .containsExactly(Duration.ofMinutes(1), Duration.ofMinutes(2), Duration.ofMinutes(4), Duration.ofMinutes(8));
+            assertThat(app.fallback().httpTimeout()).isEqualTo(Duration.ofSeconds(10));
+            assertThat(app.rateLimits().devicePerMinute()).isEqualTo(60);
+            assertThat(app.rateLimits().senderPerMinute()).isEqualTo(6000);
+
+            ReliablePushProperties props = context.getBean(ReliablePushProperties.class);
+            assertThat(props.retentionDays()).isEqualTo(30);
+            assertThat(props.worker().pollInterval()).isEqualTo(Duration.ofSeconds(5));
+            assertThat(props.worker().batchSize()).isEqualTo(100);
+            assertThat(props.worker().lease()).isEqualTo(Duration.ofMinutes(2));
+            assertThat(props.deviceToken().revocationCacheTtl()).isEqualTo(Duration.ofSeconds(60));
+            assertThat(props.testing().minuteDuration()).isNull();
+        });
+    }
+
+    @Test
+    void startsWithoutAnyReliablePushConfiguration() {
+        runner.run(context -> {
+            assertThat(context).hasNotFailed();
+            assertThat(context.getBean(AppRegistry.class).all()).isEmpty();
+        });
+    }
+
+    @Test
+    void rejectsInlineSecretWithoutEchoingIt() {
+        Map<String, Object> p = shop(m -> m.put(SHOP + "fallback.hmac-secret-ref", "super-secret-inline-value"));
+
+        runner.withPropertyValues(asProperties(p)).run(context -> {
+            assertThat(context).hasFailed();
+            String message = rootMessage(context.getStartupFailure());
+            assertThat(message).contains("hmac-secret-ref").contains("env:");
+            assertThat(message).doesNotContain("super-secret-inline-value");
+        });
+    }
+
+    @Test
+    void rejectsReferenceToUnsetEnvironmentVariable() {
+        Map<String, Object> p = shop(m -> m.put(SHOP + "fallback.hmac-secret-ref", "env:RP_TEST_NOT_SET"));
+
+        runner.withPropertyValues(asProperties(p)).run(context -> {
+            assertThat(context).hasFailed();
+            assertThat(rootMessage(context.getStartupFailure())).contains("RP_TEST_NOT_SET").contains("hmac-secret-ref");
+        });
+    }
+
+    @Test
+    void signedGrantRequiresGrantSecretRef() {
+        Map<String, Object> p = shop(m -> m.put(SHOP + "identity.type", "signed-grant"));
+
+        runner.withPropertyValues(asProperties(p)).run(context -> {
+            assertThat(context).hasFailed();
+            assertThat(rootMessage(context.getStartupFailure())).contains("grant-secret-ref");
+        });
+    }
+
+    @Test
+    void signedGrantResolvesGrantSecret() {
+        Map<String, Object> p = shop(m -> {
+            m.put(SHOP + "identity.type", "signed-grant");
+            m.put(SHOP + "identity.grant-secret-ref", "env:" + AppFixtures.HOOK_SECRET_ENV);
+        });
+
+        runner.withPropertyValues(asProperties(p)).run(context -> {
+            assertThat(context).hasNotFailed();
+            AppConfig app = context.getBean(AppRegistry.class).byId("shop").orElseThrow();
+            assertThat(app.identity().type()).isEqualTo(ReliablePushProperties.IdentityType.SIGNED_GRANT);
+            assertThat(app.identity().grantSecret().value()).isEqualTo("generated-test-hook-secret");
+        });
+    }
+
+    @Test
+    void rejectsMalformedSenderKeyHash() {
+        Map<String, Object> p = shop(m -> m.put(SHOP + "sender-api-key-sha256", "not-a-hash"));
+
+        runner.withPropertyValues(asProperties(p)).run(context -> {
+            assertThat(context).hasFailed();
+            assertThat(rootMessage(context.getStartupFailure())).contains("senderApiKeySha256");
+        });
+    }
+
+    @Test
+    void rejectsTwoAppsSharingOneSenderKey() {
+        Map<String, Object> p = shop(m -> m.putAll(AppFixtures.minimalApp("bank", "k-123")));
+
+        runner.withPropertyValues(asProperties(p)).run(context -> {
+            assertThat(context).hasFailed();
+            assertThat(rootMessage(context.getStartupFailure())).contains("sender-api-key-sha256");
+        });
+    }
+
+    @Test
+    void rejectsUnknownPolicy() {
+        Map<String, Object> p = shop(m -> m.put(SHOP + "default-policy", "SOMETIMES"));
+
+        runner.withPropertyValues(asProperties(p)).run(context -> {
+            assertThat(context).hasFailed();
+            assertThat(rootMessage(context.getStartupFailure())).contains("defaultPolicy");
+        });
+    }
+
+    @Test
+    void rejectsCurrentKidWithoutMatchingSigningKey() {
+        runner.withPropertyValues(
+                        "reliable-push.device-token.signing-keys[0].kid=k1",
+                        "reliable-push.device-token.signing-keys[0].private-key-pem-ref=env:" + AppFixtures.HOOK_SECRET_ENV,
+                        "reliable-push.device-token.current-kid=k2")
+                .run(context -> {
+                    assertThat(context).hasFailed();
+                    assertThat(rootMessage(context.getStartupFailure())).contains("current-kid");
+                });
+    }
+
+    @Test
+    void rejectsInlinePrivateKey() {
+        runner.withPropertyValues(
+                        "reliable-push.device-token.signing-keys[0].kid=k1",
+                        "reliable-push.device-token.signing-keys[0].private-key-pem-ref=-----BEGIN PRIVATE KEY-----",
+                        "reliable-push.device-token.current-kid=k1")
+                .run(context -> {
+                    assertThat(context).hasFailed();
+                    String message = rootMessage(context.getStartupFailure());
+                    assertThat(message).contains("private-key-pem-ref").doesNotContain("BEGIN PRIVATE KEY");
+                });
+    }
+
+    private static String rootMessage(Throwable failure) {
+        StringBuilder all = new StringBuilder();
+        for (Throwable t = failure; t != null; t = t.getCause()) {
+            all.append(t.getMessage()).append('\n');
+        }
+        return all.toString();
+    }
+}

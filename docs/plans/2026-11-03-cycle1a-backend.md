@@ -113,15 +113,15 @@ Expected: `openjdk version "21...` and a server version. Export `JAVA_HOME=/opt/
   - `TimeScale` — `Duration minutes(int n)` returns `n × minuteDuration` (default `1m`).
   - `ClockConfig` — `@Bean Clock clock()` = `Clock.systemUTC()`; tests override with a mutable test clock.
 
-- [ ] **Step 1: Failing tests**
+- [x] **Step 1: Failing tests**
   - `AppRegistryTest.findsAppBySenderKey()` — app `shop` with hash of `"k-123"` → `bySenderApiKey("k-123")` present with appId `shop`; `bySenderApiKey("wrong")` empty.
   - `ReliablePushPropertiesTest.rejectsWindowShorterThanBackoff()` — backoff `[1m,2m,4m,8m]`, window `14` → context fails to start with message containing `trigger-window-minutes`.
   - `ReliablePushPropertiesTest.defaultsApplied()` — minimal app config → validity `90d`, timeout `10`, max attempts `5`, window `20`, rate limits `60`/`6000`.
   - `TimeScaleTest.fastClockOnlyInE2eOrDemo()` — `testing.minute-duration=1s` with profiles `api` → startup fails (`minute-duration is only allowed in profiles e2e or demo`); with profile `e2e` → `minutes(10)` = `10s`.
-- [ ] **Step 2: Run** `./mvnw test -Dtest='AppRegistryTest,ReliablePushPropertiesTest,TimeScaleTest'` → FAIL.
-- [ ] **Step 3: Implement**; the window check and the profile check run in a `@PostConstruct`/`InitializingBean` validator that throws `IllegalStateException`.
-- [ ] **Step 4: Run** `./mvnw verify` → PASS.
-- [ ] **Step 5: Commit** `feat(backend): app registry and configuration validation`
+- [x] **Step 2: Run** `./mvnw test -Dtest='AppRegistryTest,ReliablePushPropertiesTest,TimeScaleTest'` → FAIL.
+- [x] **Step 3: Implement**; the window check and the profile check run in a `@PostConstruct`/`InitializingBean` validator that throws `IllegalStateException`.
+- [x] **Step 4: Run** `./mvnw verify` → PASS.
+- [x] **Step 5: Commit** `feat(backend): app registry and configuration validation`
 
 ### Task 5: Database schema
 

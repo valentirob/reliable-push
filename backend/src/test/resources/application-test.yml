@@ -1,0 +1,23 @@
+# Test-only configuration: activate with the Spring profile "test" (in addition to the profiles the test needs).
+# Every value here is a throwaway test value, never a real secret. Secret refs follow the production rule (env:NAME);
+# in tests NAME is satisfied by the plain property at the bottom of this file instead of a real environment variable.
+reliable-push:
+  worker:
+    poll-interval: 200ms
+  apps:
+    shop:
+      # SHA-256 of the raw test key "test-sender-key-shop" (tests send that raw key in X-Api-Key)
+      sender-api-key-sha256: 08017068a4fbb11fcf4856923e4ba6b63a02e8313c7aa3a59d1d1c2a2e354fce
+      identity:
+        type: oidc
+        issuer: https://idp.test.example
+        audience: shop-mobile
+        user-claim: sub
+        # jwks-uri is set per test (WireMock listens on a random port)
+      fallback:
+        # url is set per test (WireMock listens on a random port)
+        url: http://localhost:9/hook
+        hmac-secret-ref: env:RP_TEST_SHOP_HOOK_SECRET
+
+# Value behind the env: reference above. Deliberately obvious test value.
+RP_TEST_SHOP_HOOK_SECRET: test-only-hook-secret-shop
