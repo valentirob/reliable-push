@@ -129,15 +129,15 @@ Expected: `openjdk version "21...` and a server version. Export `JAVA_HOME=/opt/
 - Create: `backend/src/main/resources/db/migration/V1__init.sql`
 - Test: `backend/src/test/java/io/reliablepush/SchemaIT.java`
 
-- [ ] **Step 1: Failing test** `SchemaIT`:
+- [x] **Step 1: Failing test** `SchemaIT`:
   - `tablesExist()` — `information_schema.tables` contains `notification`, `notification_event`, `device`.
   - `dueIndexIsPartial()` — `pg_indexes.indexdef` for `notification_due` contains `WHERE (due_at IS NOT NULL)`.
   - `stateConstraint()` — inserting `state='BOGUS'` throws `DataIntegrityViolationException`.
   - `externalIdUniquePerApp()` — two rows same `(app_id, external_id)` → violation; same external_id other app → ok.
-- [ ] **Step 2: Run** → FAIL.
-- [ ] **Step 3: Write `V1__init.sql`** exactly per spec §3, plus: `CHECK (state IN ('PENDING','DELIVERED','READ','DISPATCHING','FALLBACK_TRIGGERED','FALLBACK_FAILED','FALLBACK_EXPIRED','CANCELLED'))`, `CHECK (policy IN ('NOT_DELIVERED','NOT_READ'))`, `notification_event.type CHECK (type IN ('DELIVERED','READ'))`, `notification_event(notification_id, type)` index, `device(app_id, user_id)` index, `notification(app_id, user_id, created_at desc)` index for listing, `notification(closed_at) where closed_at is not null` index for retention.
-- [ ] **Step 4: Run** `./mvnw verify` → PASS.
-- [ ] **Step 5: Commit** `feat(backend): initial database schema`
+- [x] **Step 2: Run** → FAIL.
+- [x] **Step 3: Write `V1__init.sql`** exactly per spec §3, plus: `CHECK (state IN ('PENDING','DELIVERED','READ','DISPATCHING','FALLBACK_TRIGGERED','FALLBACK_FAILED','FALLBACK_EXPIRED','CANCELLED'))`, `CHECK (policy IN ('NOT_DELIVERED','NOT_READ'))`, `notification_event.type CHECK (type IN ('DELIVERED','READ'))`, `notification_event(notification_id, type)` index, `device(app_id, user_id)` index, `notification(app_id, user_id, created_at desc)` index for listing, `notification(closed_at) where closed_at is not null` index for retention.
+- [x] **Step 4: Run** `./mvnw verify` → PASS.
+- [x] **Step 5: Commit** `feat(backend): initial database schema`
 
 ### Task 6: Problem details, sender API-key filter and rate limiting
 
