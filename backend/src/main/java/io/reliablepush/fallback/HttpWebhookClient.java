@@ -11,7 +11,11 @@ import java.net.http.HttpTimeoutException;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import tools.jackson.databind.json.JsonMapper;
@@ -26,7 +30,9 @@ import tools.jackson.databind.node.ObjectNode;
  * {@code 2xx} is a success, {@code 4xx} other than {@code 408/429} is final, everything else (5xx, 3xx, timeout, I/O
  * error) is retryable. Never logged: secret, signature, request body, user id, response body.
  *
- * <p>The JDK {@link HttpClient} is shared by all attempts; its connect timeout is the {@code http-timeout}, which is
+ * <p>{@code http-timeout} bounds the whole exchange (connect, headers and body): the call is sent asynchronously and
+ * cancelled when the time is up, because the JDK request timeout alone does not cover reading the response body.
+ * The JDK {@link HttpClient} is shared by all attempts; its connect timeout is the {@code http-timeout}, which is
  * configured per app, so there is one client per distinct timeout value (normally exactly one).
  */
 public class HttpWebhookClient implements WebhookClient, AutoCloseable {
@@ -64,11 +70,11 @@ public class HttpWebhookClient implements WebhookClient, AutoCloseable {
                     .header("User-Agent", userAgent)
                     .POST(HttpRequest.BodyPublishers.ofByteArray(body))
                     .build();
-            HttpResponse<Void> response = client(config.httpTimeout()).send(request, HttpResponse.BodyHandlers.discarding());
+            HttpResponse<Void> response = exchange(client(config.httpTimeout()), request, config.httpTimeout());
             WebhookResult result = classify(response.statusCode());
             LOG.debug("Webhook answered with status {} in {} ms", response.statusCode(), millis(started));
             return result;
-        } catch (HttpTimeoutException e) {
+        } catch (TimeoutException | HttpTimeoutException e) {
             // no message, no cause: exception texts can quote the request URL
             LOG.debug("Webhook timed out after {} ms", millis(started));
             return new WebhookResult.Retryable("timeout");
@@ -80,6 +86,35 @@ public class HttpWebhookClient implements WebhookClient, AutoCloseable {
             return new WebhookResult.Retryable("interrupted");
         } finally {
             Timer.builder(LATENCY_TIMER).register(meters).record(Duration.ofNanos(System.nanoTime() - started));
+        }
+    }
+
+    /**
+     * Runs the exchange asynchronously and waits at most {@code timeout} for all of it: connect, response headers and
+     * body. The JDK request timeout covers only the wait for the response headers, so a receiver that sends headers
+     * and then stalls would block a plain {@code send} until it closes the connection, and the fallback tick (which
+     * joins all rows) with it. On timeout or interrupt the exchange is cancelled, which closes the connection.
+     */
+    private static HttpResponse<Void> exchange(HttpClient client, HttpRequest request, Duration timeout)
+            throws IOException, InterruptedException, TimeoutException {
+        CompletableFuture<HttpResponse<Void>> pending = client.sendAsync(request, HttpResponse.BodyHandlers.discarding());
+        try {
+            return pending.get(timeout.toNanos(), TimeUnit.NANOSECONDS);
+        } catch (ExecutionException e) {
+            Throwable cause = e.getCause();
+            if (cause instanceof IOException io) {
+                throw io;
+            }
+            if (cause instanceof RuntimeException re) {
+                throw re;
+            }
+            if (cause instanceof Error err) {
+                throw err;
+            }
+            throw new IOException("webhook exchange failed");
+        } catch (TimeoutException | InterruptedException e) {
+            pending.cancel(true);
+            throw e;
         }
     }
 

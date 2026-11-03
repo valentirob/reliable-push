@@ -17,6 +17,11 @@ import io.reliablepush.apps.AppFixtures;
 import io.reliablepush.apps.AppRegistry;
 import io.reliablepush.shared.logging.EventCapture;
 import io.reliablepush.support.PostgresTestBase;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.ServerSocket;
+import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
@@ -26,6 +31,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import org.apache.logging.log4j.Level;
@@ -216,6 +223,46 @@ class HttpWebhookClientIT extends PostgresTestBase {
 
         assertThat(result).isEqualTo(new WebhookResult.Retryable("timeout"));
         assertThat(Duration.ofNanos(System.nanoTime() - start)).isLessThan(Duration.ofSeconds(3));
+    }
+
+    @Test
+    void receiverStallingAfterHeadersTimesOutAndConnectionIsClosed() throws Exception {
+        // 200 + Content-Length 100 + 1 body byte, then silence and the socket stays open: the JDK request timeout does
+        // not cover the body, so only the whole-exchange bound keeps the worker tick from hanging
+        try (ServerSocket server = new ServerSocket(0)) {
+            CompletableFuture<Boolean> clientClosed = new CompletableFuture<>();
+            Thread.ofVirtual().start(() -> {
+                try (Socket socket = server.accept()) {
+                    socket.setSoTimeout(5_000);
+                    InputStream in = socket.getInputStream();
+                    // drain the request until the end of the headers + body, then answer with a partial body
+                    byte[] buffer = new byte[8192];
+                    in.read(buffer);
+                    OutputStream out = socket.getOutputStream();
+                    out.write("HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\nx".getBytes(StandardCharsets.US_ASCII));
+                    out.flush();
+                    int read;
+                    do {
+                        read = in.read(buffer);
+                    } while (read > 0);
+                    clientClosed.complete(read == -1);
+                } catch (IOException e) {
+                    clientClosed.complete(false);
+                }
+            });
+            Map<String, Object> properties = new HashMap<>(AppFixtures.minimalApp("whk", "k-whk"));
+            properties.put("reliable-push.apps.whk.fallback.url", "http://localhost:" + server.getLocalPort() + "/hook");
+            properties.put("reliable-push.apps.whk.fallback.http-timeout", "1s");
+            AppConfig app = new AppRegistry(AppFixtures.bind(properties), AppFixtures.environment()).byId("whk").orElseThrow();
+            long start = System.nanoTime();
+
+            WebhookResult result = client.send(app, call());
+
+            assertThat(result).isEqualTo(new WebhookResult.Retryable("timeout"));
+            assertThat(Duration.ofNanos(System.nanoTime() - start)).isLessThan(Duration.ofSeconds(3));
+            // cancelling released the connection: the receiver sees it closed (EOF)
+            assertThat(clientClosed.get(4, TimeUnit.SECONDS)).isTrue();
+        }
     }
 
     @Test
