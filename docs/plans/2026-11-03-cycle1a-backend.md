@@ -251,11 +251,11 @@ Expected: `openjdk version "21...` and a server version. Export `JAVA_HOME=/opt/
 - Produces:
   - `FallbackDecision` (pure) — `static Outcome decide(Instant now, Instant dueAt, Duration window, int attemptsSoFar, int maxAttempts, List<Duration> backoff, WebhookResult lastResult)` → `DISPATCH | EXPIRE | RETRY_AT(Instant) | FAIL | DONE`; rule: dispatch only if `now <= dueAt + window`; next retry at `now + backoff[attempts-1]` only if that instant `<= dueAt + window`, else `EXPIRE`.
   - `FallbackScheduler.tick()` — `@Scheduled(fixedDelayString = "${reliable-push.worker.poll-interval:5s}")`; claims ≤ batch rows (lease 2 min), sets `ThreadContext trace.id` (new) + `rp.tracking_id` per row, logs `fallback.claimed` (or `fallback.reclaimed` when the row was already `DISPATCHING`), applies `FallbackDecision`, calls `WebhookClient`, logs `fallback.dispatched|retry_scheduled|failed|expired`, increments metrics (Task 15 wires counters; here use `MeterRegistry` directly).
-- [ ] **Step 1: Failing tests**
+- [x] **Step 1: Failing tests**
   - `FallbackDecisionTest`: `dispatchesInsideWindow()`, `expiresWhenClaimedAfterWindow()`, `retryScheduledWithBackoff()` (attempt 1 failed at `due+0` → retry at `due+1m`), `retryBeyondWindowExpires()` (window 5 min, attempt 3 failed at `due+3m` → `EXPIRE`), `finalFailureAfterMaxAttempts()`.
   - `FallbackSchedulerIT` (fake `WebhookClient` bean, test clock, `minute-duration: 1s` under profile `e2e`): `notDeliveredFiresExactlyOnce()`; `deliveredBeforeDueNeverFires()`; `notReadPolicyFiresWhenOnlyDelivered()`; `twoConcurrentWorkersNeverDoubleFire()` (200 due rows, two `tick()` threads in parallel → fake client received each `trackingId` exactly once); `crashedWorkerRowReclaimedAfterLeaseInsideWindow()` (row left `DISPATCHING` with expired lease → re-dispatched once, `fallback.reclaimed` logged); `crashedWorkerRowOutsideWindowExpires()` (webhook not called, state `FALLBACK_EXPIRED`); `outageLongerThanWindowExpires()` (PENDING row due 30 min ago → `FALLBACK_EXPIRED`); `deliveredDuringDispatchStaysTriggered()` (event arriving after claim → `late`, final state `FALLBACK_TRIGGERED`).
-- [ ] **Step 2: Run** → FAIL. **Step 3: Implement.** **Step 4: Run** `./mvnw verify` → PASS.
-- [ ] **Step 5: Commit** `feat(backend): fallback scheduler with lease and trigger window`
+- [x] **Step 2: Run** → FAIL. **Step 3: Implement.** **Step 4: Run** `./mvnw verify` → PASS.
+- [x] **Step 5: Commit** `feat(backend): fallback scheduler with lease and trigger window`
 
 ### Task 13: Webhook client (HMAC, retries classification)
 

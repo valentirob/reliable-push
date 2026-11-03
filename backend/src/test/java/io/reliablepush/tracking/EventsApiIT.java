@@ -273,7 +273,7 @@ class EventsApiIT extends PostgresTestBase {
         String userId = uniqueUser();
         Device device = device(SHOP, userId);
         String id = register(SHOP_KEY, userId, FallbackPolicyName.NOT_DELIVERED);
-        // what the worker's claim does (task 12): DISPATCHING, due_at cleared by the claim's own bookkeeping
+        // what the worker's claim does (task 12): DISPATCHING with a lease; due_at is kept
         jdbc.sql("update notification set state = 'DISPATCHING', next_attempt_at = now() + interval '2 minutes' where id = ?")
                 .param(UUID.fromString(id)).update();
 

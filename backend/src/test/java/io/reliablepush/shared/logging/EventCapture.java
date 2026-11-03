@@ -11,24 +11,32 @@ import org.apache.logging.log4j.core.config.LoggerConfig;
 import org.apache.logging.log4j.core.test.appender.ListAppender;
 import org.apache.logging.log4j.message.MapMessage;
 
-/** Test helper: captures {@link EventLog} events in memory (non-additive, so nothing reaches the console). */
-final class EventCapture implements AutoCloseable {
+/** Test helper: captures {@link EventLog} events (or another logger) in memory (non-additive, so nothing reaches the console). */
+public final class EventCapture implements AutoCloseable {
 
-    private static final String LOGGER_NAME = "io.reliablepush.event";
+    private static final String EVENT_LOGGER = "io.reliablepush.event";
 
     private final LoggerContext context = (LoggerContext) LogManager.getContext(false);
     private final ListAppender appender = new ListAppender("event-capture");
+    private final String loggerName;
 
-    EventCapture() {
+    /** Captures the catalogue events ({@link EventLog}). */
+    public EventCapture() {
+        this(EVENT_LOGGER);
+    }
+
+    /** Captures INFO and above of the named logger (e.g. a class logging outside the catalogue). */
+    public EventCapture(String loggerName) {
+        this.loggerName = loggerName;
         appender.start();
         Configuration configuration = context.getConfiguration();
-        LoggerConfig loggerConfig = new LoggerConfig(LOGGER_NAME, Level.INFO, false);
+        LoggerConfig loggerConfig = new LoggerConfig(loggerName, Level.INFO, false);
         loggerConfig.addAppender(appender, null, null);
-        configuration.addLogger(LOGGER_NAME, loggerConfig);
+        configuration.addLogger(loggerName, loggerConfig);
         context.updateLoggers();
     }
 
-    List<LogEvent> events() {
+    public List<LogEvent> events() {
         return appender.getEvents();
     }
 
@@ -41,13 +49,13 @@ final class EventCapture implements AutoCloseable {
     }
 
     @SuppressWarnings("unchecked")
-    static Map<String, Object> data(LogEvent event) {
+    public static Map<String, Object> data(LogEvent event) {
         return ((MapMessage<?, Object>) event.getMessage()).getData();
     }
 
     @Override
     public void close() {
-        context.getConfiguration().removeLogger(LOGGER_NAME);
+        context.getConfiguration().removeLogger(loggerName);
         context.updateLoggers();
         appender.stop();
     }
