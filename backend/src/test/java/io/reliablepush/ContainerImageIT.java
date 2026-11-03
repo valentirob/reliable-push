@@ -29,7 +29,8 @@ class ContainerImageIT {
     /** What OpenShift's restricted SCC assigns: a random UID from the project range, always group 0. */
     private static final String ARBITRARY_USER = "1000870000:0";
 
-    private static final long MAX_IMAGE_BYTES = 250L * 1024 * 1024;
+    /** Spec 9 budget: uncompressed image size (sum of layer sizes), decimal megabytes. */
+    private static final long MAX_IMAGE_BYTES = 250_000_000L;
     private static final String IMAGE = System.getProperty("image.name", "reliable-push-backend:0.1.0-SNAPSHOT");
 
     private static Network network;
@@ -96,15 +97,24 @@ class ContainerImageIT {
         var gid = app.execInContainer("id", "-g");
         assertThat(gid.getStdout().trim()).isEqualTo("0");
 
-        var java = app.execInContainer("sh", "-c", "ps -o user=,args= | grep '[J]arLauncher'");
-        assertThat(java.getStdout()).doesNotStartWith("root");
+        // PID 1 is the JVM (exec-form ENTRYPOINT, no wrapper script): real, effective, saved and fs UID
+        var status = app.execInContainer("cat", "/proc/1/status");
+        assertThat(status.getExitCode()).isZero();
+        assertThat(status.getStdout()).isNotBlank().containsPattern("(?m)^Name:\\s+java$");
+        assertThat(status.getStdout().lines().filter(l -> l.startsWith("Uid:")).findFirst())
+                .hasValueSatisfying(line -> assertThat(line.substring(4).trim().split("\\s+"))
+                        .containsOnly("1000870000"));
     }
 
     @Test
     void imageIsSmallerThan250Mb() {
+        // inspect's Size is daemon dependent (compressed with the containerd image store, uncompressed with overlay2):
+        // the layer sizes from the history are uncompressed on both
         DockerClient docker = DockerClientFactory.instance().client();
-        long size = docker.inspectImageCmd(IMAGE).exec().getSize();
-        assertThat(size).as("image size in bytes").isLessThan(MAX_IMAGE_BYTES);
+        long size = docker.imageHistoryCmd(IMAGE).exec().stream()
+                .mapToLong(layer -> layer.getSize() == null ? 0 : layer.getSize())
+                .sum();
+        assertThat(size).as("uncompressed image size in bytes (sum of layers) = %d, budget %d", size, MAX_IMAGE_BYTES).isPositive().isLessThan(MAX_IMAGE_BYTES);
     }
 
     @Test
