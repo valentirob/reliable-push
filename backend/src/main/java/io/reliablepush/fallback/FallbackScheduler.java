@@ -9,7 +9,6 @@ import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import org.springframework.lang.Nullable;
 import org.springframework.scheduling.annotation.Scheduled;
 
 /**
@@ -29,10 +28,9 @@ public class FallbackScheduler {
     private final Duration lease;
     private final int batchSize;
 
-    /** {@code dispatcher} is null while no {@link WebhookClient} is configured: the tick then claims nothing. */
     FallbackScheduler(
             NotificationRepository notifications,
-            @Nullable FallbackDispatcher dispatcher,
+            FallbackDispatcher dispatcher,
             Clock clock,
             Duration lease,
             int batchSize) {
@@ -52,9 +50,6 @@ public class FallbackScheduler {
             fixedDelayString = "${reliable-push.worker.poll-interval:5s}",
             initialDelayString = "${reliable-push.worker.poll-interval:5s}")
     public int tick() {
-        if (dispatcher == null) {
-            return 0;
-        }
         Instant now = clock.instant().truncatedTo(ChronoUnit.MICROS);
         List<ClaimedNotification> claimed = notifications.claimDue(now, now.plus(lease), batchSize);
         if (claimed.isEmpty()) {

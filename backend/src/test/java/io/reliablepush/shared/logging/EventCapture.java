@@ -27,10 +27,15 @@ public final class EventCapture implements AutoCloseable {
 
     /** Captures INFO and above of the named logger (e.g. a class logging outside the catalogue). */
     public EventCapture(String loggerName) {
+        this(loggerName, Level.INFO);
+    }
+
+    /** Captures the named logger (and its children) from {@code level} up, e.g. DEBUG to check debug lines too. */
+    public EventCapture(String loggerName, Level level) {
         this.loggerName = loggerName;
         appender.start();
         Configuration configuration = context.getConfiguration();
-        LoggerConfig loggerConfig = new LoggerConfig(loggerName, Level.INFO, false);
+        LoggerConfig loggerConfig = new LoggerConfig(loggerName, level, false);
         loggerConfig.addAppender(appender, null, null);
         configuration.addLogger(loggerName, loggerConfig);
         context.updateLoggers();

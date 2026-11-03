@@ -26,6 +26,11 @@ server:
     # same reason for application/x-www-form-urlencoded: bounded like every other body (default is 2 MB)
     max-http-form-post-size: 64KB
 
+# Filtered by Maven; the webhook User-Agent carries it (reliable-push/<version>).
+info:
+  app:
+    version: "@project.version@"
+
 management:
   endpoints:
     web:

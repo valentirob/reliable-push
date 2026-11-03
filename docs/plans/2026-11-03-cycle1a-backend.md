@@ -266,9 +266,9 @@ Expected: `openjdk version "21...` and a server version. Export `JAVA_HOME=/opt/
 **Interfaces:**
 - Consumes: `WebhookClient`, `FallbackCall`, `WebhookResult` (Task 12).
 - Produces: `WebhookSigner.sign(byte[] secret, long epochSeconds, byte[] body) → "v1=" + hex(HMAC-SHA256(secret, epochSeconds + "." + body))`. `HttpWebhookClient` (JDK `HttpClient`, redirects `NEVER`, connect + request timeout = app `http-timeout` 10 s): POST JSON `{trackingId, userId, fallback, reason, attempt}`; headers `Content-Type: application/json`, `X-RP-Timestamp`, `X-RP-Signature`, `Idempotency-Key: <trackingId>`; result `Success` for 2xx, `Retryable` for 408/429/5xx/timeout/IO error/3xx, `Final` for other 4xx.
-- [ ] **Step 1: Failing tests** — `WebhookSignerTest.knownVector()` (secret `"s3cr3t"`, ts `1700000000`, body `{"a":1}` → assert against value computed in the test with `javax.crypto.Mac` — not hard-coded by hand); `HttpWebhookClientIT` (WireMock): `success2xx()` (headers present, signature verifies), `server500Retryable()`, `badRequest400Final()`, `tooMany429Retryable()`, `redirect302RetryableNotFollowed()` (WireMock target of redirect receives 0 requests), `slowReceiverTimesOut()` (fixed delay 12 s, test timeout config 1 s → `Retryable`, returns in < 3 s), `noSecretOrBodyInLogs()`.
-- [ ] **Step 2: Run** → FAIL. **Step 3: Implement.** **Step 4: Run** `./mvnw verify` → PASS.
-- [ ] **Step 5: Commit** `feat(backend): signed webhook client`
+- [x] **Step 1: Failing tests** — `WebhookSignerTest.knownVector()` (secret `"s3cr3t"`, ts `1700000000`, body `{"a":1}` → assert against value computed in the test with `javax.crypto.Mac` — not hard-coded by hand); `HttpWebhookClientIT` (WireMock): `success2xx()` (headers present, signature verifies), `server500Retryable()`, `badRequest400Final()`, `tooMany429Retryable()`, `redirect302RetryableNotFollowed()` (WireMock target of redirect receives 0 requests), `slowReceiverTimesOut()` (fixed delay 12 s, test timeout config 1 s → `Retryable`, returns in < 3 s), `noSecretOrBodyInLogs()`.
+- [x] **Step 2: Run** → FAIL. **Step 3: Implement.** **Step 4: Run** `./mvnw verify` → PASS.
+- [x] **Step 5: Commit** `feat(backend): signed webhook client`
 
 ### Task 14: Retention job
 

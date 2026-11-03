@@ -6,7 +6,10 @@ import com.jayway.jsonpath.JsonPath;
 import io.reliablepush.support.PostgresTestBase;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.ResponseEntity;
+import org.springframework.test.context.TestPropertySource;
 
+// default profiles (api,worker) with the real clock: no worker poll, so no real webhook call happens
+@TestPropertySource(properties = "reliable-push.worker.poll-interval=1d")
 class ApplicationStartsIT extends PostgresTestBase {
 
     private ResponseEntity<String> get(String path) {

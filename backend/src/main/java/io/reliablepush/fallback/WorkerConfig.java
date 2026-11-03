@@ -14,7 +14,7 @@ import java.util.Optional;
 import java.util.stream.Collectors;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
@@ -29,6 +29,13 @@ class WorkerConfig {
 
     private static final Logger LOG = LogManager.getLogger(WorkerConfig.class);
 
+    /** The production webhook client; present wherever the fallback worker runs. Closed with the context. */
+    @Bean
+    HttpWebhookClient webhookClient(
+            Clock clock, JsonMapper json, MeterRegistry meters, @Value("${info.app.version:dev}") String version) {
+        return new HttpWebhookClient(clock, json, meters, version);
+    }
+
     @Bean
     FallbackScheduler fallbackScheduler(
             NotificationRepository notifications,
@@ -36,7 +43,7 @@ class WorkerConfig {
             TimeScale timeScale,
             Clock clock,
             ReliablePushProperties properties,
-            ObjectProvider<WebhookClient> webhookClient,
+            WebhookClient webhookClient,
             JsonMapper json,
             MeterRegistry meters) {
         // the lease is a product duration (2 "minutes"): scaled by the fast clock like backoff and trigger window
@@ -44,14 +51,8 @@ class WorkerConfig {
         boolean fastClock = !timeScale.minuteDuration().equals(Duration.ofMinutes(1));
         checkLease(lease, fastClock, apps.all()).ifPresent(LOG::warn);
 
-        WebhookClient client = webhookClient.getIfAvailable();
-        FallbackDispatcher dispatcher = null;
-        if (client == null) {
-            // until the HTTP client lands (plan task 13), a worker without one must not claim rows it cannot send
-            LOG.warn("No WebhookClient configured: the fallback worker does not claim notifications");
-        } else {
-            dispatcher = new FallbackDispatcher(notifications, apps, timeScale, clock, client, json, meters, lease);
-        }
+        FallbackDispatcher dispatcher =
+                new FallbackDispatcher(notifications, apps, timeScale, clock, webhookClient, json, meters, lease);
         return new FallbackScheduler(notifications, dispatcher, clock, lease, properties.worker().batchSize());
     }
 

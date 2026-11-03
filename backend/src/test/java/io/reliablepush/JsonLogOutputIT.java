@@ -14,7 +14,8 @@ import org.springframework.test.context.TestPropertySource;
 /** Spec 9.1: stdout is one JSON object per line (no banner, no stray text). */
 @ExtendWith(OutputCaptureExtension.class)
 // distinct property => fresh application context, so startup output is captured by this test class
-@TestPropertySource(properties = "rp.test.fresh-context=json-log-output")
+// default profiles (api,worker) with the real clock: the worker poll is pushed out so no real webhook call happens
+@TestPropertySource(properties = {"rp.test.fresh-context=json-log-output", "reliable-push.worker.poll-interval=1d"})
 class JsonLogOutputIT extends PostgresTestBase {
 
     @Test
