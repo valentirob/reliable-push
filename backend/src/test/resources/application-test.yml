@@ -11,6 +11,8 @@ reliable-push:
         private-key-pem-ref: env:RP_TEST_DEVICE_KEY_K1
         public-key-pem-ref: env:RP_TEST_DEVICE_PUB_K1
     current-kid: test-k1
+    # no revocation cache in tests: a revocation or re-registration is visible to the very next request
+    revocation-cache-ttl: 0s
   worker:
     poll-interval: 200ms
   apps:
@@ -48,6 +50,66 @@ reliable-push:
         type: oidc
         issuer: https://idp.test.example
         audience: ratelimited-mobile
+      fallback:
+        url: http://localhost:9/hook
+        hmac-secret-ref: env:RP_TEST_SHOP_HOOK_SECRET
+    # Device API tests (DeviceApiIT). identity.issuer is replaced by the FakeOidc issuer (random localhost port) via
+    # @DynamicPropertySource; the value here only satisfies validation.
+    # Key: SHA-256 of the raw test key "test-sender-key-deviceit".
+    deviceit:
+      sender-api-key-sha256: 9c0f50356e61116e4505c77c9dbff8892b0b3165145410237f9b69a25f17a38e
+      identity:
+        type: oidc
+        issuer: https://idp.test.example
+        audience: shop-mobile-it
+      fallback:
+        url: http://localhost:9/hook
+        hmac-secret-ref: env:RP_TEST_SHOP_HOOK_SECRET
+    # A second app on the same identity provider, for cross-app device id tests (DeviceApiIT).
+    # Key: SHA-256 of the raw test key "test-sender-key-deviceother".
+    deviceother:
+      sender-api-key-sha256: 62b26a734f5e429dc0d24482fec5e4d59f6809a286dfe7c9aa614486f1d3de24
+      identity:
+        type: oidc
+        issuer: https://idp.test.example
+        audience: shop-mobile-other
+      fallback:
+        url: http://localhost:9/hook
+        hmac-secret-ref: env:RP_TEST_SHOP_HOOK_SECRET
+    # Used by DeviceApiIT.registerRateLimitedPerApp: registration allows 10 x device-per-minute = 10 requests per minute.
+    # Key: SHA-256 of the raw test key "test-sender-key-deviceregister".
+    deviceregister:
+      sender-api-key-sha256: ea2147f6f94e572766cf77b92151241a4a221b9b25d3942f5439a944b91e973f
+      rate-limits:
+        device-per-minute: 1
+      identity:
+        type: oidc
+        issuer: https://idp.test.example
+        audience: shop-mobile-register
+      fallback:
+        url: http://localhost:9/hook
+        hmac-secret-ref: env:RP_TEST_SHOP_HOOK_SECRET
+    # Used by DeviceApiIT.deviceRateLimited429: only two device requests per minute (registration: 20 per minute).
+    # Key: SHA-256 of the raw test key "test-sender-key-devicelimited".
+    devicelimited:
+      sender-api-key-sha256: 510f70f5a6fcb46ef0602becb1c21d3ae4237723590312ddb078596498f19459
+      rate-limits:
+        device-per-minute: 2
+      identity:
+        type: oidc
+        issuer: https://idp.test.example
+        audience: shop-mobile-limited
+      fallback:
+        url: http://localhost:9/hook
+        hmac-secret-ref: env:RP_TEST_SHOP_HOOK_SECRET
+    # Used by DeviceApiIT.identityProviderOutage503: its identity provider (FakeOidc, issuer set per test class) has no JWKS.
+    # Key: SHA-256 of the raw test key "test-sender-key-devicedown".
+    devicedown:
+      sender-api-key-sha256: 263694706a195db96f0e1cedbc68f4a8f64ee6b4124b9b38faf02df01fd21c6f
+      identity:
+        type: oidc
+        issuer: https://idp.test.example
+        audience: shop-mobile-down
       fallback:
         url: http://localhost:9/hook
         hmac-secret-ref: env:RP_TEST_SHOP_HOOK_SECRET

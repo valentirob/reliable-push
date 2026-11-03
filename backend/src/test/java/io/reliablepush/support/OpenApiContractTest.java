@@ -7,8 +7,8 @@ import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
 /**
- * The device and events paths have no implementation yet (tasks 10 and 11): this pins the contract they must
- * conform to, so it cannot drift silently.
+ * Pins the device and events contract with literal samples (independent of any implementation), so it cannot drift
+ * silently. The implementations are checked against the same contract in their own integration tests.
  */
 class OpenApiContractTest {
 

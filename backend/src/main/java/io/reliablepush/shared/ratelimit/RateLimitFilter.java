@@ -2,6 +2,7 @@ package io.reliablepush.shared.ratelimit;
 
 import io.reliablepush.apps.AppRegistry;
 import io.reliablepush.shared.logging.EventLog;
+import io.reliablepush.shared.security.DevicePrincipal;
 import io.reliablepush.shared.security.SenderPrincipal;
 import io.reliablepush.shared.web.ProblemWriter;
 import jakarta.servlet.FilterChain;
@@ -9,16 +10,18 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
+import java.util.HashMap;
 import java.util.Map;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 /**
- * Per-caller rate limiting, after authentication. Today only the sender bucket {@code sender:<appId>} is wired
- * (limit: the app's {@code rate-limits.sender-per-minute}); a request without an authenticated sender is not
- * limited here. The {@code device:<deviceId>} bucket is added with the device filter. Over the limit: 429 problem
- * with {@code Retry-After} and a {@code rate_limit.exceeded} WARN.
+ * Per-caller rate limiting, after authentication: {@code sender:<appId>} for an authenticated sender (limit: the app's
+ * {@code rate-limits.sender-per-minute}) and {@code device:<deviceId>} for an authenticated device (limit:
+ * {@code rate-limits.device-per-minute}). A request with neither is not limited here (device registration is limited
+ * per app inside the devices module, as the app is only known after parsing the body). Over the limit: 429 problem with
+ * {@code Retry-After} and a {@code rate_limit.exceeded} WARN.
  */
 public class RateLimitFilter extends OncePerRequestFilter {
 
@@ -34,21 +37,38 @@ public class RateLimitFilter extends OncePerRequestFilter {
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
-        return !(request.getAttribute(SenderPrincipal.ATTR) instanceof SenderPrincipal);
+        return !(request.getAttribute(SenderPrincipal.ATTR) instanceof SenderPrincipal)
+                && !(request.getAttribute(DevicePrincipal.ATTR) instanceof DevicePrincipal);
     }
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws ServletException, IOException {
-        String appId = ((SenderPrincipal) request.getAttribute(SenderPrincipal.ATTR)).appId();
-        int perMinute = apps.byId(appId).orElseThrow().rateLimits().senderPerMinute();
-        String bucket = "sender:" + appId;
+        String appId;
+        String bucket;
+        int perMinute;
+        Map<String, String> fields = new HashMap<>();
+        if (request.getAttribute(SenderPrincipal.ATTR) instanceof SenderPrincipal sender) {
+            appId = sender.appId();
+            bucket = "sender:" + appId;
+            perMinute = apps.byId(appId).orElseThrow().rateLimits().senderPerMinute();
+            fields.put("rate_limit.scope", "sender");
+        } else {
+            DevicePrincipal device = (DevicePrincipal) request.getAttribute(DevicePrincipal.ATTR);
+            appId = device.appId();
+            bucket = "device:" + device.deviceId();
+            perMinute = apps.byId(appId).orElseThrow().rateLimits().devicePerMinute();
+            fields.put("rate_limit.scope", "device");
+            fields.put("rp.device_id", device.deviceId().toString());
+        }
         if (limiter.tryConsume(bucket, perMinute)) {
             chain.doFilter(request, response);
             return;
         }
         long retryAfter = limiter.retryAfterSeconds(bucket);
-        EventLog.warn("rate_limit.exceeded", Map.of("event.outcome", "failure", "rp.app_id", appId, "rate_limit.scope", "sender"));
+        fields.put("event.outcome", "failure");
+        fields.put("rp.app_id", appId);
+        EventLog.warn("rate_limit.exceeded", fields);
         problems.write(
                 request,
                 response,

@@ -77,6 +77,23 @@ public class ProblemHandler extends ResponseEntityExceptionHandler {
         return problem(HttpStatus.FORBIDDEN, "Forbidden", ex.getMessage(), ex, request);
     }
 
+    @ExceptionHandler(UnauthorizedException.class)
+    ResponseEntity<Object> unauthorized(UnauthorizedException ex, WebRequest request) {
+        HttpHeaders headers = new HttpHeaders();
+        if (ex.challenge() != null) {
+            headers.set(HttpHeaders.WWW_AUTHENTICATE, ex.challenge());
+        }
+        return problem(HttpStatus.UNAUTHORIZED, "Unauthorized", ex.getMessage(), headers, ex, request);
+    }
+
+    @ExceptionHandler(RetryLaterException.class)
+    ResponseEntity<Object> retryLater(RetryLaterException ex, WebRequest request) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.set(HttpHeaders.RETRY_AFTER, Long.toString(ex.retryAfterSeconds()));
+        String title = ex.status() == HttpStatus.TOO_MANY_REQUESTS ? "Too Many Requests" : "Service Unavailable";
+        return problem(ex.status(), title, ex.getMessage(), headers, ex, request);
+    }
+
     @ExceptionHandler(InvalidRequestException.class)
     ResponseEntity<Object> invalidRequest(InvalidRequestException ex, WebRequest request) {
         return validationProblem(List.of(Map.of("field", ex.field(), "message", ex.reason())), ex, request);
@@ -142,9 +159,14 @@ public class ProblemHandler extends ResponseEntityExceptionHandler {
     }
 
     private ResponseEntity<Object> problem(HttpStatus status, String title, String detail, Exception ex, WebRequest request) {
+        return problem(status, title, detail, new HttpHeaders(), ex, request);
+    }
+
+    private ResponseEntity<Object> problem(
+            HttpStatus status, String title, String detail, HttpHeaders headers, Exception ex, WebRequest request) {
         ProblemDetail body = ProblemDetail.forStatusAndDetail(status, detail);
         body.setTitle(title);
-        return handleExceptionInternal(ex, body, new HttpHeaders(), status, request);
+        return handleExceptionInternal(ex, body, headers, status, request);
     }
 
     private static Map<String, String> describe(ConstraintViolation<?> violation) {

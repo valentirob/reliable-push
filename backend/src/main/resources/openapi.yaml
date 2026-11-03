@@ -175,6 +175,10 @@ paths:
         `identity.type`) for a device token. The `userId` is taken from the verified credential, never from the
         body. Re-registering an existing `deviceId` of the same app and user issues a new token and invalidates the
         older ones; a `deviceId` that belongs to another user is not reused (a new id is issued).
+
+        Rejected credentials all get the same `401` body, whatever the reason. `503` with `Retry-After` means the
+        identity provider's keys could not be fetched: retry later. Registration is limited per app (ten times the
+        app's per-device limit per minute), not per device.
       requestBody:
         required: true
         content:
@@ -204,6 +208,8 @@ paths:
           $ref: '#/components/responses/ValidationFailed'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
 
   /v1/devices/token:refresh:
     post:
@@ -568,6 +574,17 @@ components:
       headers:
         Retry-After:
           description: Seconds until a request is allowed again.
+          schema:
+            type: integer
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    ServiceUnavailable:
+      description: A dependency (for example the identity provider's key set) is temporarily unavailable.
+      headers:
+        Retry-After:
+          description: Seconds to wait before retrying.
           schema:
             type: integer
       content:

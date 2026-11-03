@@ -221,9 +221,9 @@ Expected: `openjdk version "21...` and a server version. Export `JAVA_HOME=/opt/
 - Produces:
   - `DeviceAuthFilter` on `/v1/devices/token:refresh`, `/v1/devices/me`, `/v1/events`: `Authorization: Bearer <jwt>` → `DeviceTokenService.verify` + revocation check (`device.revoked_at` null and `token_version` matches; cached 60 s) → `DevicePrincipal(String appId, String userId, UUID deviceId)` (attribute `DevicePrincipal.ATTR`), `rp.app_id`, `rp.device_id`; failures 401 + `auth.failed` WARN.
   - `DeviceService` — `DeviceTokenResponse register(RegisterDeviceRequest r)` (`{appId, idToken, platform: IOS|ANDROID, deviceId?}`; re-registering an existing `deviceId` of the same app+user bumps `token_version`); `DeviceTokenResponse refresh(DevicePrincipal p)`; `void revoke(DevicePrincipal p)`; `boolean isActive(UUID deviceId, int tokenVersion)`.
-- [ ] **Step 1: Failing tests** — `registerWithValidIdTokenReturns201()` (body `deviceId`, `deviceToken`, `expiresAt` ≈ now+90 d, `device.registered` logged); `registerWithBadIdToken401()`; `unknownApp404()`; `refreshReturnsNewTokenAndOldStillValidUntilExpiry()`; `reRegisterSameDeviceInvalidatesOldToken()` (test config `revocation-cache-ttl: 0s`; after re-registration the old token → 401); `revokeThenRefresh401()`; `deviceRateLimited429()` (`device-per-minute: 2`); `deviceIdOfOtherUserNotHijacked()` (registering another user's `deviceId` creates a new device id).
-- [ ] **Step 2: Run** → FAIL. **Step 3: Implement.** **Step 4: Run** `./mvnw verify` → PASS.
-- [ ] **Step 5: Commit** `feat(backend): devices api and device auth`
+- [x] **Step 1: Failing tests** — `registerWithValidIdTokenReturns201()` (body `deviceId`, `deviceToken`, `expiresAt` ≈ now+90 d, `device.registered` logged); `registerWithBadIdToken401()`; `unknownApp404()`; `refreshReturnsNewTokenAndOldStillValidUntilExpiry()`; `reRegisterSameDeviceInvalidatesOldToken()` (test config `revocation-cache-ttl: 0s`; after re-registration the old token → 401); `revokeThenRefresh401()`; `deviceRateLimited429()` (`device-per-minute: 2`); `deviceIdOfOtherUserNotHijacked()` (registering another user's `deviceId` creates a new device id).
+- [x] **Step 2: Run** → FAIL. **Step 3: Implement.** **Step 4: Run** `./mvnw verify` → PASS.
+- [x] **Step 5: Commit** `feat(backend): devices api and device auth`
 
 ### Task 11: Tracking events API
 

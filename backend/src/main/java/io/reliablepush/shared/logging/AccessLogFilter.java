@@ -13,12 +13,13 @@ import org.springframework.web.servlet.HandlerMapping;
 
 /**
  * Emits one {@code api.request} event per HTTP request (spec 9.1). Runs right after
- * {@link TraceIdFilter} so it wraps the auth filters and can read the {@code rp.app_id} request
- * attribute they set.
+ * {@link TraceIdFilter} so it wraps the auth filters and can read the {@code rp.app_id} and {@code rp.device_id}
+ * request attributes they set.
  */
 public class AccessLogFilter extends OncePerRequestFilter {
 
     public static final String APP_ID_ATTRIBUTE = "rp.app_id";
+    public static final String DEVICE_ID_ATTRIBUTE = "rp.device_id";
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
@@ -58,6 +59,10 @@ public class AccessLogFilter extends OncePerRequestFilter {
         Object appId = request.getAttribute(APP_ID_ATTRIBUTE);
         if (appId != null) {
             fields.put("rp.app_id", appId.toString());
+        }
+        Object deviceId = request.getAttribute(DEVICE_ID_ATTRIBUTE);
+        if (deviceId != null) {
+            fields.put("rp.device_id", deviceId.toString());
         }
         emit(fields);
     }
