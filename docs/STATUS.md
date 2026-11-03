@@ -2,6 +2,16 @@
 
 Newest entry first. Updated at the end of every work session (see `.agents/skills/session-handoff/SKILL.md`).
 
+## 2026-11-04 — Claude Code — `feature/cycle1a-backend`
+
+- **Done:** whole-branch review of plan 1A (no critical findings) and its fix wave: `TrackingServiceTest` → `TrackingServiceIT`; device tokens of an app no longer configured → generic 401 (`unknown_app`); bare numbers mean minutes for `backoff`/`lease` and days for `device-token-validity`; startup fails when no app is configured; worker drains the due backlog within one tick (bounded by lease/2) with `worker.max-concurrency`; Hikari connection timeout 5 s and pool timeouts answered 503 + `Retry-After: 5`; cancel of an already-closed notification → 409; retention cron configurable and disabled in tests. Docs updated accordingly.
+- **State:** `./mvnw -B verify` BUILD SUCCESS: 229 unit + 210 integration tests, 0 failures, line coverage 93.3%. `./mvnw -B verify -Pimage`: 4/4. Not merged to `develop`, not pushed.
+- **Next:**
+  1. Maintainer decides: merge `feature/cycle1a-backend` into `develop` (`--no-ff`).
+  2. `gh auth login`, then push `main`, `develop` (and optionally the feature branch); check the first CI run.
+  3. Plan 1B (client-java, harness, `scripts/e2e.sh`, web console), then plan 1C (Helm, Gatling, API/worker load and pool sizing).
+- **Open (follow-ups from reviews):** graceful worker shutdown (stop flag on context close); claim coalescing under sustained backlog; client-abort IOException logged as ERROR; `/actuator/prometheus` on a management port (Helm); cap stale JWKS key use (~24 h); `api` profile gates nothing (log active roles at startup); Dependabot commit-message prefixes.
+
 ## 2026-11-03 (3) — Claude Code — `feature/cycle1a-backend`
 
 - **Done:** plan 1A backend implemented (tasks 1-17: schema V1-V3, apps/config validation, sender API, device API with OIDC / signed-grant identity and ES256 device tokens, events, fallback worker with lease and trigger window, signed webhook client, retention, metrics, ECS JSON logging, container image, CI) and documented (task 18): `docs/architecture.md`, `docs/api.md`, `docs/integration-guide.md`, `docs/security.md`, `docs/operations.md`, `docs/testing.md`, README quick start, `AGENTS.md` commands. Spec and `.agents/rules/backend-java.md` updated with the decisions taken during implementation (see "Changes during implementation" at the top of the spec).
