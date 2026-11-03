@@ -47,6 +47,10 @@ Database connection (Spring Boot): `SPRING_DATASOURCE_URL` (`jdbc:postgresql://h
 
 ### Configuration reference (`reliable-push.*`)
 
+Durations take a unit (`500ms`, `30s`, `2m`, `1h`, `90d`). A bare number is read in the key's own unit where the table
+says so (minutes for `worker.lease` and `fallback.backoff`, days for `device-token-validity`), otherwise as milliseconds
+(Spring's default), so always write the unit for `poll-interval`, `revocation-cache-ttl` and `http-timeout`.
+
 | Key | Default | Validation / notes |
 |---|---|---|
 | `device-token.signing-keys[]` | none | List of `{kid, private-key-pem-ref, public-key-pem-ref}`. `kid`s must be unique; both refs are `env:NAME`; private key PKCS#8 PEM (`BEGIN PRIVATE KEY`), public key SPKI PEM (`BEGIN PUBLIC KEY`), both P-256 and matching. With no keys the application starts but cannot issue or verify device tokens: configure at least one on every API instance |
@@ -54,7 +58,7 @@ Database connection (Spring Boot): `SPRING_DATASOURCE_URL` (`jdbc:postgresql://h
 | `device-token.revocation-cache-ttl` | `60s` | How long a "device is active" answer is cached per instance (revocation latency on other instances) |
 | `worker.poll-interval` | `5s` | Time between fallback claim ticks |
 | `worker.batch-size` | `100` | 1-10000 rows claimed per tick (each on its own virtual thread) |
-| `worker.lease` | `2m` | A product duration (scaled by the fast clock). Must be longer than every app's `fallback.http-timeout`; otherwise startup fails (a warning only with the fast clock) |
+| `worker.lease` | `2m` | A product duration (scaled by the fast clock); a bare number means minutes. Must be longer than every app's `fallback.http-timeout`; otherwise startup fails (a warning only with the fast clock) |
 | `worker.backlog-refresh-interval` | `30s` | Optional; how often `rp_due_backlog` is recomputed |
 | `retention-days` | `30` | At least 1. Closed notifications older than this are deleted daily |
 | `retention.cron` | `0 17 3 * * *` | Spring cron expression (six fields, always UTC) of the daily retention run (worker role); `-` disables the schedule |
@@ -72,7 +76,7 @@ configuration without any app fails the start):
 | `identity.user-claim` | `sub` | Claim that becomes the user id (non-blank string, at most 256 characters) |
 | `identity.jwks-uri` | discovery | Optional; otherwise `<issuer>/.well-known/openid-configuration` is used. https (http only for a local issuer) |
 | `identity.grant-secret-ref` | none | Required for `signed-grant` (`env:NAME`, at least 32 bytes), rejected for other types |
-| `device-token-validity` | `90d` | Positive duration; lifetime of issued device tokens |
+| `device-token-validity` | `90d` | Positive duration (a bare number means days); lifetime of issued device tokens |
 | `default-policy` | `NOT_DELIVERED` | `NOT_DELIVERED` or `NOT_READ`; used when a registration omits `policy` |
 | `default-timeout-minutes` | `10` | At least 1; used when a registration omits `timeoutMinutes` |
 | `rate-limits.device-per-minute` | `60` | At least 1; per device, and per user for registration |
@@ -80,7 +84,7 @@ configuration without any app fails the start):
 | `fallback.url` | required | Absolute http(s) URL; use https in production |
 | `fallback.hmac-secret-ref` | required | `env:NAME` of the webhook HMAC secret |
 | `fallback.max-attempts` | `5` | 1-20 |
-| `fallback.backoff` | `1m, 2m, 4m, 8m` | Positive durations between attempts; when shorter than `max-attempts - 1` the last value repeats |
+| `fallback.backoff` | `1m, 2m, 4m, 8m` | Positive durations between attempts; a bare number means minutes (`1,2,4,8` = the default), as a comma-separated value or a YAML list. When shorter than `max-attempts - 1` the last value repeats |
 | `fallback.trigger-window-minutes` | `20` | At least 1, and at least the cumulative backoff of `max-attempts` attempts (startup fails otherwise). Leave margin: a retry whose time falls after `due_at + window` expires instead of firing |
 | `fallback.http-timeout` | `10s` | Positive; bounds the whole webhook exchange. A literal duration, never scaled by the fast clock |
 

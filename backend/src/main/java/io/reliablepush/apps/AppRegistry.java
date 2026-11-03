@@ -10,6 +10,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HexFormat;
@@ -18,6 +19,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.regex.Pattern;
+import org.springframework.boot.convert.DurationStyle;
 import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Component;
 
@@ -103,7 +105,7 @@ public class AppRegistry {
         ReliablePushProperties.Fallback f = p.fallback();
         URI url = parseWebhookUrl(base + "fallback.url", f.url());
         Secret hmac = SecretRefs.resolve(env, base + "fallback.hmac-secret-ref", f.hmacSecretRef());
-        List<Duration> backoff = List.copyOf(f.backoff());
+        List<Duration> backoff = parseBackoff(base + "fallback.backoff", f.backoff());
         if (backoff.isEmpty() || backoff.stream().anyMatch(d -> d.isZero() || d.isNegative())) {
             throw new IllegalStateException(base + "fallback.backoff must list at least one positive duration");
         }
@@ -136,6 +138,19 @@ public class AppRegistry {
                 p.defaultTimeoutMinutes(),
                 new AppConfig.RateLimits(p.rateLimits().devicePerMinute(), p.rateLimits().senderPerMinute()),
                 fallback);
+    }
+
+    /** Each entry is a Spring duration ({@code 90s}, {@code 2m}, ...); a bare number means minutes. */
+    private static List<Duration> parseBackoff(String property, List<String> values) {
+        List<Duration> parsed = new ArrayList<>(values.size());
+        for (String value : values) {
+            try {
+                parsed.add(DurationStyle.detectAndParse(value.trim(), ChronoUnit.MINUTES));
+            } catch (IllegalArgumentException e) {
+                throw new IllegalStateException(property + " entry '" + value + "' is not a duration (e.g. 2m, 90s or 2)");
+            }
+        }
+        return List.copyOf(parsed);
     }
 
     private static URI parseWebhookUrl(String property, String value) {

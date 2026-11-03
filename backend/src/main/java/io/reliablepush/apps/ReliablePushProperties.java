@@ -8,12 +8,14 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import java.time.Duration;
+import java.time.temporal.ChronoUnit;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
+import org.springframework.boot.convert.DurationUnit;
 import org.springframework.lang.Nullable;
 import org.springframework.validation.annotation.Validated;
 
@@ -22,6 +24,10 @@ import org.springframework.validation.annotation.Validated;
  * environment checks (trigger window vs backoff, secret refs, fast clock) run in {@link AppRegistry} and
  * {@code TimeScale} at startup and throw {@link IllegalStateException}. Secret/key values are never held here, only
  * {@code env:NAME} references.
+ *
+ * <p>A duration without a unit is read in the unit its key is about: minutes for {@code worker.lease} and
+ * {@code fallback.backoff} ({@code 1,2,4,8} = 1, 2, 4, 8 minutes), days for {@code device-token-validity}, Spring's
+ * default milliseconds everywhere else. An explicit unit ({@code 30s}, {@code 2m}) always wins.
  */
 @Validated
 @ConfigurationProperties("reliable-push")
@@ -69,7 +75,7 @@ public record ReliablePushProperties(
     public record Worker(
             @DefaultValue("5s") @NotNull Duration pollInterval,
             @DefaultValue("100") @Min(1) @Max(10_000) int batchSize,
-            @DefaultValue("2m") @NotNull Duration lease) {}
+            @DefaultValue("2m") @DurationUnit(ChronoUnit.MINUTES) @NotNull Duration lease) {}
 
     /** {@code minuteDuration} is null unless the fast clock is requested; allowed only in profiles e2e or demo. */
     public record Testing(@Nullable Duration minuteDuration) {}
@@ -83,7 +89,7 @@ public record ReliablePushProperties(
             @NotBlank @Pattern(regexp = "[0-9a-f]{64}", message = "must be 64 lowercase hex characters (SHA-256)")
                     String senderApiKeySha256,
             @Valid @NotNull Identity identity,
-            @DefaultValue("90d") @NotNull Duration deviceTokenValidity,
+            @DefaultValue("90d") @DurationUnit(ChronoUnit.DAYS) @NotNull Duration deviceTokenValidity,
             @DefaultValue("NOT_DELIVERED") @Pattern(regexp = "NOT_DELIVERED|NOT_READ") String defaultPolicy,
             @DefaultValue("10") @Min(1) int defaultTimeoutMinutes,
             @Valid @DefaultValue RateLimits rateLimits,
@@ -104,7 +110,12 @@ public record ReliablePushProperties(
             @NotBlank String url,
             @NotBlank String hmacSecretRef,
             @DefaultValue("5") @Min(1) @Max(20) int maxAttempts,
-            @DefaultValue({"1m", "2m", "4m", "8m"}) @NotNull List<@NotNull Duration> backoff,
+            /**
+             * Durations, parsed by {@link AppRegistry} with minutes as the unit of a bare number. Kept as strings
+             * because Spring applies {@code @DurationUnit} to a comma-separated value but not to the elements of
+             * an indexed (YAML list) value.
+             */
+            @DefaultValue({"1m", "2m", "4m", "8m"}) @NotNull List<@NotBlank String> backoff,
             @DefaultValue("20") @Min(1) int triggerWindowMinutes,
             @DefaultValue("10s") @NotNull Duration httpTimeout) {}
 }

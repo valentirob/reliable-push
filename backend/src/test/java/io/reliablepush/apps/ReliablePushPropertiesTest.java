@@ -154,6 +154,68 @@ class ReliablePushPropertiesTest {
     }
 
     @Test
+    void unitLessMinuteDurationsBindAsMinutes() {
+        Map<String, Object> p = shop(m -> {
+            m.put(SHOP + "fallback.backoff", "1,2,4,8");
+            m.put(SHOP + "device-token-validity", "30");
+            m.put("reliable-push.worker.lease", "3");
+        });
+
+        runner.withPropertyValues(asProperties(p)).run(context -> {
+            assertThat(context).hasNotFailed();
+            AppConfig app = context.getBean(AppRegistry.class).byId("shop").orElseThrow();
+            assertThat(app.fallback().backoff())
+                    .containsExactly(Duration.ofMinutes(1), Duration.ofMinutes(2), Duration.ofMinutes(4), Duration.ofMinutes(8));
+            assertThat(app.deviceTokenValidity()).isEqualTo(Duration.ofDays(30));
+            assertThat(context.getBean(ReliablePushProperties.class).worker().lease()).isEqualTo(Duration.ofMinutes(3));
+        });
+    }
+
+    @Test
+    void unitLessBackoffAsIndexedListBindsAsMinutes() {
+        // the YAML list form (backoff: [1, 2]) arrives as indexed properties
+        Map<String, Object> p = shop(m -> {
+            m.put(SHOP + "fallback.backoff[0]", "1");
+            m.put(SHOP + "fallback.backoff[1]", "2");
+        });
+
+        runner.withPropertyValues(asProperties(p)).run(context -> {
+            assertThat(context).hasNotFailed();
+            assertThat(context.getBean(AppRegistry.class).byId("shop").orElseThrow().fallback().backoff())
+                    .containsExactly(Duration.ofMinutes(1), Duration.ofMinutes(2));
+        });
+    }
+
+    @Test
+    void malformedBackoffEntryFailsTheStart() {
+        Map<String, Object> p = shop(m -> m.put(SHOP + "fallback.backoff", "1m,soon"));
+
+        runner.withPropertyValues(asProperties(p)).run(context -> {
+            assertThat(context).hasFailed();
+            assertThat(rootMessage(context.getStartupFailure())).contains("fallback.backoff").contains("soon");
+        });
+    }
+
+    @Test
+    void explicitUnitsStillWin() {
+        Map<String, Object> p = shop(m -> {
+            m.put(SHOP + "fallback.backoff", "1m,2s,90s,1h");
+            m.put(SHOP + "fallback.trigger-window-minutes", "70");
+            m.put(SHOP + "device-token-validity", "12h");
+            m.put("reliable-push.worker.lease", "30s");
+        });
+
+        runner.withPropertyValues(asProperties(p)).run(context -> {
+            assertThat(context).hasNotFailed();
+            AppConfig app = context.getBean(AppRegistry.class).byId("shop").orElseThrow();
+            assertThat(app.fallback().backoff()).containsExactly(
+                    Duration.ofMinutes(1), Duration.ofSeconds(2), Duration.ofSeconds(90), Duration.ofHours(1));
+            assertThat(app.deviceTokenValidity()).isEqualTo(Duration.ofHours(12));
+            assertThat(context.getBean(ReliablePushProperties.class).worker().lease()).isEqualTo(Duration.ofSeconds(30));
+        });
+    }
+
+    @Test
     void zeroAppsFailTheStart() {
         runner.run(context -> {
             assertThat(context).hasFailed();
