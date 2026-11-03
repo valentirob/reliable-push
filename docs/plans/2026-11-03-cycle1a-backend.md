@@ -206,9 +206,9 @@ Expected: `openjdk version "21...` and a server version. Export `JAVA_HOME=/opt/
   - `OidcIdTokenVerifier` — JWKS from `jwks-uri` or `<issuer>/.well-known/openid-configuration`, nimbus `JWKSourceBuilder` with cache (TTL 15 min, refresh on unknown kid, outage tolerance); checks `iss`, `aud`, `exp`, signature RS256/ES256; `userId` = configured claim (default `sub`).
   - `SignedGrantVerifier` — HS256 JWT signed with `grant-secret-ref`, max lifetime 5 min, `aud=appId`, `sub=userId`.
   - `FakeOidc` — WireMock-backed issuer: `String issuer()`, `String idToken(String sub, String aud, Duration ttl)`.
-- [ ] **Step 1: Failing tests** — OIDC: `validTokenYieldsSub()`, `wrongAudienceRejected()`, `expiredRejected()`, `unknownKidTriggersOneJwksRefresh()` (WireMock verifies JWKS fetched exactly twice), `customUserClaim()` (`user-claim: email`). Grant: `validGrant()`, `lifetimeOver5MinRejected()`, `wrongSecretRejected()`.
-- [ ] **Step 2: Run** → FAIL. **Step 3: Implement.** **Step 4: Run** `./mvnw verify` → PASS.
-- [ ] **Step 5: Commit** `feat(backend): pluggable identity verifiers`
+- [x] **Step 1: Failing tests** — OIDC: `validTokenYieldsSub()`, `wrongAudienceRejected()`, `expiredRejected()`, `unknownKidTriggersOneJwksRefresh()` (WireMock verifies JWKS fetched exactly twice), `customUserClaim()` (`user-claim: email`). Grant: `validGrant()`, `lifetimeOver5MinRejected()`, `wrongSecretRejected()`.
+- [x] **Step 2: Run** → FAIL. **Step 3: Implement.** **Step 4: Run** `./mvnw verify` → PASS.
+- [x] **Step 5: Commit** `feat(backend): pluggable identity verifiers`
 
 ### Task 10: Devices API and device auth filter
 
