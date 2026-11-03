@@ -27,10 +27,11 @@ import tools.jackson.databind.json.JsonMapper;
 
 /**
  * Handles one claimed row (spec 2): trigger-window check, webhook call, outcome. Runs outside any transaction, so no
- * row lock is held during the HTTP call; the outcome is persisted with a conditional update ({@code DISPATCHING} and
- * the attempts count seen at claim time). If another worker re-claimed the row after this worker's lease ran out and
- * persisted first, the outcome is dropped (logged, not counted): the row keeps exactly one final state, though the
- * webhook may have been called twice (receivers de-duplicate on {@code Idempotency-Key}).
+ * row lock is held during the HTTP call; the outcome is persisted with an update fenced on this worker's lease
+ * ({@code lease_until} it claimed with, plus {@code DISPATCHING} and the attempts count). If another worker re-claimed
+ * the row after this worker's lease ran out, this worker's outcome is dropped (logged, not counted) whether it finishes
+ * before or after the re-claimer: only the current lease holder writes. The row keeps exactly one final state, though
+ * the webhook may have been called twice (receivers de-duplicate on {@code Idempotency-Key}).
  *
  * <p>Every row gets its own {@code trace.id} and {@code rp.tracking_id} in the {@link ThreadContext}, removed when done.
  * Never logged: the fallback payload and the raw user id.
@@ -38,6 +39,12 @@ import tools.jackson.databind.json.JsonMapper;
 final class FallbackDispatcher {
 
     private static final Logger LOG = LogManager.getLogger(FallbackDispatcher.class);
+
+    /**
+     * Grace period for rows of an app this replica does not know (no app config, so no app window): the default
+     * {@code fallback.trigger-window-minutes}, in product minutes.
+     */
+    static final int UNCONFIGURED_APP_WINDOW_MINUTES = 20;
 
     static final String TRACE_ID = "trace.id";
     static final String TRACKING_ID = "rp.tracking_id";
@@ -88,8 +95,8 @@ final class FallbackDispatcher {
         int attempt = row.fallbackAttempts() + 1;
         Map<String, Object> claimFields = fields(row, "success");
         claimFields.put("rp.attempt", attempt);
-        if (row.previousState() == NotificationState.DISPATCHING) {
-            // a due retry or a lease that ran out (previous worker crashed or too slow): the row cannot tell
+        if (row.reclaimed()) {
+            // the previous holder never persisted an outcome: it crashed or its call outlasted the lease
             EventLog.warn("fallback.reclaimed", claimFields);
         } else {
             EventLog.info("fallback.claimed", claimFields);
@@ -97,16 +104,7 @@ final class FallbackDispatcher {
 
         AppConfig app = apps.byId(row.appId()).orElse(null);
         if (app == null) {
-            // e.g. a rolling deploy where this replica's configuration does not know the app yet: leave it for later
-            Instant next = now().plus(lease);
-            if (notifications.reschedule(row.id(), row.fallbackAttempts(), row.fallbackAttempts(), next)) {
-                Map<String, Object> f = fields(row, "unknown");
-                f.put("reason", "app_not_configured");
-                f.put("rp.next_attempt_at", next.toString());
-                EventLog.warn("fallback.retry_scheduled", f);
-            } else {
-                dropped("retry_scheduled");
-            }
+            unconfiguredApp(row);
             return;
         }
 
@@ -157,7 +155,7 @@ final class FallbackDispatcher {
                 }
             }
             case Outcome.RetryAt retry -> {
-                if (notifications.reschedule(row.id(), row.fallbackAttempts(), attempt, retry.at())) {
+                if (notifications.reschedule(row.id(), row.leaseUntil(), row.fallbackAttempts(), attempt, retry.at())) {
                     Map<String, Object> f = fields(row, "failure");
                     f.put("rp.attempt", attempt);
                     f.put("event.duration", duration);
@@ -173,6 +171,29 @@ final class FallbackDispatcher {
         }
     }
 
+    /**
+     * A row of an app this replica does not know, e.g. during a rolling deploy where the new app is only configured on
+     * newer replicas: left for later (re-claimable after one lease, attempts unchanged) while
+     * {@code now <= dueAt + 20 product minutes}, then closed as {@code FALLBACK_EXPIRED} so it neither stays due forever
+     * nor keeps competing for batch slots.
+     */
+    private void unconfiguredApp(ClaimedNotification row) {
+        Instant now = now();
+        if (now.isAfter(row.dueAt().plus(timeScale.minutes(UNCONFIGURED_APP_WINDOW_MINUTES)))) {
+            expire(row, row.fallbackAttempts(), "app_not_configured");
+            return;
+        }
+        Instant next = now.plus(lease);
+        if (notifications.reschedule(row.id(), row.leaseUntil(), row.fallbackAttempts(), row.fallbackAttempts(), next)) {
+            Map<String, Object> f = fields(row, "unknown");
+            f.put("reason", "app_not_configured");
+            f.put("rp.next_attempt_at", next.toString());
+            EventLog.warn("fallback.retry_scheduled", f);
+        } else {
+            dropped("retry_scheduled");
+        }
+    }
+
     private void expire(ClaimedNotification row, int attempts, String reason) {
         if (close(row, attempts, NotificationState.FALLBACK_EXPIRED, "expired")) {
             Map<String, Object> f = fields(row, "failure");
@@ -184,7 +205,7 @@ final class FallbackDispatcher {
     }
 
     private boolean close(ClaimedNotification row, int attempts, NotificationState state, String outcome) {
-        if (notifications.close(row.id(), row.fallbackAttempts(), attempts, state, now())) {
+        if (notifications.close(row.id(), row.leaseUntil(), row.fallbackAttempts(), attempts, state, now())) {
             return true;
         }
         dropped(outcome);
@@ -192,7 +213,7 @@ final class FallbackDispatcher {
     }
 
     private static void dropped(String outcome) {
-        LOG.warn("Fallback outcome {} dropped: the row was re-claimed by another worker after this worker's lease ran out",
+        LOG.warn("Fallback outcome {} dropped: this worker's lease ran out and another worker re-claimed the row",
                 outcome);
     }
 

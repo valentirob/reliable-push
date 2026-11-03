@@ -175,9 +175,12 @@ public class NotificationRepository {
 
     /**
      * Fallback worker: claims up to {@code batch} due rows (spec 2, claim query) and leases them until
-     * {@code now + lease}. Selection and update are one statement, hence one transaction: due rows are locked with
+     * {@code leaseUntil}. Selection and update are one statement, hence one transaction: due rows are locked with
      * {@code FOR NO KEY UPDATE SKIP LOCKED} (rows another worker is claiming right now are skipped, and event inserts
-     * referencing a row are not blocked), then set to {@code DISPATCHING} with {@code next_attempt_at = now + lease}.
+     * referencing a row are not blocked), then set to {@code DISPATCHING} with
+     * {@code next_attempt_at = lease_until = leaseUntil}. A row whose {@code lease_until} was still set is reported as
+     * re-claimed (its previous holder never persisted an outcome); its lease is replaced, which fences the previous
+     * holder's outcome updates.
      * Concurrent workers therefore never claim the same row twice; a row whose lease ran out (crashed worker) or whose
      * retry backoff is over is due again. {@code due_at} and {@code fallback_attempts} are not changed: the trigger
      * window is measured from the original due time, and attempts are counted when an outcome is persisted.
@@ -189,7 +192,7 @@ public class NotificationRepository {
     public List<ClaimedNotification> claimDue(Instant now, Instant leaseUntil, int batch) {
         return jdbc.sql("""
                         with due as (
-                            select id, state as previous_state
+                            select id, state as previous_state, lease_until is not null as reclaimed
                               from notification
                              where (state in ('PENDING', 'DELIVERED') and due_at <= :now)
                                 or (state = 'DISPATCHING' and next_attempt_at <= :now)
@@ -198,11 +201,11 @@ public class NotificationRepository {
                                for no key update skip locked
                         )
                         update notification n
-                           set state = 'DISPATCHING', next_attempt_at = :leaseUntil
+                           set state = 'DISPATCHING', next_attempt_at = :leaseUntil, lease_until = :leaseUntil
                           from due
                          where n.id = due.id
                         returning n.id, n.app_id, n.user_id, n.policy, n.fallback_payload::text as fallback_payload,
-                                  n.due_at, n.fallback_attempts, due.previous_state
+                                  n.due_at, n.fallback_attempts, due.previous_state, due.reclaimed, n.lease_until
                         """)
                 .param("now", timestamp(now))
                 .param("leaseUntil", timestamp(leaseUntil))
@@ -215,26 +218,31 @@ public class NotificationRepository {
                         rs.getString("fallback_payload"),
                         instant(rs, "due_at"),
                         rs.getInt("fallback_attempts"),
-                        NotificationState.valueOf(rs.getString("previous_state"))))
+                        NotificationState.valueOf(rs.getString("previous_state")),
+                        rs.getBoolean("reclaimed"),
+                        instant(rs, "lease_until")))
                 .list();
     }
 
     /**
-     * Fallback worker: records a failed attempt and when to try again. Conditional on the row still being
-     * {@code DISPATCHING} with {@code expectedAttempts}: if another worker re-claimed the row after this worker's lease
-     * ran out and already persisted its own outcome, nothing is overwritten.
+     * Fallback worker: records when to try again and releases the lease ({@code lease_until} cleared, so the next
+     * claim is a normal one). Fenced on the caller's lease: only the worker still holding {@code claimedLeaseUntil}
+     * (and the attempts count it claimed with) writes. If another worker re-claimed the row after this worker's lease
+     * ran out, nothing is overwritten, whichever of the two finishes first.
      *
-     * @return {@code false} if the row changed meanwhile (the caller drops its outcome)
+     * @return {@code false} if this worker no longer holds the lease (the caller drops its outcome)
      */
-    public boolean reschedule(UUID id, int expectedAttempts, int attempts, Instant nextAttemptAt) {
+    public boolean reschedule(UUID id, Instant claimedLeaseUntil, int expectedAttempts, int attempts, Instant nextAttemptAt) {
         return jdbc.sql("""
                         update notification
-                           set fallback_attempts = :attempts, next_attempt_at = :next
-                         where id = :id and state = 'DISPATCHING' and fallback_attempts = :expected
+                           set fallback_attempts = :attempts, next_attempt_at = :next, lease_until = null
+                         where id = :id and state = 'DISPATCHING' and lease_until = :lease
+                           and fallback_attempts = :expected
                         """)
                         .param("attempts", attempts)
                         .param("next", timestamp(nextAttemptAt))
                         .param("id", id)
+                        .param("lease", timestamp(claimedLeaseUntil))
                         .param("expected", expectedAttempts)
                         .update()
                 == 1;
@@ -243,11 +251,12 @@ public class NotificationRepository {
     /**
      * Fallback worker: closes a {@code DISPATCHING} row in a final fallback state ({@code FALLBACK_TRIGGERED},
      * {@code FALLBACK_FAILED} or {@code FALLBACK_EXPIRED}): {@code closed_at = at}, {@code due_at} and
-     * {@code next_attempt_at} cleared. Conditional like {@link #reschedule}.
+     * {@code next_attempt_at} and {@code lease_until} cleared. Fenced on the caller's lease like {@link #reschedule}.
      *
-     * @return {@code false} if the row changed meanwhile (the caller drops its outcome)
+     * @return {@code false} if this worker no longer holds the lease (the caller drops its outcome)
      */
-    public boolean close(UUID id, int expectedAttempts, int attempts, NotificationState state, Instant at) {
+    public boolean close(
+            UUID id, Instant claimedLeaseUntil, int expectedAttempts, int attempts, NotificationState state, Instant at) {
         if (state != NotificationState.FALLBACK_TRIGGERED
                 && state != NotificationState.FALLBACK_FAILED
                 && state != NotificationState.FALLBACK_EXPIRED) {
@@ -256,13 +265,15 @@ public class NotificationRepository {
         return jdbc.sql("""
                         update notification
                            set state = :state, fallback_attempts = :attempts, closed_at = :at,
-                               due_at = null, next_attempt_at = null
-                         where id = :id and state = 'DISPATCHING' and fallback_attempts = :expected
+                               due_at = null, next_attempt_at = null, lease_until = null
+                         where id = :id and state = 'DISPATCHING' and lease_until = :lease
+                           and fallback_attempts = :expected
                         """)
                         .param("state", state.name())
                         .param("attempts", attempts)
                         .param("at", timestamp(at))
                         .param("id", id)
+                        .param("lease", timestamp(claimedLeaseUntil))
                         .param("expected", expectedAttempts)
                         .update()
                 == 1;

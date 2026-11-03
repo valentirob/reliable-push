@@ -21,6 +21,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
@@ -34,6 +35,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import org.apache.logging.log4j.Level;
@@ -190,11 +192,15 @@ class FallbackSchedulerIT extends PostgresTestBase {
         return insert(APP, "user-" + UUID.randomUUID(), policy, dueAt);
     }
 
-    /** A row a crashed worker left behind: DISPATCHING with the given lease end and attempts. */
+    /** A row a crashed worker left behind: DISPATCHING, still holding its lease (lease_until set), with attempts. */
     private UUID dispatchingLeftover(Instant dueAt, Instant leaseUntil, int attempts) {
         UUID id = insert(FallbackPolicy.NOT_DELIVERED, dueAt);
-        jdbc.sql("update notification set state = 'DISPATCHING', next_attempt_at = ?, fallback_attempts = ? where id = ?")
-                .params(leaseUntil.atOffset(java.time.ZoneOffset.UTC), attempts, id)
+        OffsetDateTime lease = leaseUntil.atOffset(ZoneOffset.UTC);
+        jdbc.sql("""
+                        update notification set state = 'DISPATCHING', next_attempt_at = ?, lease_until = ?, fallback_attempts = ?
+                         where id = ?
+                        """)
+                .params(lease, lease, attempts, id)
                 .update();
         return id;
     }
@@ -215,7 +221,7 @@ class FallbackSchedulerIT extends PostgresTestBase {
 
     private Row row(UUID id) {
         return jdbc.sql("""
-                        select state, due_at, closed_at, next_attempt_at, fallback_attempts, delivered_at
+                        select state, due_at, closed_at, next_attempt_at, fallback_attempts, delivered_at, lease_until
                           from notification where id = ?
                         """)
                 .param(id)
@@ -225,12 +231,19 @@ class FallbackSchedulerIT extends PostgresTestBase {
                         instant(rs.getObject("closed_at", OffsetDateTime.class)),
                         instant(rs.getObject("next_attempt_at", OffsetDateTime.class)),
                         rs.getInt("fallback_attempts"),
-                        instant(rs.getObject("delivered_at", OffsetDateTime.class))))
+                        instant(rs.getObject("delivered_at", OffsetDateTime.class)),
+                        instant(rs.getObject("lease_until", OffsetDateTime.class))))
                 .single();
     }
 
     private record Row(
-            NotificationState state, Instant dueAt, Instant closedAt, Instant nextAttemptAt, int attempts, Instant deliveredAt) {}
+            NotificationState state,
+            Instant dueAt,
+            Instant closedAt,
+            Instant nextAttemptAt,
+            int attempts,
+            Instant deliveredAt,
+            Instant leaseUntil) {}
 
     private static Instant instant(OffsetDateTime value) {
         return value == null ? null : value.toInstant();
@@ -265,6 +278,7 @@ class FallbackSchedulerIT extends PostgresTestBase {
         assertThat(row.closedAt()).isNotNull();
         assertThat(row.dueAt()).isNull();
         assertThat(row.nextAttemptAt()).isNull();
+        assertThat(row.leaseUntil()).isNull();
     }
 
     // ---- tests -------------------------------------------------------------------------------------------------
@@ -468,6 +482,7 @@ class FallbackSchedulerIT extends PostgresTestBase {
 
         Row afterFirst = row(id);
         assertThat(afterFirst.state()).isEqualTo(NotificationState.DISPATCHING);
+        assertThat(afterFirst.leaseUntil()).isNull();
         assertThat(afterFirst.attempts()).isEqualTo(1);
         assertThat(afterFirst.nextAttemptAt()).isEqualTo(now().plus(minutes(1)));
         assertThat(afterFirst.dueAt()).isEqualTo(due.truncatedTo(ChronoUnit.MICROS));
@@ -481,10 +496,10 @@ class FallbackSchedulerIT extends PostgresTestBase {
         assertThat(webhook.callsFor(id)).extracting(FallbackCall::attempt).containsExactly(1, 2);
         assertClosed(id, NotificationState.FALLBACK_TRIGGERED);
         assertThat(row(id).attempts()).isEqualTo(2);
-        // claiming a row that was already DISPATCHING is logged as fallback.reclaimed (the row cannot tell a due retry
-        // from a lease that ran out)
+        // a due retry is a normal claim: the previous outcome released the lease (only a lost lease is a re-claim)
         assertThat(actions(id)).containsExactly(
-                "fallback.claimed", "fallback.retry_scheduled", "fallback.reclaimed", "fallback.dispatched");
+                "fallback.claimed", "fallback.retry_scheduled", "fallback.claimed", "fallback.dispatched");
+        assertThat(event(id, "fallback.claimed").getLevel()).isEqualTo(Level.INFO);
     }
 
     @Test
@@ -521,7 +536,7 @@ class FallbackSchedulerIT extends PostgresTestBase {
         assertThat(webhook.count(id)).isEqualTo(2);
         assertClosed(id, NotificationState.FALLBACK_EXPIRED);
         assertThat(actions(id)).containsExactly(
-                "fallback.claimed", "fallback.retry_scheduled", "fallback.reclaimed", "fallback.expired");
+                "fallback.claimed", "fallback.retry_scheduled", "fallback.claimed", "fallback.expired");
     }
 
     @Test
@@ -556,6 +571,58 @@ class FallbackSchedulerIT extends PostgresTestBase {
     }
 
     @Test
+    void staleLeaseHolderFinishingFirstIsDroppedAndReclaimerWins() throws Exception {
+        UUID id = insert(FallbackPolicy.NOT_DELIVERED, now().minusMillis(1));
+        CountDownLatch firstInCall = new CountDownLatch(1);
+        CountDownLatch secondInCall = new CountDownLatch(1);
+        CountDownLatch firstPersisted = new CountDownLatch(1);
+        AtomicInteger calls = new AtomicInteger();
+        webhook.script.put(id, call -> {
+            try {
+                if (calls.incrementAndGet() == 1) {
+                    // worker A: slow call, its lease runs out meanwhile; it fails after B re-claimed and called
+                    firstInCall.countDown();
+                    assertThat(secondInCall.await(30, TimeUnit.SECONDS)).isTrue();
+                    return new WebhookResult.Retryable("timeout");
+                }
+                // worker B: the re-claimer; succeeds only after A tried to persist its stale outcome
+                secondInCall.countDown();
+                assertThat(firstPersisted.await(30, TimeUnit.SECONDS)).isTrue();
+                return new WebhookResult.Success(200);
+            } catch (InterruptedException e) {
+                throw new IllegalStateException(e);
+            }
+        });
+
+        List<LogEvent> dropped;
+        try (EventCapture dispatcherLog = new EventCapture(FallbackDispatcher.class.getName());
+                ExecutorService workers = Executors.newFixedThreadPool(2)) {
+            Future<Integer> workerA = workers.submit(scheduler::tick);
+            assertThat(firstInCall.await(30, TimeUnit.SECONDS)).isTrue();
+            clock.advance(minutes(3)); // past A's lease (2 product minutes)
+            Future<Integer> workerB = workers.submit(scheduler::tick);
+
+            workerA.get(30, TimeUnit.SECONDS);
+            Row afterStale = row(id);
+            firstPersisted.countDown();
+            workerB.get(30, TimeUnit.SECONDS);
+
+            // A's Retryable was fenced off by B's newer lease: nothing written
+            assertThat(afterStale.state()).isEqualTo(NotificationState.DISPATCHING);
+            assertThat(afterStale.attempts()).isZero();
+            dropped = List.copyOf(dispatcherLog.events()).stream()
+                    .filter(e -> id.toString().equals(e.getContextData().getValue("rp.tracking_id")))
+                    .toList();
+        }
+
+        assertThat(webhook.count(id)).isEqualTo(2);
+        assertClosed(id, NotificationState.FALLBACK_TRIGGERED);
+        assertThat(row(id).attempts()).isEqualTo(1);
+        assertThat(actions(id)).containsExactly("fallback.claimed", "fallback.reclaimed", "fallback.dispatched");
+        assertThat(dropped).singleElement().satisfies(e -> assertThat(e.getLevel()).isEqualTo(Level.WARN));
+    }
+
+    @Test
     void rowOfAnUnconfiguredAppIsLeftForLater() {
         UUID id = insert("fb-unknown-app", "user-" + UUID.randomUUID(), FallbackPolicy.NOT_DELIVERED, now().minusMillis(1));
 
@@ -566,10 +633,26 @@ class FallbackSchedulerIT extends PostgresTestBase {
         assertThat(row.state()).isEqualTo(NotificationState.DISPATCHING);
         assertThat(row.attempts()).isZero();
         assertThat(row.nextAttemptAt()).isAfter(now());
+        assertThat(row.leaseUntil()).isNull();
         assertThat(actions(id)).containsExactly("fallback.claimed", "fallback.retry_scheduled");
         assertThat(EventCapture.data(event(id, "fallback.retry_scheduled"))).containsEntry("reason", "app_not_configured");
 
         // do not leave a forever-due row in the shared database
         jdbc.sql("delete from notification where id = ?").param(id).update();
+    }
+
+    @Test
+    void rowOfAnUnconfiguredAppExpiresAfterTheDefaultWindow() {
+        // no app config, so the default trigger window (20 product minutes) bounds the grace period
+        UUID id = insert("fb-unknown-app", "user-" + UUID.randomUUID(), FallbackPolicy.NOT_DELIVERED, now().minus(minutes(21)));
+        double expiredBefore = fallbackCount("expired");
+
+        scheduler.tick();
+
+        assertThat(webhook.count(id)).isZero();
+        assertClosed(id, NotificationState.FALLBACK_EXPIRED);
+        assertThat(actions(id)).containsExactly("fallback.claimed", "fallback.expired");
+        assertThat(EventCapture.data(event(id, "fallback.expired"))).containsEntry("reason", "app_not_configured");
+        assertThat(fallbackCount("expired")).isEqualTo(expiredBefore + 1);
     }
 }

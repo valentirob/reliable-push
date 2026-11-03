@@ -56,6 +56,30 @@ class SchemaIT extends PostgresTestBase {
     }
 
     @Test
+    void leaseUntilOnlyOnDispatchingRows() {
+        assertThat(jdbc.sql("""
+                        select data_type || ':' || is_nullable from information_schema.columns
+                         where table_schema = current_schema() and table_name = 'notification' and column_name = 'lease_until'
+                        """).query(String.class).single())
+                .isEqualTo("timestamp with time zone:YES");
+
+        UUID id = UUID.randomUUID();
+        jdbc.sql("""
+                insert into notification
+                  (id, app_id, user_id, policy, timeout_minutes, fallback_payload, state, created_at, lease_until)
+                values (?, 'app-lease', 'u1', 'NOT_READ', 10, '{}'::jsonb, 'DISPATCHING', now(), now())
+                """).param(id).update();
+
+        assertThatThrownBy(() -> jdbc.sql("update notification set state = 'FALLBACK_TRIGGERED', closed_at = now() where id = ?")
+                        .param(id).update())
+                .isInstanceOf(DataIntegrityViolationException.class);
+        assertThatCode(() -> jdbc.sql("""
+                        update notification set state = 'FALLBACK_TRIGGERED', closed_at = now(), lease_until = null where id = ?
+                        """).param(id).update())
+                .doesNotThrowAnyException();
+    }
+
+    @Test
     void stateConstraint() {
         assertThatThrownBy(() -> insertNotification("app-state", null, "BOGUS", "NOT_READ"))
                 .isInstanceOf(DataIntegrityViolationException.class);
