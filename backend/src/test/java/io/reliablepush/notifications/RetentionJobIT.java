@@ -30,8 +30,9 @@ import org.springframework.test.context.TestPropertySource;
  *
  * <p>The database is shared with every other IT and the purge is global, so the clock is fixed in the year 2020
  * (before any row another test creates, which are 2026 or 2100): only this class's rows can be older than the cutoff.
- * The assertions are on this test's own rows, and the logged count is a lower bound. The scheduled fallback poll is
- * pushed out to one day, and the open rows are due in the year 2200, so no worker ever claims them.
+ * The assertions are on this test's own rows, and since nothing else can be that old the logged count is exact.
+ * The scheduled fallback poll is pushed out to one day, and the open rows are due in the year 2200, so no worker
+ * ever claims them.
  */
 @ActiveProfiles({"test", "worker"})
 @TestPropertySource(properties = "reliable-push.worker.poll-interval=1d")
@@ -139,7 +140,7 @@ class RetentionJobIT extends PostgresTestBase {
         assertThat(exists(pending)).isTrue();
         assertThat(exists(dispatching)).isTrue();
         assertThat(purgedEvents()).hasSize(1);
-        assertThat((Integer) EventCapture.data(purgedEvents().get(0)).get("count")).isGreaterThanOrEqualTo(1);
+        assertThat(EventCapture.data(purgedEvents().get(0))).containsEntry("count", 1);
     }
 
     @Test
@@ -164,7 +165,7 @@ class RetentionJobIT extends PostgresTestBase {
                         .single())
                 .isZero();
         assertThat(exists(recent)).isTrue();
-        assertThat((Integer) EventCapture.data(purgedEvents().get(0)).get("count")).isGreaterThanOrEqualTo(total);
+        assertThat(EventCapture.data(purgedEvents().get(0))).containsEntry("count", total);
     }
 
     @Test
