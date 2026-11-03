@@ -119,6 +119,40 @@ class SchemaIT extends PostgresTestBase {
     }
 
     @Test
+    void eventUniquePerNotificationAndType() {
+        UUID notificationId = UUID.randomUUID();
+        jdbc.sql("""
+                insert into notification
+                  (id, app_id, user_id, policy, timeout_minutes, fallback_payload, state, created_at)
+                values (?, 'app-uniq', 'u1', 'NOT_READ', 10, '{}'::jsonb, 'PENDING', now())
+                """).param(notificationId).update();
+
+        insertEvent(notificationId, null, "DELIVERED");
+
+        assertThatThrownBy(() -> insertEvent(notificationId, null, "DELIVERED"))
+                .isInstanceOf(DataIntegrityViolationException.class);
+        assertThatCode(() -> insertEvent(notificationId, null, "READ")).doesNotThrowAnyException();
+        assertThat(jdbc.sql("select count(*) from pg_indexes where schemaname = current_schema()"
+                        + " and indexname = 'notification_event_notification_type'")
+                .query(Integer.class).single()).isZero();
+    }
+
+    @Test
+    void closedRowHasNoDueAt() {
+        UUID id = UUID.randomUUID();
+        jdbc.sql("""
+                insert into notification
+                  (id, app_id, user_id, policy, timeout_minutes, fallback_payload, state, created_at, due_at)
+                values (?, 'app-close', 'u1', 'NOT_READ', 10, '{}'::jsonb, 'PENDING', now(), now())
+                """).param(id).update();
+
+        assertThatThrownBy(() -> jdbc.sql("update notification set closed_at = now() where id = ?").param(id).update())
+                .isInstanceOf(DataIntegrityViolationException.class);
+        assertThatCode(() -> jdbc.sql("update notification set closed_at = now(), due_at = null where id = ?")
+                .param(id).update()).doesNotThrowAnyException();
+    }
+
+    @Test
     void deviceRejectsUnknownPlatform() {
         assertThatThrownBy(() -> jdbc.sql("""
                 insert into device (id, app_id, user_id, platform, token_version, created_at, last_seen_at)

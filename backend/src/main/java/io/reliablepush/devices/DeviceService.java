@@ -104,6 +104,18 @@ public class DeviceService {
         return new DeviceTokenResponse(null, token.token(), token.expiresAt());
     }
 
+    /**
+     * Records that the device of an authenticated request was seen. Conditional on the presented token version, like
+     * {@link #refresh}: a token that lost against a re-registration or revocation within the cache TTL is rejected.
+     */
+    public void markSeen(DevicePrincipal principal) {
+        Instant now = clock.instant().truncatedTo(ChronoUnit.MICROS);
+        if (!repository.touch(principal.deviceId(), principal.appId(), principal.userId(), principal.tokenVersion(), now)) {
+            activeCache.evict(principal.deviceId());
+            throw new UnauthorizedException(TOKEN_REJECTED, DEVICE_CHALLENGE);
+        }
+    }
+
     /** Revokes the device: every token it ever had stops working (on other instances after the cache TTL). */
     public void revoke(DevicePrincipal principal) {
         Instant now = clock.instant().truncatedTo(ChronoUnit.MICROS);

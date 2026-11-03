@@ -17,7 +17,7 @@ import org.springframework.stereotype.Repository;
 /**
  * Persistence of notifications (plain SQL through {@link JdbcClient}). Every state change is a conditional update
  * ({@code WHERE state IN (...)}), so concurrent writers cannot overwrite each other (spec 2, race safety); every
- * update that closes a row sets {@code closed_at} and clears {@code due_at}. Used by the {@code notifications},
+ * update that closes a row sets {@code closed_at} and clears {@code due_at} (a closed row never waits for the worker). Used by the {@code notifications},
  * {@code tracking} and {@code fallback} modules through these public methods only.
  */
 @Repository
@@ -126,6 +126,49 @@ public class NotificationRepository {
                         .param("at", timestamp(at))
                         .param("id", id)
                         .param("appId", appId)
+                        .update()
+                == 1;
+    }
+
+    /**
+     * The device reported {@code DELIVERED}: {@code PENDING -> DELIVERED}, {@code delivered_at = at}. Under policy
+     * {@code NOT_DELIVERED} the policy is now satisfied, so the row is closed ({@code closed_at = at}, {@code due_at}
+     * cleared) and the fallback worker no longer claims it; under {@code NOT_READ} it stays due. A conditional update
+     * on {@code state = 'PENDING'}: it races with the worker's claim and with cancel, and exactly one wins.
+     *
+     * @return {@code true} if the row changed (it was still {@code PENDING})
+     */
+    public boolean markDelivered(UUID id, Instant at) {
+        return jdbc.sql("""
+                        update notification
+                           set state = 'DELIVERED', delivered_at = :at,
+                               due_at = case when policy = 'NOT_DELIVERED' then null else due_at end,
+                               closed_at = case when policy = 'NOT_DELIVERED' then :at else closed_at end
+                         where id = :id and state = 'PENDING'
+                        """)
+                        .param("at", timestamp(at))
+                        .param("id", id)
+                        .update()
+                == 1;
+    }
+
+    /**
+     * The device reported {@code READ}: {@code PENDING | DELIVERED -> READ}, {@code read_at = at}, {@code delivered_at}
+     * set when still unset (read implies delivered), {@code due_at} cleared, {@code closed_at = at} unless a
+     * {@code NOT_DELIVERED} delivery closed the row earlier (a closed {@code DELIVERED} row can still become
+     * {@code READ}; its {@code closed_at} is kept).
+     *
+     * @return {@code true} if the row changed
+     */
+    public boolean markRead(UUID id, Instant at) {
+        return jdbc.sql("""
+                        update notification
+                           set state = 'READ', read_at = :at, delivered_at = coalesce(delivered_at, :at),
+                               due_at = null, closed_at = coalesce(closed_at, :at)
+                         where id = :id and state in ('PENDING', 'DELIVERED')
+                        """)
+                        .param("at", timestamp(at))
+                        .param("id", id)
                         .update()
                 == 1;
     }
