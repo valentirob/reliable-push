@@ -55,8 +55,8 @@ Summary of how the backend protects data and authenticates callers. The binding 
 Keys are P-256 pairs, configured as environment variables holding PEM text, identified by `kid`:
 
 ```sh
-openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out k1.pem      # private key, PKCS#8
-openssl pkey -in k1.pem -pubout -out k1.pub.pem                                 # public key, SPKI
+openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -pkeyopt ec_param_enc:named_curve -out k1.pem   # private key, PKCS#8
+openssl pkey -in k1.pem -pubout -out k1.pub.pem                                                                # public key, SPKI
 # RP_DEVICE_KEY_K1="$(cat k1.pem)"   RP_DEVICE_PUB_K1="$(cat k1.pub.pem)"      (then delete the files)
 ```
 
@@ -68,7 +68,8 @@ reliable-push:
     current-kid: k1
 ```
 
-The private key must be PKCS#8 (`BEGIN PRIVATE KEY`) and the public key SPKI (`BEGIN PUBLIC KEY`); both must be P-256 and
+`-pkeyopt ec_param_enc:named_curve` is required with the LibreSSL that ships with macOS (3.3.x), which otherwise writes explicit
+EC parameters that the backend rejects at startup; it is harmless with OpenSSL 3 and later. The private key must be PKCS#8 (`BEGIN PRIVATE KEY`) and the public key SPKI (`BEGIN PUBLIC KEY`); both must be P-256 and
 match each other, otherwise startup fails. **Rotation procedure:**
 
 1. Generate a new pair (`k2`) and add it to `signing-keys` next to `k1`; deploy. All instances now verify both kids.

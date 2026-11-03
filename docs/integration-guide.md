@@ -125,7 +125,10 @@ Body:
    (attempts are signed when they are sent; retries get a fresh timestamp).
 2. **De-duplicate on `Idempotency-Key`.** A call can arrive more than once: after a retry whose response was lost, or when
    a worker crashed between a successful call and recording it (this extra re-send is not counted against `max-attempts`).
-   Store the keys you handled (for example with a unique constraint) and answer repeats with `2xx` without sending the SMS again.
+   The `Idempotency-Key` (the `trackingId`) is the **same on every attempt** of one notification, so record it as handled only
+   after the work is done or durably enqueued (for example insert it with a unique constraint in the same transaction that
+   enqueues the SMS). If you record it first and then fail with a `5xx`, the retry is acknowledged as a duplicate and the SMS
+   is never sent. Answer a key that is already recorded with `2xx` without sending again.
 3. **Return a `2xx` quickly** (the default budget is 10 s for the whole exchange, `fallback.http-timeout`). Do slow work, such
    as calling an SMS provider, after acknowledging, or from a queue.
 

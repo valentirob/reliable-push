@@ -14,7 +14,7 @@
 >   a `lease_until` marker identifies re-claimed rows and fences outcome writes; rows of an app missing from the
 >   configuration expire after `due_at` + 20 min (`app_not_configured`).
 > - §3: `notification.lease_until` (V3), CHECK constraints and indexes of V1 to V3, foreign-key behaviour of `notification_event`.
-> - §4.3 / `openapi.yaml`: event authorisation failures (`403`) and unknown ids are reported per item in the `200` response of `POST /v1/events`.
+> - §4.3, §5 / `openapi.yaml`: event authorisation failures (`FORBIDDEN`) and unknown ids (`NOT_FOUND`) are reported per item in the `200` response of `POST /v1/events`.
 > - §5: device signing keys are PEM pairs per `kid` (`current-kid`, `revocation-cache-ttl`); secret refs are `env:NAME`, read literally;
 >   registration is rate limited per user after credential verification; identity-verification details (JWKS cache, timeouts, limits).
 > - §8: configuration example matches the implemented keys.
@@ -36,7 +36,7 @@ Device SDK (iOS NSE / Android FCM service)                                    �
                                                                               
 reliable-push worker
   (5) every few seconds: claim PENDING rows with due_at <= now (SKIP LOCKED)
-      ──► POST <app fallback webhook> {trackingId, userId, message, reason}  (HMAC-signed)
+      ──► POST <app fallback webhook> {trackingId, userId, fallback, reason, attempt}  (HMAC-signed)
 ```
 
 **Shape:** a modular monolith (one Spring Boot application, one container image).
@@ -164,7 +164,7 @@ user is `FORBIDDEN` (logged as `authz.denied`), one of another app is `NOT_FOUND
 
 - **Device identity:** `IdentityVerifier` SPI. Default `OidcIdTokenVerifier` accepts RS256 and ES256 only, with keys taken only from the issuer's JWKS (never from token headers; `azp` is ignored by design), and validates `iss`, `aud`, `exp` (`iat`/`nbf` with 60 s skew); it maps a configured claim (default `sub`, at most 256 characters) to `userId`. ID tokens larger than 8 KB are rejected. The JWKS URL is `jwks-uri` or the `jwks_uri` of the discovery document; it must be https (http only when the issuer host is `localhost`/`127.0.0.1`); redirects are not followed. The key set is cached for 15 minutes, a token with an unknown `kid` may refresh it at most once per 30 s, stale keys keep being served during an identity provider outage, fetches have a 5 s deadline and a 64 KB limit. If no key set can be obtained, `POST /v1/devices` answers `503` with `Retry-After: 30`. Alternative `SignedGrantVerifier`: short-lived HS256 grant signed by the customer backend with a shared secret of at least 32 bytes; lifetime (`exp - iat`) at most 5 minutes, so a leaked grant can be replayed for at most about 7 minutes (no `jti` store).
 - **Device JWT:** ES256, signed with a backend key; keys are PEM pairs per `kid` (rotation: see §8). Claims: `iss`, `aud=appId`, `sub=userId`, `did=deviceId`, `ver=token_version`, `iat`, `exp`. Validity per app (default 90 days). Verification is strict (algorithm, `kid` from configuration only, single `aud`). Revocation: `device.revoked_at` or bumped `token_version`, checked with a short in-memory cache (`revocation-cache-ttl`, default 60 s).
-- **Event authorisation:** `notification.app_id = jwt.aud AND notification.user_id = jwt.sub`, else `403` (counted, not detailed).
+- **Event authorisation:** `notification.app_id = jwt.aud AND notification.user_id = jwt.sub`, else the event is reported per item as `FORBIDDEN` (another user's notification; logged as `authz.denied`) or `NOT_FOUND` (unknown id or another app) inside the `200` response (see §4.3).
 - **Rate limiting:** Bucket4j in-memory token buckets per `deviceId` and per app API key (defaults: device 60 req/min, sender key 6,000 req/min). Registration has no device token yet and is limited per user (`register:<appId>:<userHash>`, the device-per-minute limit), counted only after the credential was verified, so unauthenticated traffic cannot exhaust a legitimate user's bucket. Limits are per instance (N replicas allow N times the rate); per-IP limits for unauthenticated traffic belong at the ingress. Interface allows a shared store later.
 - **Webhook:** headers `X-RP-Timestamp`, `X-RP-Signature: v1=<hex HMAC-SHA256(secret, timestamp + "." + body)>`, `Idempotency-Key: <trackingId>`. Retries: max 5 attempts with exponential backoff between them (1, 2, 4, 8 min), configurable; per-attempt HTTP timeout 10 s. Only `2xx` is success; `4xx` other than `408/429` is final failure.
 - **Hygiene:** Bean Validation on all inputs, `fallback` payload ≤ 4 KB, request body ≤ 64 KB, no tokens or payloads in logs, TLS terminated at ingress.
@@ -240,7 +240,7 @@ reliable-push:
 
 Secret and key references are always `env:NAME`, read literally from the environment (no `${...}` indirection; inline
 secrets are rejected at startup). Generate a key pair with
-`openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out k1.pem` (private key; recent OpenSSL writes PKCS#8)
+`openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -pkeyopt ec_param_enc:named_curve -out k1.pem` (private key, PKCS#8; `ec_param_enc:named_curve` is required with macOS LibreSSL 3.3.x, which otherwise writes explicit EC parameters that the backend rejects at startup)
 and `openssl pkey -in k1.pem -pubout -out k1.pub.pem`. Rotation: add a new pair, switch `current-kid`, keep the old pair
 until the longest `device-token-validity` has elapsed, then remove it. The full reference is `docs/operations.md`.
 

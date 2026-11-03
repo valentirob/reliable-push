@@ -32,8 +32,10 @@ Standard Spring Boot configuration. Two ways are practical:
 2. Environment variables. Spring maps a property to a variable by removing dashes, replacing dots with underscores and
    upper-casing, with `_<index>_` for list entries: `reliable-push.apps.shop.fallback.url` is
    `RELIABLEPUSH_APPS_SHOP_FALLBACK_URL`, and `reliable-push.device-token.signing-keys[0].kid` is
-   `RELIABLEPUSH_DEVICETOKEN_SIGNINGKEYS_0_KID`. Use the dash-less form (the variant with `RELIABLE_PUSH_` does not bind
-   the `apps` map). The map key (the app id) is lower-cased by this mapping.
+   `RELIABLEPUSH_DEVICETOKEN_SIGNINGKEYS_0_KID`. Use the dash-less form: variables starting with `RELIABLE_PUSH_` bind
+   nothing under `reliable-push.*`. The symptom is silent: the application starts with zero apps and every sender request
+   gets `401`. The map key (the app id) comes out lower-cased, so app ids containing `-`, `_` or upper-case letters cannot
+   be expressed through environment variables; use a YAML file for those.
 
 **Secrets and keys are never configured inline.** Every `*-ref` key takes `env:NAME`: the value is read verbatim from the
 environment variable `NAME` (no `${...}` indirection, so a secret may contain `${`). A value that is not of the form

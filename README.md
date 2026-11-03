@@ -80,7 +80,8 @@ EOF
 docker network create rp-net
 docker run -d --name rp-db --network rp-net -e POSTGRES_DB=reliablepush -e POSTGRES_USER=rp \
   -e POSTGRES_PASSWORD="$RP_DB_PASSWORD" postgres:16
-docker run -d --name rp-app --network rp-net -p 8080:8080 \
+until docker exec rp-db pg_isready -U rp -d reliablepush >/dev/null 2>&1; do sleep 1; done   # wait for PostgreSQL (--restart covers its init restart)
+docker run -d --name rp-app --network rp-net --restart on-failure -p 8080:8080 \
   -v "$PWD/rp.yml:/config/application.yml:ro" -e SPRING_CONFIG_ADDITIONAL_LOCATION=optional:file:/config/ \
   -e SPRING_DATASOURCE_URL=jdbc:postgresql://rp-db:5432/reliablepush \
   -e SPRING_DATASOURCE_USERNAME=rp -e SPRING_DATASOURCE_PASSWORD="$RP_DB_PASSWORD" \
