@@ -171,11 +171,11 @@ Expected: `openjdk version "21...` and a server version. Export `JAVA_HOME=/opt/
   - `NotificationService` — `NotificationView register(String appId, RegisterNotificationRequest r)`; `Optional<NotificationView> get(String appId, UUID id)`; `NotificationPage list(String appId, String userId, NotificationState state, Instant since, int limit, String cursor)`; `void cancel(String appId, UUID id)`.
   - `NotificationRepository` (package-private API used only by `notifications`, `tracking`, `fallback` through these public methods): `insert(Notification)`, `findById(UUID)`, `findByExternalId(String appId, String externalId)`, `page(...)`, `boolean markDelivered(UUID id, Instant at)` / `boolean markRead(UUID id, Instant at)` (conditional updates per spec §2, clearing `due_at` when the policy is satisfied), `boolean cancel(UUID)`, `List<Notification> claimDue(Instant now, int batch, Duration lease)`, `void reschedule(UUID, Instant nextAttemptAt, int attempts)`, `void close(UUID, NotificationState finalState, Instant at)`, `int purgeClosedBefore(Instant)`.
   - `OpenApiAssert.assertMatchesContract(String method, String path, int status, String body)` — validates responses against `openapi.yaml` (test-only `com.atlassian.oai:swagger-request-validator-core`).
-- [ ] **Step 1: Failing tests**
+- [x] **Step 1: Failing tests**
   - `NotificationServiceTest.appliesAppDefaults()` — no policy/timeout → `NOT_DELIVERED`, `dueAt = createdAt + 10 min` (fixed clock).
   - `NotificationApiIT.registerReturns201WithTrackingIdAndDueAt()`; `.duplicateExternalIdReturnsExisting()` (same `trackingId`, `notification.duplicate` logged); `.getShowsExternalState()`; `.otherAppCannotRead()` (404); `.listNewestFirstWithCursor()` (3 rows, `limit=2` → 2 + `nextCursor`, next page 1); `.limitAbove100Is422()`; `.fallbackOver4KbIs413or422()` (assert 422 with field `fallback`); `.cancelPendingIs204ThenCancelAgain409()`; `.responsesMatchContract()` (via `OpenApiAssert`); `.registerLogsEventWithoutUserId()` — `notification.registered` has `rp.user_hash`, no raw `userId` anywhere in captured logs.
-- [ ] **Step 2: Run** → FAIL. **Step 3: Implement** (cursor = base64url of `created_at|id`). **Step 4: Run** `./mvnw verify` → PASS.
-- [ ] **Step 5: Commit** `feat(backend): sender notifications api`
+- [x] **Step 2: Run** → FAIL. **Step 3: Implement** (cursor = base64url of `created_at|id`). **Step 4: Run** `./mvnw verify` → PASS.
+- [x] **Step 5: Commit** `feat(backend): sender notifications api`
 
 ### Task 8: Device token service (ES256, rotation, revocation)
 

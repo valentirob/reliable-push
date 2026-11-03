@@ -18,6 +18,17 @@ reliable-push:
         # url is set per test (WireMock listens on a random port)
         url: http://localhost:9/hook
         hmac-secret-ref: env:RP_TEST_SHOP_HOOK_SECRET
+    # A second app with default limits, for cross-app isolation tests (NotificationApiIT).
+    # Key: SHA-256 of the raw test key "test-sender-key-other".
+    other:
+      sender-api-key-sha256: 47d5b1f25c55bbe7ee9dfcdbe5e41a63d49ae6b74da5519f177c29f0b8db2c4b
+      identity:
+        type: oidc
+        issuer: https://idp.test.example
+        audience: other-mobile
+      fallback:
+        url: http://localhost:9/hook
+        hmac-secret-ref: env:RP_TEST_SHOP_HOOK_SECRET
     # Used by SenderApiKeyIT.rateLimited429: only two sender requests per minute.
     # Key: SHA-256 of the raw test key "test-sender-key-limited".
     ratelimited:

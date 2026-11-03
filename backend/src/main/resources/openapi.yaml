@@ -1,0 +1,576 @@
+openapi: 3.0.3
+info:
+  title: reliable-push API
+  version: 0.1.0
+  description: |
+    Sender API (server to server, header `X-Api-Key`) and device API (mobile SDKs, device JWT) of reliable-push.
+    Spec: docs/specs/2026-11-03-reliable-push-design.md, sections 4.1 to 4.3.
+
+    Errors are RFC 9457 `application/problem+json` documents. Rejected values are never echoed back.
+    Every response carries `X-Request-Id` (the correlation id also written to the logs as `trace.id`).
+servers:
+  - url: /
+tags:
+  - name: notifications
+    description: Sender API
+  - name: devices
+    description: Device registration and device tokens
+  - name: events
+    description: Delivery and read events reported by devices
+
+paths:
+  /v1/notifications:
+    post:
+      tags: [notifications]
+      operationId: registerNotification
+      summary: Register a notification to track
+      description: |
+        Registers a push that the sender is about to send (or has sent) and returns its `trackingId`, which the
+        sender must put into the push payload as `rp_tid`. The `appId` comes from the API key, never from the body.
+
+        Idempotent per app when `externalId` is given: a request with an `externalId` that already exists for the
+        app creates nothing and returns the existing record (same `trackingId`, still `201`), also when two such
+        requests race.
+
+        `policy` and `timeoutMinutes` default to the app's configured `default-policy` / `default-timeout-minutes`.
+        `dueAt` is `createdAt + timeoutMinutes`. Unknown JSON fields are ignored.
+      security:
+        - SenderApiKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterNotificationRequest'
+      responses:
+        '201':
+          description: Registered (or the existing record, for a repeated `externalId`).
+          headers:
+            Location:
+              description: Path of the new notification, `/v1/notifications/{trackingId}`.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Notification'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+    get:
+      tags: [notifications]
+      operationId: listNotifications
+      summary: List notifications of the calling app, newest first
+      description: |
+        Ordered by `createdAt` descending (ties by `trackingId` descending). Scoped to the API key's app.
+        Page through with `nextCursor`; the cursor is opaque and only valid with the same filters.
+      security:
+        - SenderApiKey: []
+      parameters:
+        - name: userId
+          in: query
+          description: Only notifications of this user.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 256
+        - name: state
+          in: query
+          description: Only notifications in this state (`FALLBACK_PENDING` while a fallback is being dispatched).
+          schema:
+            $ref: '#/components/schemas/NotificationState'
+        - name: since
+          in: query
+          description: Only notifications created at or after this instant.
+          schema:
+            type: string
+            format: date-time
+        - name: limit
+          in: query
+          description: Page size.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: cursor
+          in: query
+          description: The `nextCursor` of the previous page.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: A page of notifications.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationPage'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /v1/notifications/{trackingId}:
+    parameters:
+      - $ref: '#/components/parameters/TrackingId'
+    get:
+      tags: [notifications]
+      operationId: getNotification
+      summary: Get one notification
+      description: |
+        A notification of another app is reported as `404`, exactly like an unknown id, so its existence is never
+        revealed. The fallback content is never returned.
+      security:
+        - SenderApiKey: []
+      responses:
+        '200':
+          description: The notification.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Notification'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+    delete:
+      tags: [notifications]
+      operationId: cancelNotification
+      summary: Cancel a notification
+      description: |
+        Only a notification in state `PENDING` or `DELIVERED` can be cancelled; it becomes `CANCELLED` and no
+        fallback is sent. Any other state (including an already cancelled one) is `409`.
+      security:
+        - SenderApiKey: []
+      responses:
+        '204':
+          description: Cancelled.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /v1/devices:
+    post:
+      tags: [devices]
+      operationId: registerDevice
+      summary: Register a device
+      description: |
+        Exchanges the app's identity credential (an OIDC ID token, or a signed grant, depending on the app's
+        `identity.type`) for a device token. The `userId` is taken from the verified credential, never from the
+        body. Re-registering an existing `deviceId` of the same app and user issues a new token and invalidates the
+        older ones; a `deviceId` that belongs to another user is not reused (a new id is issued).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterDeviceRequest'
+      responses:
+        '201':
+          description: Registered.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceRegistered'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Unknown `appId`.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /v1/devices/token:refresh:
+    post:
+      tags: [devices]
+      operationId: refreshDeviceToken
+      summary: Refresh the device token
+      description: Issues a new token for the calling device. The old token stays valid until it expires.
+      security:
+        - DeviceToken: []
+      responses:
+        '200':
+          description: A new device token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceToken'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /v1/devices/me:
+    delete:
+      tags: [devices]
+      operationId: revokeDevice
+      summary: Revoke the calling device
+      description: Afterwards every token of the device is rejected with `401`.
+      security:
+        - DeviceToken: []
+      responses:
+        '204':
+          description: Revoked.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /v1/events:
+    post:
+      tags: [events]
+      operationId: reportEvents
+      summary: Report delivery and read events
+      description: |
+        A batch of at most 50 events from the calling device. An event is accepted only for a `trackingId` of the
+        same app and user as the device token; the outcome is reported per item in `items`. Duplicates (same
+        `trackingId` and type) and events that arrive after the fallback was claimed or the notification was
+        cancelled are not errors: the request still succeeds with `200`. `occurredAt` is clamped by the server.
+      security:
+        - DeviceToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EventBatch'
+      responses:
+        '200':
+          description: Processed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventBatchResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+components:
+  securitySchemes:
+    SenderApiKey:
+      type: apiKey
+      in: header
+      name: X-Api-Key
+      description: Per-app sender API key (stored hashed on the server).
+    DeviceToken:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Device token (ES256 JWT) issued by `POST /v1/devices`.
+
+  parameters:
+    TrackingId:
+      name: trackingId
+      in: path
+      required: true
+      description: The id returned by `POST /v1/notifications`.
+      schema:
+        type: string
+        format: uuid
+
+  schemas:
+    FallbackPolicy:
+      type: string
+      description: |
+        `NOT_DELIVERED` is satisfied by a delivered or read event, `NOT_READ` only by a read event. When the
+        policy is unmet at `dueAt`, the fallback webhook is called.
+      enum: [NOT_DELIVERED, NOT_READ]
+
+    NotificationState:
+      type: string
+      description: |
+        `FALLBACK_PENDING`: the fallback was claimed and the webhook is in progress or awaiting a retry.
+        `READ`, `FALLBACK_TRIGGERED`, `FALLBACK_FAILED`, `FALLBACK_EXPIRED` and `CANCELLED` are final.
+      enum:
+        - PENDING
+        - DELIVERED
+        - READ
+        - FALLBACK_PENDING
+        - FALLBACK_TRIGGERED
+        - FALLBACK_FAILED
+        - FALLBACK_EXPIRED
+        - CANCELLED
+
+    RegisterNotificationRequest:
+      type: object
+      required: [userId, fallback]
+      properties:
+        userId:
+          type: string
+          minLength: 1
+          maxLength: 256
+          description: The recipient, as the app's identity provider names it.
+        externalId:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: The sender's own id; unique per app, makes the registration idempotent.
+        policy:
+          $ref: '#/components/schemas/FallbackPolicy'
+        timeoutMinutes:
+          type: integer
+          minimum: 1
+          maximum: 10080
+          description: Minutes until the policy must be satisfied (default from the app configuration).
+        fallback:
+          type: object
+          additionalProperties: true
+          description: |
+            Opaque JSON object sent to the fallback webhook (for example the SMS text). At most 4096 bytes
+            serialized (`422` with field `fallback` above that). Never returned by the API and never logged.
+
+    Notification:
+      type: object
+      required: [trackingId, userId, state, policy, timeoutMinutes, createdAt]
+      properties:
+        trackingId:
+          type: string
+          format: uuid
+        userId:
+          type: string
+        externalId:
+          type: string
+          nullable: true
+        state:
+          $ref: '#/components/schemas/NotificationState'
+        policy:
+          $ref: '#/components/schemas/FallbackPolicy'
+        timeoutMinutes:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+        dueAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the fallback is due; `null` once the policy is satisfied or the notification is closed.
+        deliveredAt:
+          type: string
+          format: date-time
+          nullable: true
+        readAt:
+          type: string
+          format: date-time
+          nullable: true
+        closedAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    NotificationPage:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Notification'
+        nextCursor:
+          type: string
+          nullable: true
+          description: Pass as `cursor` for the next page; `null` on the last page.
+
+    RegisterDeviceRequest:
+      type: object
+      required: [appId, idToken, platform]
+      properties:
+        appId:
+          type: string
+        idToken:
+          type: string
+          description: The app's OIDC ID token (or signed grant). Never logged.
+        platform:
+          type: string
+          enum: [IOS, ANDROID]
+        deviceId:
+          type: string
+          format: uuid
+          description: The id issued earlier, when the same installation registers again.
+
+    DeviceRegistered:
+      type: object
+      required: [deviceId, deviceToken, expiresAt]
+      properties:
+        deviceId:
+          type: string
+          format: uuid
+        deviceToken:
+          type: string
+        expiresAt:
+          type: string
+          format: date-time
+
+    DeviceToken:
+      type: object
+      required: [deviceToken, expiresAt]
+      properties:
+        deviceToken:
+          type: string
+        expiresAt:
+          type: string
+          format: date-time
+
+    EventType:
+      type: string
+      enum: [DELIVERED, READ]
+
+    DeviceEvent:
+      type: object
+      required: [trackingId, type, occurredAt]
+      properties:
+        trackingId:
+          type: string
+          format: uuid
+        type:
+          $ref: '#/components/schemas/EventType'
+        occurredAt:
+          type: string
+          format: date-time
+
+    EventBatch:
+      type: object
+      required: [events]
+      properties:
+        events:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items:
+            $ref: '#/components/schemas/DeviceEvent'
+
+    EventOutcome:
+      type: string
+      enum: [ACCEPTED, DUPLICATE, LATE, NOT_FOUND, FORBIDDEN]
+
+    EventBatchResult:
+      type: object
+      required: [accepted, ignored]
+      properties:
+        accepted:
+          type: integer
+          minimum: 0
+        ignored:
+          type: integer
+          minimum: 0
+        items:
+          type: array
+          description: Outcome per submitted event, in request order.
+          items:
+            type: object
+            required: [trackingId, outcome]
+            properties:
+              trackingId:
+                type: string
+                format: uuid
+              outcome:
+                $ref: '#/components/schemas/EventOutcome'
+
+    Problem:
+      type: object
+      description: RFC 9457 problem document.
+      required: [title, status]
+      properties:
+        type:
+          type: string
+          example: about:blank
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        instance:
+          type: string
+        errors:
+          type: array
+          description: Present on `422`; one entry per invalid field. Values are never echoed.
+          items:
+            type: object
+            required: [message]
+            properties:
+              field:
+                type: string
+              message:
+                type: string
+
+  responses:
+    BadRequest:
+      description: The body is not readable JSON (malformed, wrong types, unknown enum value).
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Unauthorized:
+      description: Missing or invalid credentials. Identical for a missing and an unknown credential.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    NotFound:
+      description: Unknown id (or an id of another app).
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Conflict:
+      description: The notification is not in a state that allows the operation.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    PayloadTooLarge:
+      description: The request body exceeds 64 KB.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    ValidationFailed:
+      description: A field is invalid; `errors` names it.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    TooManyRequests:
+      description: Rate limit exceeded.
+      headers:
+        Retry-After:
+          description: Seconds until a request is allowed again.
+          schema:
+            type: integer
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'

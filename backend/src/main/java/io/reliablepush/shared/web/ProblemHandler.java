@@ -77,6 +77,11 @@ public class ProblemHandler extends ResponseEntityExceptionHandler {
         return problem(HttpStatus.FORBIDDEN, "Forbidden", ex.getMessage(), ex, request);
     }
 
+    @ExceptionHandler(InvalidRequestException.class)
+    ResponseEntity<Object> invalidRequest(InvalidRequestException ex, WebRequest request) {
+        return validationProblem(List.of(Map.of("field", ex.field(), "message", ex.reason())), ex, request);
+    }
+
     @ExceptionHandler(RequestBodyTooLargeException.class)
     ResponseEntity<Object> tooLarge(RequestBodyTooLargeException ex, WebRequest request) {
         return payloadTooLarge(ex, request);

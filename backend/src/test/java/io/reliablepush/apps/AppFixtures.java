@@ -11,7 +11,7 @@ import org.springframework.boot.context.properties.source.MapConfigurationProper
 import org.springframework.mock.env.MockEnvironment;
 
 /** Builds {@link ReliablePushProperties} the way Spring does (relaxed binding), without a context. */
-final class AppFixtures {
+public final class AppFixtures {
 
     static final String HOOK_SECRET_ENV = "RP_TEST_HOOK_SECRET";
 
@@ -26,7 +26,7 @@ final class AppFixtures {
     }
 
     /** Minimal valid config of one app: only the mandatory keys, everything else defaulted. */
-    static Map<String, Object> minimalApp(String appId, String rawSenderKey) {
+    public static Map<String, Object> minimalApp(String appId, String rawSenderKey) {
         Map<String, Object> p = new HashMap<>();
         String base = "reliable-push.apps." + appId + ".";
         p.put(base + "sender-api-key-sha256", sha256Hex(rawSenderKey));
@@ -38,11 +38,11 @@ final class AppFixtures {
         return p;
     }
 
-    static MockEnvironment environment() {
+    public static MockEnvironment environment() {
         return new MockEnvironment().withProperty(HOOK_SECRET_ENV, "generated-test-hook-secret");
     }
 
-    static ReliablePushProperties bind(Map<String, Object> properties) {
+    public static ReliablePushProperties bind(Map<String, Object> properties) {
         return new Binder(new MapConfigurationPropertySource(properties))
                 .bind("reliable-push", ReliablePushProperties.class)
                 .get();
