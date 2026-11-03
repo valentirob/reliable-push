@@ -24,7 +24,8 @@ import org.springframework.stereotype.Component;
 /**
  * Read-only registry of the configured apps. Everything is resolved and validated once, at startup: secret refs
  * ({@code env:NAME}) are read from the {@link Environment} immediately, so a missing variable or an invalid
- * combination fails the application start with an {@link IllegalStateException} instead of the first request.
+ * combination fails the application start with an {@link IllegalStateException} instead of the first request. So
+ * does a configuration without any app: the service would only answer 401 to everyone.
  */
 @Component
 public class AppRegistry {
@@ -37,6 +38,11 @@ public class AppRegistry {
     private final List<Entry> entries;
 
     public AppRegistry(ReliablePushProperties properties, Environment environment) {
+        if (properties.apps().isEmpty()) {
+            // the usual cause: variables named RELIABLE_PUSH_APPS_... bind nothing under reliable-push.*
+            throw new IllegalStateException("no apps configured under reliable-push.apps"
+                    + " (environment variables must use the RELIABLEPUSH_APPS_<ID>_... form)");
+        }
         Map<String, AppConfig> apps = new LinkedHashMap<>();
         List<Entry> list = new ArrayList<>();
         for (Map.Entry<String, AppProperties> configured : properties.apps().entrySet()) {

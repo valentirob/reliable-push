@@ -33,8 +33,9 @@ Standard Spring Boot configuration. Two ways are practical:
    upper-casing, with `_<index>_` for list entries: `reliable-push.apps.shop.fallback.url` is
    `RELIABLEPUSH_APPS_SHOP_FALLBACK_URL`, and `reliable-push.device-token.signing-keys[0].kid` is
    `RELIABLEPUSH_DEVICETOKEN_SIGNINGKEYS_0_KID`. Use the dash-less form: variables starting with `RELIABLE_PUSH_` bind
-   nothing under `reliable-push.*`. The symptom is silent: the application starts with zero apps and every sender request
-   gets `401`. The map key (the app id) comes out lower-cased, so app ids containing `-`, `_` or upper-case letters cannot
+   nothing under `reliable-push.*`. With no app configured the start fails with `no apps configured under
+   reliable-push.apps (environment variables must use the RELIABLEPUSH_APPS_<ID>_... form)`; other keys spelled that way
+   (for example the signing keys) are silently ignored, so check them too. The map key (the app id) comes out lower-cased, so app ids containing `-`, `_` or upper-case letters cannot
    be expressed through environment variables; use a YAML file for those.
 
 **Secrets and keys are never configured inline.** Every `*-ref` key takes `env:NAME`: the value is read verbatim from the
@@ -59,8 +60,8 @@ Database connection (Spring Boot): `SPRING_DATASOURCE_URL` (`jdbc:postgresql://h
 | `retention.cron` | `0 17 3 * * *` | Spring cron expression (six fields, always UTC) of the daily retention run (worker role); `-` disables the schedule |
 | `testing.minute-duration` | unset (1 minute = 60 s) | Fast clock, e.g. `1s`. Accepted only with the `e2e` or `demo` profile, must be positive |
 
-Per app, under `apps.<appId>` (the app id matches `[A-Za-z0-9][A-Za-z0-9_-]{0,63}`; at least one app is needed to do anything
-useful):
+Per app, under `apps.<appId>` (the app id matches `[A-Za-z0-9][A-Za-z0-9_-]{0,63}`; at least one app is required, a
+configuration without any app fails the start):
 
 | Key | Default | Validation / notes |
 |---|---|---|

@@ -9,12 +9,15 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.TestPropertySource;
 
 /** Spec 9.1: stdout is one JSON object per line (no banner, no stray text). */
 @ExtendWith(OutputCaptureExtension.class)
 // distinct property => fresh application context, so startup output is captured by this test class
-// default profiles (api,worker) with the real clock: the worker poll is pushed out so no real webhook call happens
+// both roles (the production default api,worker) plus the test apps, real clock: the worker poll is pushed out so no
+// real webhook call happens
+@ActiveProfiles({"api", "worker", "test"})
 @TestPropertySource(properties = {"rp.test.fresh-context=json-log-output", "reliable-push.worker.poll-interval=1d"})
 class JsonLogOutputIT extends PostgresTestBase {
 

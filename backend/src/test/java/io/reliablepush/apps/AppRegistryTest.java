@@ -1,6 +1,7 @@
 package io.reliablepush.apps;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -42,11 +43,11 @@ class AppRegistryTest {
     }
 
     @Test
-    void emptyWithoutConfiguredApps() {
-        AppRegistry registry = registryWith(Map.of("reliable-push.retention-days", "30"));
-
-        assertThat(registry.all()).isEmpty();
-        assertThat(registry.bySenderApiKey("anything")).isEmpty();
+    void zeroConfiguredAppsFailStartupWithAHintAtTheEnvironmentVariableForm() {
+        assertThatThrownBy(() -> registryWith(Map.of("reliable-push.retention-days", "30")))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("no apps configured under reliable-push.apps"
+                        + " (environment variables must use the RELIABLEPUSH_APPS_<ID>_... form)");
     }
 
     @Test

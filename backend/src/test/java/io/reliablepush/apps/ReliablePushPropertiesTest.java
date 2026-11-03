@@ -12,6 +12,8 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
+import org.springframework.core.env.StandardEnvironment;
+import org.springframework.core.env.SystemEnvironmentPropertySource;
 
 class ReliablePushPropertiesTest {
 
@@ -152,11 +154,39 @@ class ReliablePushPropertiesTest {
     }
 
     @Test
-    void startsWithoutAnyReliablePushConfiguration() {
+    void zeroAppsFailTheStart() {
         runner.run(context -> {
-            assertThat(context).hasNotFailed();
-            assertThat(context.getBean(AppRegistry.class).all()).isEmpty();
+            assertThat(context).hasFailed();
+            assertThat(rootMessage(context.getStartupFailure()))
+                    .contains("no apps configured under reliable-push.apps")
+                    .contains("RELIABLEPUSH_APPS_<ID>_");
         });
+    }
+
+    @Test
+    void environmentVariablesBindAppsOnlyInTheDashlessForm() {
+        runner.withInitializer(ctx -> ctx.getEnvironment().getPropertySources().addFirst(asEnvironment("RELIABLEPUSH_")))
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    assertThat(context.getBean(AppRegistry.class).byId("shop")).isPresent();
+                });
+        // RELIABLE_PUSH_APPS_... maps to reliable.push.apps..., not reliable-push.apps...: the start must fail loudly
+        runner.withInitializer(ctx -> ctx.getEnvironment().getPropertySources().addFirst(asEnvironment("RELIABLE_PUSH_")))
+                .run(context -> {
+                    assertThat(context).hasFailed();
+                    assertThat(rootMessage(context.getStartupFailure())).contains("no apps configured");
+                });
+    }
+
+    /**
+     * The minimal shop app as environment variables, with {@code prefix} in place of {@code reliable-push.}. The source
+     * name must end in {@code -systemEnvironment} for Spring to apply its environment-variable name mapping.
+     */
+    private static SystemEnvironmentPropertySource asEnvironment(String prefix) {
+        Map<String, Object> env = new HashMap<>();
+        AppFixtures.minimalApp("shop", "k-123").forEach((key, value) -> env.put(
+                prefix + key.substring("reliable-push.".length()).replace('.', '_').replace("-", "").toUpperCase(), value));
+        return new SystemEnvironmentPropertySource("test-" + StandardEnvironment.SYSTEM_ENVIRONMENT_PROPERTY_SOURCE_NAME, env);
     }
 
     @Test
