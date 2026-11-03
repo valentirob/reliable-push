@@ -279,6 +279,26 @@ public class NotificationRepository {
                 == 1;
     }
 
+    /**
+     * Retention: deletes up to {@code chunk} closed rows whose {@code closed_at} is before {@code cutoff}, oldest
+     * first (the events go with them, ON DELETE CASCADE). Rows with {@code closed_at} null are never matched. Uses the
+     * partial index on {@code closed_at}.
+     *
+     * @return the number of rows deleted; fewer than {@code chunk} means nothing older is left
+     */
+    public int purgeClosedBefore(Instant cutoff, int chunk) {
+        return jdbc.sql("""
+                        delete from notification
+                         where id in (select id from notification
+                                       where closed_at < :cutoff
+                                       order by closed_at
+                                       limit :chunk)
+                        """)
+                .param("cutoff", timestamp(cutoff))
+                .param("chunk", chunk)
+                .update();
+    }
+
     private static OffsetDateTime timestamp(Instant instant) {
         return instant == null ? null : instant.atOffset(ZoneOffset.UTC);
     }

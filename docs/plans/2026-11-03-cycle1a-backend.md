@@ -275,9 +275,9 @@ Expected: `openjdk version "21...` and a server version. Export `JAVA_HOME=/opt/
 **Files:**
 - Create: `backend/src/main/java/io/reliablepush/notifications/RetentionJob.java` (`@Profile("worker")`, daily `@Scheduled(cron = "0 17 3 * * *")`, uses `NotificationRepository.purgeClosedBefore` in chunks of 1,000)
 - Test: `backend/src/test/java/io/reliablepush/notifications/RetentionJobIT.java`
-- [ ] **Step 1: Failing test** `purgesOnlyClosedOlderThanRetention()` — rows: closed 31 d ago (deleted, with its events), closed 29 d ago (kept), PENDING created 60 d ago (kept); `retention.purged` logged with `count=1`.
-- [ ] **Step 2: Run** → FAIL. **Step 3: Implement.** **Step 4: Run** → PASS.
-- [ ] **Step 5: Commit** `feat(backend): retention job`
+- [x] **Step 1: Failing test** `purgesOnlyClosedOlderThanRetention()` — rows: closed 31 d ago (deleted, with its events), closed 29 d ago (kept), PENDING created 60 d ago (kept); `retention.purged` logged with `count=1`.
+- [x] **Step 2: Run** → FAIL. **Step 3: Implement.** **Step 4: Run** → PASS.
+- [x] **Step 5: Commit** `feat(backend): retention job`
 
 ### Task 15: Metrics
 
