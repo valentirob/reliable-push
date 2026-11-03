@@ -2,6 +2,7 @@ package io.reliablepush.apps;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import io.reliablepush.shared.time.TimeScale;
 import java.time.Duration;
 import java.util.HashMap;
 import java.util.Map;
@@ -16,7 +17,7 @@ class ReliablePushPropertiesTest {
 
     @Configuration(proxyBeanMethods = false)
     @EnableConfigurationProperties(ReliablePushProperties.class)
-    @Import(AppRegistry.class)
+    @Import({AppRegistry.class, TimeScale.class})
     static class Config {}
 
     private final ApplicationContextRunner runner = new ApplicationContextRunner()
@@ -70,6 +71,57 @@ class ReliablePushPropertiesTest {
             assertThat(context).hasFailed();
             assertThat(rootMessage(context.getStartupFailure())).contains("trigger-window-minutes");
         });
+    }
+
+    @Test
+    void fastClockKeepsWindowAndBackoffInTheSameUnits() {
+        // minute-duration=1s scales window and backoff alike, so the check compares them unscaled: 20 >= 15 starts, 14 < 15 fails
+        ApplicationContextRunner fast = runner.withInitializer(ctx -> ctx.getEnvironment().setActiveProfiles("e2e"))
+                .withPropertyValues("reliable-push.testing.minute-duration=1s");
+
+        fast.withPropertyValues(asProperties(shop(m -> m.put(SHOP + "fallback.trigger-window-minutes", "20"))))
+                .run(context -> assertThat(context).hasNotFailed());
+
+        fast.withPropertyValues(asProperties(shop(m -> m.put(SHOP + "fallback.trigger-window-minutes", "14"))))
+                .run(context -> {
+                    assertThat(context).hasFailed();
+                    assertThat(rootMessage(context.getStartupFailure())).contains("trigger-window-minutes");
+                });
+    }
+
+    @Test
+    void fastClockInForbiddenProfileFailsWithTimeScaleMessage() {
+        runner.withInitializer(ctx -> ctx.getEnvironment().setActiveProfiles("api"))
+                .withPropertyValues("reliable-push.testing.minute-duration=1s")
+                .withPropertyValues(asProperties(AppFixtures.minimalApp("shop", "k-123")))
+                .run(context -> {
+                    assertThat(context).hasFailed();
+                    assertThat(rootMessage(context.getStartupFailure()))
+                            .contains("minute-duration is only allowed in profiles e2e or demo");
+                });
+    }
+
+    @Test
+    void secretWithPlaceholderSyntaxResolvesVerbatimAndNeverLeaks() {
+        String secret = "abc${nope}SECRETTAIL";
+        Map<String, Object> p = AppFixtures.minimalApp("shop", "k-123");
+
+        runner.withPropertyValues(AppFixtures.HOOK_SECRET_ENV + "=" + secret)
+                .withPropertyValues(asProperties(p))
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    AppConfig app = context.getBean(AppRegistry.class).byId("shop").orElseThrow();
+                    assertThat(app.fallback().hmacSecret().value()).isEqualTo(secret);
+                });
+
+        // an unrelated startup failure must not quote the secret either
+        Map<String, Object> bad = shop(m -> m.put(SHOP + "fallback.trigger-window-minutes", "1"));
+        runner.withPropertyValues(AppFixtures.HOOK_SECRET_ENV + "=" + secret)
+                .withPropertyValues(asProperties(bad))
+                .run(context -> {
+                    assertThat(context).hasFailed();
+                    assertThat(rootMessage(context.getStartupFailure())).doesNotContain("SECRETTAIL");
+                });
     }
 
     @Test

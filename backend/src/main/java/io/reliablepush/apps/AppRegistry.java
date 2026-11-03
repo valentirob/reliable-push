@@ -37,13 +37,10 @@ public class AppRegistry {
     private final List<Entry> entries;
 
     public AppRegistry(ReliablePushProperties properties, Environment environment) {
-        Duration minute = properties.testing().minuteDuration() != null
-                ? properties.testing().minuteDuration()
-                : Duration.ofMinutes(1);
         Map<String, AppConfig> apps = new LinkedHashMap<>();
         List<Entry> list = new ArrayList<>();
         for (Map.Entry<String, AppProperties> configured : properties.apps().entrySet()) {
-            AppConfig app = resolve(configured.getKey(), configured.getValue(), environment, minute);
+            AppConfig app = resolve(configured.getKey(), configured.getValue(), environment);
             for (Entry other : list) {
                 if (MessageDigest.isEqual(other.senderKeyHash(), HexFormat.of().parseHex(app.senderApiKeySha256()))) {
                     throw new IllegalStateException("reliable-push.apps." + app.appId() + ".sender-api-key-sha256 equals the one of app "
@@ -83,7 +80,7 @@ public class AppRegistry {
         return entries.stream().map(Entry::app).toList();
     }
 
-    private static AppConfig resolve(String appId, AppProperties p, Environment env, Duration minute) {
+    private static AppConfig resolve(String appId, AppProperties p, Environment env) {
         String base = "reliable-push.apps." + appId + ".";
         if (!APP_ID.matcher(appId).matches()) {
             throw new IllegalStateException("reliable-push.apps." + appId + ": app id must match " + APP_ID.pattern());
@@ -109,7 +106,8 @@ public class AppRegistry {
                 url, hmac, f.maxAttempts(), backoff, f.triggerWindowMinutes(), f.httpTimeout());
 
         // The trigger window must cover every webhook attempt, otherwise retries would run past the notification's window.
-        Duration window = minute.multipliedBy(fallback.triggerWindowMinutes());
+        // Both sides are in configured (unscaled) units: in fast-clock profiles TimeScale scales window and backoff alike.
+        Duration window = Duration.ofMinutes(fallback.triggerWindowMinutes());
         Duration cumulative = fallback.cumulativeBackoff();
         if (window.compareTo(cumulative) < 0) {
             throw new IllegalStateException(base + "fallback.trigger-window-minutes (" + fallback.triggerWindowMinutes()

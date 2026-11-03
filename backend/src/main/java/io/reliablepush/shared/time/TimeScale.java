@@ -35,6 +35,14 @@ public class TimeScale {
         return minuteDuration.multipliedBy(n);
     }
 
+    /**
+     * Scales a configured duration the same way as product minutes: {@code d x minuteDuration / 1 min}. Use for every
+     * minute-based duration (webhook backoff, lease); a literal duration such as the webhook HTTP timeout is not scaled.
+     */
+    public Duration scale(Duration d) {
+        return d.multipliedBy(minuteDuration.toNanos()).dividedBy(Duration.ofMinutes(1).toNanos());
+    }
+
     public Duration minuteDuration() {
         return minuteDuration;
     }

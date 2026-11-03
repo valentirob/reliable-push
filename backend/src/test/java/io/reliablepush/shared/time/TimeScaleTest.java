@@ -62,6 +62,21 @@ class TimeScaleTest {
     }
 
     @Test
+    void scalesDurationsLikeMinutes() {
+        runnerWithProfiles("e2e").withPropertyValues("reliable-push.testing.minute-duration=1s").run(context -> {
+            TimeScale scale = context.getBean(TimeScale.class);
+            assertThat(scale.scale(Duration.ofMinutes(1))).isEqualTo(Duration.ofSeconds(1));
+            assertThat(scale.scale(Duration.ofMinutes(8))).isEqualTo(Duration.ofSeconds(8));
+            assertThat(scale.scale(Duration.ofSeconds(30))).isEqualTo(Duration.ofMillis(500));
+        });
+        runnerWithProfiles("api").run(context -> {
+            TimeScale scale = context.getBean(TimeScale.class);
+            assertThat(scale.scale(Duration.ofMinutes(8))).isEqualTo(Duration.ofMinutes(8));
+            assertThat(scale.scale(Duration.ofSeconds(10))).isEqualTo(Duration.ofSeconds(10));
+        });
+    }
+
+    @Test
     void clockBeanIsSystemUtc() {
         runnerWithProfiles("api").run(context -> assertThat(context.getBean(Clock.class).getZone()).isEqualTo(java.time.ZoneOffset.UTC));
     }

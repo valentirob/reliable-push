@@ -1,7 +1,9 @@
 package io.reliablepush.shared.config;
 
 import java.util.regex.Pattern;
+import org.springframework.core.env.ConfigurableEnvironment;
 import org.springframework.core.env.Environment;
+import org.springframework.core.env.PropertySource;
 
 /**
  * Resolves {@code *-ref} configuration values. Only {@code env:NAME} is supported: the value is read from the Spring
@@ -31,11 +33,33 @@ public final class SecretRefs {
     /** Resolves {@code env:NAME} to its value; fails if the variable is not set or blank. */
     public static Secret resolve(Environment environment, String property, String ref) {
         String name = requireEnvRef(property, ref);
-        String value = environment.getProperty(name);
+        String value = readRaw(environment, name);
         if (value == null || value.isBlank()) {
             throw new IllegalStateException(
                     property + " references environment variable " + name + " which is not set");
         }
         return new Secret(value);
+    }
+
+    /**
+     * Reads the value verbatim from the property sources. {@code Environment.getProperty} would resolve nested
+     * {@code ${...}} placeholders inside the value and, on failure, quote the whole value in its exception; a secret may
+     * legitimately contain {@code ${}. Any failure is rethrown without cause or value.
+     */
+    private static String readRaw(Environment environment, String name) {
+        try {
+            if (environment instanceof ConfigurableEnvironment configurable) {
+                for (PropertySource<?> source : configurable.getPropertySources()) {
+                    Object value = source.getProperty(name);
+                    if (value != null) {
+                        return value.toString();
+                    }
+                }
+                return null;
+            }
+            return environment.getProperty(name);
+        } catch (RuntimeException e) {
+            throw new IllegalStateException("environment variable " + name + " could not be read");
+        }
     }
 }
