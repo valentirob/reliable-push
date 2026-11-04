@@ -31,7 +31,7 @@ import org.springframework.stereotype.Component;
  * {@link DeviceBehaviour} and reports DELIVERED/READ events. Behaviour delays are wall-clock durations.
  */
 @Component
-public class DeviceSimulator implements AutoCloseable {
+public class DeviceSimulator implements PushReceiver, AutoCloseable {
 
     private static final Logger LOG = LogManager.getLogger(DeviceSimulator.class);
     static final DeviceBehaviour DEFAULT_BEHAVIOUR = new DeviceBehaviour.DeliverAfter(Duration.ofSeconds(1));
@@ -161,6 +161,7 @@ public class DeviceSimulator implements AutoCloseable {
      * A push for the user's devices arrived: each device follows its behaviour from {@code perDevice} (default
      * {@code DeliverAfter(1s)}).
      */
+    @Override
     public void receivePush(UUID trackingId, String appId, String userId, Map<UUID, DeviceBehaviour> perDevice) {
         Map<UUID, DeviceBehaviour> behaviours = perDevice == null ? Map.of() : perDevice;
         for (DeviceState s : devices.values()) {

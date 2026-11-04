@@ -140,9 +140,9 @@
   - `record SendPushCommand(String appId, String userId, String title, String body, FallbackPolicy policy, Integer timeoutMinutes, Map<String,?> fallback, Map<UUID, DeviceBehaviour> perDevice)`.
   - `FakeSender.send(SendPushCommand c)` → `Notification` (registers via `SenderClient`, then calls `receivePush`); one `SenderClient` per app, cached.
   - `PayloadPreview.apns(UUID tid, String title, String body)` → JSON string `{"aps":{"alert":{"title":…,"body":…},"mutable-content":1},"rp_tid":"<tid>"}`; `.fcmV1(...)` → `{"message":{"token":"<device-token>","android":{"priority":"HIGH"},"data":{"rp_tid":…,"title":…,"body":…}}}` (data-only); `.fcmV2(...)` → `{"message":{"token":"<device-token>","android_v2":{"remote_notification":{"notification":{"title":…,"body":…},"mutable_content":true,"data":{"rp_tid":…}}}}}` — exact shapes per spec §6; `<device-token>` is a literal placeholder.
-- [ ] **Step 1: Failing tests** — `PayloadPreviewTest.apnsHasMutableContentAndTid()`, `.fcmV1IsDataOnlyHighPriority()` (no `notification` key), `.fcmV2HasMutableContent()`; `FakeSenderIT.sendRegistersThenSimulatesPush()` (fake backend + real DeviceSimulator stub: sender API called once, `receivePush` called with the returned trackingId).
-- [ ] **Step 2: Run** → FAIL. **Step 3: Implement.** **Step 4: Run** → PASS.
-- [ ] **Step 5: Commit** `feat(harness): fake sender and payload preview`
+- [x] **Step 1: Failing tests** — `PayloadPreviewTest.apnsHasMutableContentAndTid()`, `.fcmV1IsDataOnlyHighPriority()` (no `notification` key), `.fcmV2HasMutableContent()`; `FakeSenderIT.sendRegistersThenSimulatesPush()` (fake backend + real DeviceSimulator stub: sender API called once, `receivePush` called with the returned trackingId).
+- [x] **Step 2: Run** → FAIL. **Step 3: Implement.** **Step 4: Run** → PASS.
+- [x] **Step 5: Commit** `feat(harness): fake sender and payload preview`
 
 ### Task 8: Tracking timeline and SSE stream
 
