@@ -67,7 +67,7 @@ runs the stack.
 
 ## End-to-end tests (local only)
 
-`./scripts/e2e.sh [--scenario <name>] [--keep]` (Windows, PowerShell 7: `pwsh scripts/e2e.ps1 -Scenario <name> -Keep`; the
+`./scripts/e2e.sh [--scenario <name>] [--keep]` (Windows, PowerShell 7: `pwsh scripts/e2e.ps1 [-Scenario <name>] [-Keep]`; the
 PowerShell scripts have not been run on Windows). Needs Docker with the compose plugin, `curl`, and ports 8080 and 8090 free
 on 127.0.0.1. The images build inside Docker, but `console-smoke` (so the full 17-entry run) calls the host `./mvnw`: it needs
 JDK 21 and network access (Maven artifacts, Playwright's Chromium). With Colima: `export DOCKER_HOST=unix://$HOME/.colima/default/docker.sock`.
@@ -103,5 +103,7 @@ minutes. It keeps running; the script prints the stop command:
 
 The console has six screens: Devices, Send push, Live tracking, Fallback inbox, Scenarios and Logs. A permanent banner reads
 "Test harness — simulated data, not for production". No secret is shown in the page or exposed by its API; live updates use
-Server-Sent Events and reconnect automatically. The console and the harness are never built into the backend image or deployed
-with a Helm chart.
+Server-Sent Events and reconnect automatically. The console API accepts writes (`POST`) only with `Content-Type: application/json`
+(an explicit `{}` when there is nothing to send) and rejects cross-site requests (`Origin` or `Sec-Fetch-Site` from another
+origin) with 403; `curl` and the scripts send neither header. The console and the harness are never built into the backend
+image or deployed with a Helm chart.
