@@ -37,6 +37,43 @@ class BackendLogTailTest {
     }
 
     @Test
+    void concurrentPollsReadEveryLineOnce() throws Exception {
+        BackendLogTail tail = tail();
+        int lines = 4_000;
+        StringBuilder text = new StringBuilder();
+        for (int i = 0; i < lines; i++) {
+            text.append(line("a", "t" + i, "x", "m" + i));
+        }
+        append("backend-a.json", text.toString());
+        append("backend-b.json", text.toString());
+        int threads = 8;
+        java.util.concurrent.CyclicBarrier start = new java.util.concurrent.CyclicBarrier(threads);
+        List<Thread> pollers = new java.util.ArrayList<>();
+        List<Throwable> errors = new java.util.concurrent.CopyOnWriteArrayList<>();
+        for (int t = 0; t < threads; t++) {
+            pollers.add(Thread.ofPlatform().start(() -> {
+                try {
+                    start.await();
+                    for (int i = 0; i < 20; i++) {
+                        tail.poll();
+                    }
+                } catch (Throwable e) {
+                    errors.add(e);
+                }
+            }));
+        }
+        for (Thread p : pollers) {
+            p.join();
+        }
+        assertThat(errors).isEmpty();
+        assertThat(tail.malformedCount()).isZero();
+        for (int i = 0; i < lines; i += 50) {
+            // exactly once per file: no line read twice, none lost
+            assertThat(tail.query(new LogQuery(null, "t" + i, null, 10))).as("t" + i).hasSize(2);
+        }
+    }
+
+    @Test
     void readsAppendedLines() throws IOException {
         BackendLogTail tail = tail();
         append("backend-a.json", line("api.request", "t1", "x1", "one"));

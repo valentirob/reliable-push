@@ -74,6 +74,7 @@ public class BackendLogTail {
     private final AtomicLong oversize = new AtomicLong();
     private volatile boolean missingLogged;
     private ScheduledExecutorService executor;
+    private final Object pollLock = new Object();
 
     @Autowired
     public BackendLogTail(HarnessProperties properties, @Value("${harness.log-poll-interval:500ms}") Duration interval) {
@@ -113,8 +114,18 @@ public class BackendLogTail {
         }
     }
 
-    /** One pass over the directory; public so tests (and nothing else) can drive it deterministically. */
+    /**
+     * One pass over the directory. Runs on the tail's scheduler and may also be called directly (tests drive it
+     * deterministically): synchronized, because the per-file offsets and partial lines are not thread-safe. Only
+     * {@link #poll} takes this lock; queries use {@code entries}' own lock.
+     */
     public void poll() {
+        synchronized (pollLock) {
+            pollOnce();
+        }
+    }
+
+    private void pollOnce() {
         List<Path> current = new ArrayList<>();
         if (Files.isDirectory(dir)) {
             try (DirectoryStream<Path> stream = Files.newDirectoryStream(dir, "backend-*.json")) {
