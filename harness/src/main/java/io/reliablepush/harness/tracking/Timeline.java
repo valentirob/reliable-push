@@ -56,11 +56,11 @@ public class Timeline {
     /** The sender just registered this notification; returns the entry, or null when the history already has one. */
     public synchronized TimelineEntry registered(String appId, Notification n) {
         Holder h = touch(n.trackingId());
+        if (h.registered) {
+            return null; // the backend (poller) got there first: never regress its newer snapshot
+        }
         h.appId = appId;
         h.current = n;
-        if (h.registered) {
-            return null;
-        }
         h.registered = true;
         TimelineEntry e = new TimelineEntry(clock.instant(), "registered",
                 Map.of("source", "sender", "state", n.state().name()));

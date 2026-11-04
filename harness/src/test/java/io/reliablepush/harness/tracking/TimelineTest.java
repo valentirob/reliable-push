@@ -106,4 +106,16 @@ class TimelineTest {
         assertThat(t.recent("shop", 10)).extracting(Notification::trackingId).containsExactly(b, a);
         assertThat(t.recent("shop", 1)).extracting(Notification::trackingId).containsExactly(b);
     }
+
+    @Test
+    void lateSenderRegistrationDoesNotRegressCurrentState() {
+        Timeline t = new Timeline(10, clock);
+        UUID id = UUID.randomUUID();
+        t.observe("shop", n(id, NotificationState.DELIVERED, T0));
+
+        assertThat(t.registered("shop", n(id, NotificationState.PENDING, T0))).isNull();
+
+        assertThat(t.current(id)).get().extracting(Notification::state).isEqualTo(NotificationState.DELIVERED);
+        assertThat(t.observe("shop", n(id, NotificationState.DELIVERED, T0))).isEmpty();
+    }
 }

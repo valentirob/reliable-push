@@ -56,8 +56,8 @@ public class ConsoleStream implements SmartLifecycle {
                 }
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
-            } catch (IOException | IllegalStateException e) {
-                // client went away
+            } catch (IOException | RuntimeException e) {
+                // client went away (or an unexpected failure): never leave a zombie client behind
                 remove(this);
                 emitter.completeWithError(e);
             }

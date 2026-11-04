@@ -21,7 +21,10 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterAll;
@@ -86,6 +89,9 @@ class TrackingPollerIT {
 
     @Autowired
     ConsoleStream stream;
+
+    @Autowired
+    Timeline timeline;
 
     final List<Stream<String>> open = new CopyOnWriteArrayList<>();
 
@@ -171,31 +177,47 @@ class TrackingPollerIT {
         int before = listCalls.get();
         Thread.sleep(1500);
 
-        assertThat(listCalls.get() - before).isLessThanOrEqualTo(2);
+        assertThat(listCalls.get() - before).isBetween(1, 2);
     }
 
     @Test
     void streamDeliversTimelineEventsToEveryClient() throws Exception {
-        List<Stream<String>> clients = new ArrayList<>();
-        clients.add(connect());
-        clients.add(connect());
-        await().until(() -> stream.clientCount() >= 2);
-        // let the Spring poller see PENDING first, then move the notification on
-        Thread.sleep(1200);
+        int clients = 2;
+        List<BlockingQueue<String>> inboxes = new ArrayList<>();
+        for (int i = 0; i < clients; i++) {
+            Stream<String> lines = connect();
+            BlockingQueue<String> inbox = new LinkedBlockingQueue<>();
+            inboxes.add(inbox);
+            Thread.ofVirtual().start(() -> {
+                try {
+                    lines.forEach(inbox::add);
+                } catch (RuntimeException closed) {
+                    // stream closed by the test
+                }
+            });
+        }
+        await().until(() -> stream.clientCount() >= clients);
+        // the Spring poller has seen PENDING before the notification moves on
+        await().atMost(Duration.ofSeconds(8)).until(() -> timeline.current(TID).isPresent()
+                && timeline.current(TID).get().state() == NotificationState.PENDING);
         state = "READ";
 
-        for (Stream<String> c : clients) {
-            var it = c.iterator();
+        for (BlockingQueue<String> inbox : inboxes) {
             String hit = null;
             long deadline = System.nanoTime() + Duration.ofSeconds(8).toNanos();
-            while (hit == null && System.nanoTime() < deadline && it.hasNext()) {
-                String line = it.next();
-                if (line.startsWith("data:") && line.contains("state_changed")) {
+            while (hit == null) {
+                long left = deadline - System.nanoTime();
+                String line = left > 0 ? inbox.poll(left, TimeUnit.NANOSECONDS) : null;
+                if (line == null) {
+                    break;
+                }
+                if (line.startsWith("data:") && line.contains("\"to\":\"READ\"")) {
                     hit = line;
                 }
             }
-            assertThat(hit).contains("\"type\":\"timeline\"").contains("\"trackingId\":\"" + TID + "\"")
-                    .contains("\"to\":\"READ\"").doesNotContain("sender-key");
+            assertThat(hit).as("timeline event for READ").isNotNull()
+                    .contains("\"type\":\"timeline\"").contains("\"trackingId\":\"" + TID + "\"")
+                    .contains("state_changed").doesNotContain("sender-key");
         }
     }
 }
