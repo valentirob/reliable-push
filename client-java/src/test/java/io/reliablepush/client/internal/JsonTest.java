@@ -70,7 +70,7 @@ class JsonTest {
         for (String bad : new String[] {
                 "{\"a\":}", "[1,]", "\"\\x\"", "{} x", "", "{", "[1", "\"abc", "tru", "nul", "01", "1.", "-", "1e",
                 "{\"a\" 1}", "{a:1}", "[1 2]", "\"\\u12\"", "\"a\nb\"", "{\"a\":1,}", "+1", ".5",
-                "[".repeat(65) + "]".repeat(65), "{\"a\":".repeat(65) + "1" + "}".repeat(65), "99999999999999999999" }) {
+                "[".repeat(65) + "]".repeat(65), "{\"a\":".repeat(65) + "1" + "}".repeat(65), "99999999999999999999", "1e999", "-1e999", "[1e999]" }) {
             assertThatThrownBy(() -> Json.read(bad))
                     .as(bad)
                     .isInstanceOf(IllegalArgumentException.class)
@@ -90,14 +90,24 @@ class JsonTest {
         assertThatThrownBy(() -> Json.write(Map.of(1, 2))).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> Json.write(Double.NaN)).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> Json.write(Double.POSITIVE_INFINITY)).isInstanceOf(IllegalArgumentException.class);
-        List<Object> cyc = new ArrayList<>();
-        Object deep = cyc;
-        for (int i = 0; i < 65; i++) {
+        assertThatThrownBy(() -> Json.write(nested(65))).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> Json.write(nested(66))).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void writesMaxDepthAndReaderAgrees() {
+        String json = Json.write(nested(64));
+        assertThat(json).isEqualTo("[".repeat(64) + "]".repeat(64));
+        assertThat(Json.read(json)).isNotNull();
+    }
+
+    private static Object nested(int levels) {
+        Object deep = new ArrayList<>();
+        for (int i = 1; i < levels; i++) {
             List<Object> n = new ArrayList<>();
             n.add(deep);
             deep = n;
         }
-        Object tooDeep = deep;
-        assertThatThrownBy(() -> Json.write(tooDeep)).isInstanceOf(IllegalArgumentException.class);
+        return deep;
     }
 }

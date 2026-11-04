@@ -25,7 +25,7 @@
 - No secret is committed: per-run secrets are generated into `harness/build/e2e/secrets.env` (git-ignored). Never log or return through the console API: sender API keys, grant secrets, HMAC secrets, device tokens, raw user ids are allowed in the console (they are simulated) but never in backend logs.
 - Packages: `io.reliablepush.client` (client-java); `io.reliablepush.harness.{config,receiver,devices,sender,tracking,logs,scenarios,console}`.
 - Gitflow: all tasks commit to `feature/cycle1b-harness` from `develop`, merged `--no-ff` after the final review; Conventional Commits; tick the task's checkboxes in this file in the same commit.
-- Test naming: unit `*Test`, integration `*IT` (failsafe). `client-java`: `./mvnw -B verify` in `client-java/`; harness: `./mvnw -B verify` in `harness/`.
+- Test naming: unit `*Test`, integration `*IT` (failsafe). One Maven wrapper at repo root; `client-java`: `./mvnw -B -pl client-java verify`; harness: `./mvnw -B -pl harness -am verify` (both from repo root; backend keeps its own wrapper).
 
 ## Review Focus
 
@@ -40,16 +40,16 @@
 ### Task 1: client-java — JSON codec
 
 **Files:**
-- Create: `pom.xml` (root aggregator: modules `client-java`, `harness`; packaging pom; no parent), `client-java/pom.xml`, `client-java/mvnw`, `client-java/.mvn/wrapper/*` (copy backend wrapper config), `client-java/src/main/java/io/reliablepush/client/internal/Json.java`
+- Create: `pom.xml` (root aggregator: packaging pom; no parent; lists only `client-java` until Task 4 adds `harness`), `mvnw`, `mvnw.cmd`, `.mvn/wrapper/*` (root wrapper, copy backend wrapper config), `client-java/pom.xml`, `client-java/src/main/java/io/reliablepush/client/internal/Json.java`
 - Test: `client-java/src/test/java/io/reliablepush/client/internal/JsonTest.java`
 
 **Interfaces:**
 - Produces: `final class Json` (package `io.reliablepush.client.internal`, not exported in docs) — `static String write(Object value)` for `null`, `String`, `Number`, `Boolean`, `Map<String,?>`, `List<?>` (nested); `static Object read(String json)` returning `null|String|Long|Double|Boolean|LinkedHashMap<String,Object>|ArrayList<Object>`; throws `IllegalArgumentException("invalid JSON at <offset>")` on malformed input; max depth 64.
 
 - [x] **Step 1: Failing tests** — `writesNestedStructures()` (`Map.of("a", List.of(1, true, null), "b", "x\"\n\u0001")` → `{"a":[1,true,null],"b":"x\"\n\u0001"}` with `\u0001` escaped as `\u0001`; key order = insertion order for `LinkedHashMap`); `readsWhatItWrites()` (round-trip of a nested map incl. unicode `é` and surrogate pair 😀); `readsNumbers()` (`1` → `Long 1`, `1.5` → `Double`, `-0`, `1e3` → `Double 1000.0`); `rejectsMalformed()` (`{"a":}`, `[1,]`, `"\x"`, trailing garbage `{} x`, depth 65) each → `IllegalArgumentException` with "invalid JSON"; `rejectsUnsupportedTypes()` (`write(new Object())` → IAE).
-- [x] **Step 2: Run** `cd client-java && ./mvnw -B test` → FAIL (no class).
+- [x] **Step 2: Run** `./mvnw -B -pl client-java test` → FAIL (no class).
 - [x] **Step 3: Implement** (recursive-descent reader, `StringBuilder` writer; no reflection). pom: `groupId io.reliablepush`, `artifactId reliable-push-client`, version `0.1.0-SNAPSHOT`, `maven.compiler.release 17`, test deps JUnit 5 + AssertJ only, surefire + failsafe, JaCoCo line gate 0.80; **no** `<dependencies>` in compile/runtime scope (enforce with maven-enforcer `banDependencies`… or a test asserting `mvn dependency:list -DincludeScope=runtime` is empty — use maven-enforcer-plugin rule `bannedDependencies` excluding `*:*` for scopes compile/runtime).
-- [x] **Step 4: Run** `./mvnw -B verify` → PASS.
+- [x] **Step 4: Run** `./mvnw -B -pl client-java verify` → PASS.
 - [x] **Step 5: Commit** `feat(client): zero-dependency json codec`
 
 ### Task 2: client-java — SenderClient
@@ -68,7 +68,7 @@
   - `enum NotificationState { PENDING, DELIVERED, READ, FALLBACK_PENDING, FALLBACK_TRIGGERED, FALLBACK_FAILED, FALLBACK_EXPIRED, CANCELLED }` (external names); `enum FallbackPolicy { NOT_DELIVERED, NOT_READ }`.
   - `class ReliablePushException extends RuntimeException` with `int status()`, `Optional<ProblemDetails> problem()`, `Optional<Duration> retryAfter()`; `record ProblemDetails(String type, String title, int status, String detail, String field)`; IO/timeout → `ReliablePushException` with status `-1`. `toString()`/messages never contain the API key.
 - [ ] **Step 1: Failing tests** — `registerSendsApiKeyAndBody()` (fake server asserts `X-Api-Key`, `Content-Type: application/json`, body fields; returns 201 → mapped `Notification`); `getUnknownIsEmpty()` (404); `listPassesQueryParams()` (`userId`, `state=FALLBACK_PENDING`, `since` ISO-8601 percent-encoded, `limit`, `cursor`); `cancelConflictThrows409()`; `problemDetailsParsed()` (422 with `field`); `rateLimitedExposesRetryAfter()` (429 + `Retry-After: 7` → `retryAfter()` = 7 s); `timeoutIsStatusMinusOne()` (server sleeps 2 s, timeout 300 ms, returns < 1.5 s); `redirectNotFollowed()` (302 → exception status 302); `apiKeyNeverInExceptionText()`; `unknownJsonFieldsIgnored()`.
-- [ ] **Step 2: Run** → FAIL. **Step 3: Implement.** README: install, usage snippet (register → put `trackingId` as `rp_tid` in the push payload, spec §6), error handling. **Step 4: Run** `./mvnw -B verify` → PASS.
+- [ ] **Step 2: Run** → FAIL. **Step 3: Implement.** README: install, usage snippet (register → put `trackingId` as `rp_tid` in the push payload, spec §6), error handling. **Step 4: Run** `./mvnw -B -pl client-java verify` → PASS.
 - [ ] **Step 5: Commit** `feat(client): sender api client`
 
 ### Task 3: Backend — JSON log file for e2e/demo
@@ -86,7 +86,7 @@
 ### Task 4: Harness skeleton, configuration and container
 
 **Files:**
-- Create: `harness/pom.xml` (Spring Boot 4.1.x parent same version as backend; deps: webmvc, actuator, validation, log4j2 (Logback excluded), `io.reliablepush:reliable-push-client`; test: spring-boot-starter-test, `com.microsoft.playwright:playwright` **test scope**), `harness/mvnw*`, `harness/.mvn/wrapper/*`, `harness/src/main/java/io/reliablepush/harness/HarnessApplication.java`, `harness/src/main/java/io/reliablepush/harness/config/{HarnessProperties,HarnessApp}.java`, `harness/src/main/resources/{application.yml,log4j2-spring.xml}`, `harness/Dockerfile` (build context = repo root: builds `client-java` then `harness`; runtime `eclipse-temurin:21.0.13_9-jre-alpine-3.24`; USER 1001), `harness/.dockerignore`
+- Create: `harness/pom.xml` (Spring Boot 4.1.x parent same version as backend; deps: webmvc, actuator, validation, log4j2 (Logback excluded), `io.reliablepush:reliable-push-client`; test: spring-boot-starter-test, `com.microsoft.playwright:playwright` **test scope**), root `pom.xml` (modify: add module `harness`), `harness/src/main/java/io/reliablepush/harness/HarnessApplication.java`, `harness/src/main/java/io/reliablepush/harness/config/{HarnessProperties,HarnessApp}.java`, `harness/src/main/resources/{application.yml,log4j2-spring.xml}`, `harness/Dockerfile` (build context = repo root: builds `client-java` then `harness`; runtime `eclipse-temurin:21.0.13_9-jre-alpine-3.24`; USER 1001), `harness/.dockerignore`
 - Test: `harness/src/test/java/io/reliablepush/harness/config/HarnessPropertiesTest.java`, `harness/src/test/java/io/reliablepush/harness/HarnessStartsIT.java`
 
 **Interfaces:**
@@ -94,7 +94,7 @@
   - `@ConfigurationProperties("harness") record HarnessProperties(URI backendUrl, Path backendLogDir, Map<String, HarnessApp> apps)`; `record HarnessApp(String senderApiKey, String grantSecret, String hmacSecret, String grantIssuer)`; `HarnessProperties.app(String appId)` → `HarnessApp` or `IllegalArgumentException`. `toString()` of both records redacts all secrets.
   - Server port `8090`; Actuator `health` exposed; console static root `/` → `classpath:/static/console/`.
 - [ ] **Step 1: Failing tests** — `HarnessPropertiesTest.secretsRedactedInToString()`, `.unknownAppThrows()`; `HarnessStartsIT.healthUp()` (random port, test apps from `src/test/resources/application-test.yml` with generated values).
-- [ ] **Step 2: Run** `cd harness && ./mvnw -B verify` → FAIL. Install client first: root `./mvnw -B -q install -pl client-java` (document in harness README). **Step 3: Implement.** **Step 4: Run** → PASS; `docker build -f harness/Dockerfile .` succeeds.
+- [ ] **Step 2: Run** `./mvnw -B -pl harness -am verify` → FAIL (`-am` builds client-java in the reactor; no separate install needed). **Step 3: Implement.** **Step 4: Run** → PASS; `docker build -f harness/Dockerfile .` succeeds.
 - [ ] **Step 5: Commit** `feat(harness): skeleton, configuration and container`
 
 ### Task 5: Fallback receiver
@@ -108,7 +108,7 @@
   - `POST /hooks/{appId}` — reads raw body bytes; verifies `X-RP-Signature` = `v1=hex(HMAC-SHA256(hmacSecret, X-RP-Timestamp + "." + body))` in constant time and timestamp skew ≤ 300 s; records a `ReceivedWebhook(String appId, UUID trackingId, String idempotencyKey, int attempt, String reason, boolean signatureValid, Instant receivedAt, int respondedStatus, Map<String,Object> body)`; then responds per mode.
   - `enum ReceiverMode { OK, FAIL_500, FAIL_400, HANG }` + `Duration hang` (default 0); `WebhookInbox` — `void setMode(String appId, ReceiverMode mode, Duration hang)`, `List<ReceivedWebhook> received(String appId)`, `List<ReceivedWebhook> forTracking(UUID id)`, `void clear()`, listener hook `onReceived(Consumer<ReceivedWebhook>)` (used by SSE, Task 8). Invalid signature → 401, recorded with `signatureValid=false`. Inbox bounded to the last 10,000 entries.
 - [ ] **Step 1: Failing tests** — `SignatureVerifierTest.knownVector()` (expected computed in the test with `javax.crypto.Mac`), `.rejectsTamperedBody()`, `.rejectsStaleTimestamp()` (301 s); `FallbackReceiverIT.okModeRecordsAnd200()`, `.fail500Mode()`, `.hangModeDelaysResponse()` (hang 1 s → response ≥ 1 s), `.invalidSignature401AndRecorded()`, `.idempotencyKeyRecorded()`.
-- [ ] **Step 2: Run** → FAIL. **Step 3: Implement.** **Step 4: Run** `./mvnw -B verify` → PASS.
+- [ ] **Step 2: Run** → FAIL. **Step 3: Implement.** **Step 4: Run** `./mvnw -B -pl harness -am verify` → PASS.
 - [ ] **Step 5: Commit** `feat(harness): fallback receiver with signature check and failure modes`
 
 ### Task 6: Device simulator
@@ -189,7 +189,7 @@
   - REST (`ScenarioController`): `GET /console/api/scenarios` (name, description, externalControl); `POST /console/api/scenarios/run` body `{"names": [...]}` or `{}` = all non-external → 200 `{"results": [...]}`; concurrent → **409** problem (Review Focus 4); `POST /console/api/scenarios/{name}/prepare` and `/{name}/verify` for external-control scenarios (Task 11); `GET /console/api/scenarios/report/summary.json` and `/report/junit.xml` for the last run.
   - Scenario catalogue (names exact; fast clock 1 min = 1 s; app `shop` timeout 5, window 20, backoff 1,2,4,8 unless stated): `delivered-before-timeout` (deliver:1s → DELIVERED, no webhook after 8 s); `read-policy-read` (NOT_READ, read:1s:2s → READ, no webhook); `read-policy-delivered-only` (NOT_READ, deliver:1s → FALLBACK_TRIGGERED, exactly 1 webhook); `not-delivered-single-fallback` (never → exactly 1 webhook, valid signature, Idempotency-Key = trackingId); `late-delivery-after-fallback` (late:8s → FALLBACK_TRIGGERED stays, device event outcome LATE); `multi-device` (2 devices: never + deliver:2s → DELIVERED, no webhook); `cancellation` (cancel at 1 s → CANCELLED, no webhook); `receiver-retries-then-succeeds` (receiver FAIL_500 for first 2 calls → 3 webhooks attempts 1..3, FALLBACK_TRIGGERED); `receiver-final-failure` (FAIL_400 → 1 webhook, FALLBACK_FAILED); `retries-expire-in-window` (FAIL_500 always, window 20 → FALLBACK_EXPIRED); `token-refresh-near-expiry` (app `news` with device-token-validity `PT20S`: refresh happens and later events still accepted); `rate-limited` (app `limited`, device-per-minute 2 → third events call gets 429 with Retry-After); `log-catalogue` (for one fallback run: backend log has `notification.registered`, `tracking.event_accepted`, `fallback.claimed`, `fallback.dispatched` for the trackingId, all with the same `rp.tracking_id`); `log-hygiene` (Review Focus 5); external: `worker-crash-inside-window`, `worker-crash-outside-window` (Task 11).
 - [ ] **Step 1: Failing tests** — `ScenarioReportTest.summaryMatchesSchema()`, `.junitXmlHasFailureDetails()`, `.escapesXml()`; `ScenarioRunnerTest.secondConcurrentRunRejected()`, `.timeoutMarksFailed()` (scenario sleeping beyond a test timeout of 200 ms), `.failureCarriesExpectedActualHint()`.
-- [ ] **Step 2: Run** → FAIL. **Step 3: Implement** runner, report, controller and catalogue (catalogue scenarios are exercised for real in Task 11). **Step 4: Run** `./mvnw -B verify` → PASS.
+- [ ] **Step 2: Run** → FAIL. **Step 3: Implement** runner, report, controller and catalogue (catalogue scenarios are exercised for real in Task 11). **Step 4: Run** `./mvnw -B -pl harness -am verify` → PASS.
 - [ ] **Step 5: Commit** `feat(harness): scenario runner, catalogue and reports`
 
 ### Task 11: Compose stack, secrets and E2E scripts
@@ -223,19 +223,19 @@
 - Produces REST under `/console/api`: `GET apps`; `GET/POST devices` (`{appId,userId,platform,androidMode}`), `POST devices/{id}/refresh`, `POST devices/{id}/online` (`{online}`); `POST push` (`SendPushCommand` JSON, behaviours as strings like `deliver:3s`) → `{trackingId}`; `GET notifications?appId=` (from `Timeline.recent`); `GET notifications/{id}` (notification + timeline); `POST notifications/{id}/cancel`; `GET payload-preview?trackingId=&title=&body=` → `{apns, fcmV1, fcmV2}`; `GET inbox?appId=`; `POST inbox/mode` (`{appId, mode, hangMs}`); `GET logs?traceId=&trackingId=&eventAction=&limit=`; plus Task 8 stream and Task 10 scenario endpoints. No endpoint returns device tokens or harness secrets.
 - UI: single page, tab navigation for the six screens of spec §10.2 (Devices, Send push, Live tracking, Fallback inbox, Scenarios, Logs); permanent banner text exactly "Test harness — simulated data, not for production"; live tracking table with state badges, countdowns to `dueAt` and to `dueAt + window` (window from `GET apps`), detail timeline; copy buttons for payload previews; works in current Chrome, Firefox, Safari, Edge; no external requests (no CDN, no fonts).
 - [ ] **Step 1: Failing tests** — `ConsoleApiIT.createDeviceAndList()`, `.pushReturnsTrackingId()`, `.notificationDetailHasTimeline()`, `.payloadPreviewHasThreeShapes()`, `.inboxModeSwitch()`, `.noTokenOrSecretInAnyResponse()` (crawl all GET endpoints after a push; assert none of the run's secrets/device tokens appear), `.staticConsoleServedWithBanner()`.
-- [ ] **Step 2: Run** → FAIL. **Step 3: Implement** controller and static UI. **Step 4: Run** `./mvnw -B verify` → PASS.
+- [ ] **Step 2: Run** → FAIL. **Step 3: Implement** controller and static UI. **Step 4: Run** `./mvnw -B -pl harness -am verify` → PASS.
 - [ ] **Step 5: Commit** `feat(harness): web console`
 
 ### Task 13: Demo scripts and console smoke test
 
 **Files:**
 - Create: `scripts/demo.sh`, `scripts/demo.ps1`, `harness/src/test/java/io/reliablepush/harness/console/ConsoleSmokeE2E.java` (JUnit 5, `@Tag("console")`, excluded from default `verify`; enabled by Maven profile `console-smoke`)
-- Modify: `harness/pom.xml` (profile `console-smoke`), `scripts/e2e.sh`/`e2e.ps1` (after catalogue scenarios run `./mvnw -B -f harness/pom.xml verify -Pconsole-smoke -Dconsole.url=http://127.0.0.1:8090` and add its JUnit XML + a `console-smoke` entry to `summary.json`)
+- Modify: `harness/pom.xml` (profile `console-smoke`), `scripts/e2e.sh`/`e2e.ps1` (after catalogue scenarios run `./mvnw -B -pl harness -am verify -Pconsole-smoke -Dconsole.url=http://127.0.0.1:8090` and add its JUnit XML + a `console-smoke` entry to `summary.json`)
 
 **Interfaces:**
 - Produces: `demo.sh [--realtime]` — same stack as E2E but profile `demo` instead of `e2e`, keeps running, opens `http://127.0.0.1:8090` (`open`/`xdg-open`; print URL if neither), prints how to stop (`docker compose -p reliable-push-demo down -v`); `--realtime` removes `RELIABLEPUSH_TESTING_MINUTEDURATION`.
 - [ ] **Step 1: Failing test** `ConsoleSmokeE2E.registerDeviceSendPushSeeDeliveredAndFallback()` — headless Chromium via Playwright: banner text visible; create device (Android v1) for a fresh user; send push with behaviour `deliver:1s` → tracking row shows `DELIVERED` within 10 s; send push with `never` → inbox shows one webhook with "signature valid" within 20 s.
-- [ ] **Step 2: Run** against a running demo (`./scripts/demo.sh` in another shell, then `./mvnw -B -f harness/pom.xml verify -Pconsole-smoke`) → FAIL before UI fixes / PASS after. **Step 3: Implement** scripts and profile. **Step 4: Run** `./scripts/e2e.sh` → exit 0 including `console-smoke`.
+- [ ] **Step 2: Run** against a running demo (`./scripts/demo.sh` in another shell, then `./mvnw -B -pl harness -am verify -Pconsole-smoke`) → FAIL before UI fixes / PASS after. **Step 3: Implement** scripts and profile. **Step 4: Run** `./scripts/e2e.sh` → exit 0 including `console-smoke`.
 - [ ] **Step 5: Commit** `feat(harness): demo scripts and console smoke test`
 
 ### Task 14: CI for client and harness, docs and handoff
@@ -243,8 +243,8 @@
 **Files:**
 - Create: `.github/workflows/harness-ci.yml`
 - Modify: `.github/dependabot.yml` (maven `/client-java`, `/harness`; docker `/harness`), `docs/testing.md` (E2E + console sections replacing "arrives with plan 1B"), `docs/integration-guide.md` (client-java usage), `README.md` (components table, demo pointer), `AGENTS.md` (Commands: client, harness, e2e, demo), `docs/STATUS.md`, `CONTRIBUTING.md` (E2E line now real)
-- [ ] **Step 1: Write workflow** — triggers like backend-ci with paths `client-java/**`, `harness/**`, workflow file; jobs: `client` (`./mvnw -B verify` in `client-java`, assert no runtime deps via enforcer), `harness` (install client, `./mvnw -B verify` in `harness`, excluding `console` tag); actions pinned to the same SHAs as backend-ci; **no** e2e/compose job (spec §10.1).
+- [ ] **Step 1: Write workflow** — triggers like backend-ci with paths `client-java/**`, `harness/**`, workflow file; jobs: `client` (`./mvnw -B -pl client-java verify`, assert no runtime deps via enforcer), `harness` (`./mvnw -B -pl harness -am verify`, excluding `console` tag); actions pinned to the same SHAs as backend-ci; **no** e2e/compose job (spec §10.1).
 - [ ] **Step 2: Validate** `docker run --rm -v "$PWD":/repo -w /repo rhysd/actionlint:1.7.12` → no errors.
 - [ ] **Step 3: Docs** — every command in docs runs as written (execute each once); all links resolve.
-- [ ] **Step 4: Final verification** — `client-java` and `harness` `./mvnw -B verify` green; `./scripts/e2e.sh` exit 0; record counts and the E2E line in `docs/STATUS.md`.
+- [ ] **Step 4: Final verification** — `./mvnw -B -pl client-java verify` and `./mvnw -B -pl harness -am verify` green; `./scripts/e2e.sh` exit 0; record counts and the E2E line in `docs/STATUS.md`.
 - [ ] **Step 5: Commit** `ci: client and harness builds; docs: e2e and console`; then run the `session-handoff` skill.

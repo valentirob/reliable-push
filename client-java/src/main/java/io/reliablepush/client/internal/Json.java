@@ -47,9 +47,6 @@ public final class Json {
     }
 
     private static void writeValue(StringBuilder sb, Object v, int depth) {
-        if (depth > MAX_DEPTH) {
-            throw new IllegalArgumentException("JSON value nested deeper than " + MAX_DEPTH);
-        }
         if (v == null) {
             sb.append("null");
         } else if (v instanceof String s) {
@@ -63,6 +60,7 @@ public final class Json {
             }
             sb.append(n);
         } else if (v instanceof Map<?, ?> m) {
+            checkDepth(depth + 1);
             sb.append('{');
             boolean first = true;
             for (Map.Entry<?, ?> e : m.entrySet()) {
@@ -79,6 +77,7 @@ public final class Json {
             }
             sb.append('}');
         } else if (v instanceof List<?> l) {
+            checkDepth(depth + 1);
             sb.append('[');
             boolean first = true;
             for (Object o : l) {
@@ -91,6 +90,12 @@ public final class Json {
             sb.append(']');
         } else {
             throw new IllegalArgumentException("unsupported JSON type: " + v.getClass().getName());
+        }
+    }
+
+    private static void checkDepth(int containerDepth) {
+        if (containerDepth > MAX_DEPTH) {
+            throw new IllegalArgumentException("JSON value nested deeper than " + MAX_DEPTH);
         }
     }
 
@@ -332,7 +337,15 @@ public final class Json {
             }
             String text = s.substring(start, pos);
             try {
-                return integral ? (Object) Long.parseLong(text) : (Object) Double.parseDouble(text);
+                if (integral) {
+                    return Long.parseLong(text);
+                }
+                double d = Double.parseDouble(text);
+                if (Double.isInfinite(d)) {
+                    pos = start;
+                    throw error();
+                }
+                return d;
             } catch (NumberFormatException ex) {
                 pos = start;
                 throw error();
