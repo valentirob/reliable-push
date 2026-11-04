@@ -28,7 +28,7 @@ Build from source (repo root), then `install` to use it from your local reposito
 SenderClient client = SenderClient.builder()
         .baseUrl(URI.create("https://push.example.com"))
         .apiKey(System.getenv("RELIABLEPUSH_API_KEY"))   // per-app sender key
-        .timeout(Duration.ofSeconds(10))                   // default
+        .timeout(Duration.ofSeconds(10))                   // default; total time per call
         .build();
 
 // 1. Register before (or right after) sending the push.
@@ -50,6 +50,9 @@ NotificationPage page = client.list("user-42", NotificationState.FALLBACK_PENDIN
 String next = page.nextCursor();                                   // opaque; null on the last page
 client.cancel(n.trackingId());                                     // only PENDING/DELIVERED, else 409
 ```
+
+The timeout bounds the whole call (connect, headers and full body); on expiry you get status `-1`.
+The base URL must not contain user info, query or fragment. HTTP/1.1 is used.
 
 `list` takes `limit` 1..100 (otherwise `IllegalArgumentException`). A state this client does not know (newer
 server) is reported as `NotificationState.UNKNOWN`.

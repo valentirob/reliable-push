@@ -2,7 +2,6 @@ package io.reliablepush.client;
 
 import io.reliablepush.client.internal.Json;
 
-import java.io.IOException;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
@@ -19,6 +18,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /**
  * Client of the reliable-push sender API. Immutable and thread-safe; share one instance. Redirects are never
@@ -37,6 +40,7 @@ public final class SenderClient {
         this.apiKey = apiKey;
         this.timeout = timeout;
         this.http = HttpClient.newBuilder()
+                .version(HttpClient.Version.HTTP_1_1)
                 .followRedirects(HttpClient.Redirect.NEVER)
                 .connectTimeout(timeout)
                 .build();
@@ -147,13 +151,20 @@ public final class SenderClient {
     }
 
     private HttpResponse<String> send(HttpRequest req) {
+        CompletableFuture<HttpResponse<String>> f =
+                http.sendAsync(req, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
         try {
-            return http.send(req, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            return f.get(timeout.toNanos(), TimeUnit.NANOSECONDS);
         } catch (InterruptedException e) {
+            f.cancel(true);
             Thread.currentThread().interrupt();
             throw new ReliablePushException("sender API call interrupted", -1, null, null, e);
-        } catch (IOException e) {
-            throw new ReliablePushException("sender API call failed: " + e.getClass().getSimpleName(), -1, null, null, e);
+        } catch (TimeoutException e) {
+            f.cancel(true);
+            throw new ReliablePushException("sender API call timed out", -1, null, null, e);
+        } catch (ExecutionException e) {
+            Throwable c = e.getCause() != null ? e.getCause() : e;
+            throw new ReliablePushException("sender API call failed: " + c.getClass().getSimpleName(), -1, null, null, c);
         }
     }
 

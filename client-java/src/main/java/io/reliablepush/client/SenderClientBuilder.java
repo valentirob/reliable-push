@@ -24,7 +24,11 @@ public final class SenderClientBuilder {
         return this;
     }
 
-    /** Per-request timeout (also used as connect timeout). Must be positive. */
+    /**
+     * Total time allowed for one call, including connecting, headers and the whole response body (a server that
+     * stalls mid-body also ends in a {@link ReliablePushException} with status -1). Also the connect timeout.
+     * Must be positive.
+     */
     public SenderClientBuilder timeout(Duration timeout) {
         this.timeout = timeout;
         return this;
@@ -37,6 +41,9 @@ public final class SenderClientBuilder {
         String scheme = baseUrl.getScheme();
         if (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme) || baseUrl.getHost() == null) {
             throw new IllegalArgumentException("baseUrl must be an absolute http(s) URL");
+        }
+        if (baseUrl.getRawUserInfo() != null || baseUrl.getRawQuery() != null || baseUrl.getRawFragment() != null) {
+            throw new IllegalArgumentException("baseUrl must not contain user info, query or fragment");
         }
         if (apiKey.isBlank() || apiKey.chars().anyMatch(c -> c < 0x21 || c > 0x7e)) {
             throw new IllegalArgumentException("apiKey must be non-empty printable ASCII");

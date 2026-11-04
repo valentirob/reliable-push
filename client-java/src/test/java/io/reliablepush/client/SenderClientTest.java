@@ -13,6 +13,7 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
@@ -257,6 +258,38 @@ class SenderClientTest {
             assertThat(e.problem()).isEmpty();
         });
         assertThat(Duration.ofNanos(System.nanoTime() - t0)).isLessThan(Duration.ofMillis(1500));
+    }
+
+    @Test
+    void stalledBodyIsStatusMinusOne() throws Exception {
+        java.util.concurrent.CountDownLatch release = new java.util.concurrent.CountDownLatch(1);
+        SenderClient c = start(ex -> {
+            ex.getResponseHeaders().set("Content-Type", "application/json");
+            ex.sendResponseHeaders(200, 1000);
+            ex.getResponseBody().write('{');
+            ex.getResponseBody().flush();
+            try {
+                release.await(5, java.util.concurrent.TimeUnit.SECONDS);
+            } catch (InterruptedException ignored) {
+                Thread.currentThread().interrupt();
+            }
+        }, Duration.ofMillis(300));
+        long t0 = System.nanoTime();
+        try {
+            assertThatThrownBy(() -> c.get(TID)).isInstanceOfSatisfying(ReliablePushException.class,
+                    e -> assertThat(e.status()).isEqualTo(-1));
+            assertThat(Duration.ofNanos(System.nanoTime() - t0)).isLessThan(Duration.ofMillis(1500));
+        } finally {
+            release.countDown();
+        }
+    }
+
+    @Test
+    void builderRejectsUserInfoQueryFragment() {
+        for (String u : List.of("http://user:pw@127.0.0.1:1", "http://127.0.0.1:1/?a=b", "http://127.0.0.1:1/#f")) {
+            assertThatThrownBy(() -> SenderClient.builder().baseUrl(URI.create(u)).apiKey(KEY).build())
+                    .isInstanceOf(IllegalArgumentException.class);
+        }
     }
 
     @Test
