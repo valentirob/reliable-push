@@ -61,6 +61,8 @@ class DeviceSimulatorIT {
     volatile String eventsOutcome = "ACCEPTED";
     volatile boolean stallEvents;
     volatile boolean rejectAllTokens;
+    volatile long eventsDelayMs;
+    volatile long refreshDelayMs;
     HttpServer server;
     DeviceSimulator simulator;
     String lastIssuedToken;
@@ -109,17 +111,20 @@ class DeviceSimulatorIT {
                         + "\",\"expiresAt\":\"" + clock.instant().plus(validity) + "\"}");
             }
             case "POST /v1/devices/token:refresh" -> {
+                sleep(refreshDelayMs);
                 if (!authed) { reply(ex, 401, "{\"title\":\"Unauthorized\",\"status\":401}"); return; }
                 reply(ex, 200, "{\"deviceToken\":\"" + newToken() + "\",\"expiresAt\":\""
                         + clock.instant().plus(validity) + "\"}");
             }
             case "DELETE /v1/devices/me" -> {
                 if (!authed) { reply(ex, 401, "{}"); return; }
+                validTokens.remove(bearer);
                 ex.sendResponseHeaders(204, -1);
                 ex.close();
             }
             case "POST /v1/events" -> {
                 if (!authed) { reply(ex, 401, "{\"title\":\"Unauthorized\",\"status\":401}"); return; }
+                sleep(eventsDelayMs);
                 if (stallEvents) {
                     ex.sendResponseHeaders(200, 100);
                     ex.getResponseBody().write('{');
@@ -142,6 +147,10 @@ class DeviceSimulatorIT {
             }
             default -> reply(ex, 404, "{}");
         }
+    }
+
+    static void sleep(long ms) {
+        try { Thread.sleep(ms); } catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
     }
 
     static void reply(HttpExchange ex, int status, String body) throws IOException {
@@ -253,11 +262,15 @@ class DeviceSimulatorIT {
 
     @Test
     void neverPostsNothing() throws Exception {
-        SimulatedDevice d = simulator.register("shop", "u1", Platform.IOS, null);
-        simulator.receivePush(UUID.randomUUID(), "shop", "u1", Map.of(d.deviceId(), DeviceBehaviour.parse("never")));
-        Thread.sleep(700);
-        assertThat(reported).isEmpty();
-        assertThat(eventCalls()).isZero();
+        SimulatedDevice never = simulator.register("shop", "u1", Platform.IOS, null);
+        SimulatedDevice barrier = simulator.register("shop", "u1", Platform.ANDROID, AndroidMode.V1);
+        simulator.receivePush(UUID.randomUUID(), "shop", "u1", Map.of(
+                never.deviceId(), DeviceBehaviour.parse("never"),
+                barrier.deviceId(), DeviceBehaviour.parse("deliver:0s")));
+        await().atMost(Duration.ofSeconds(3)).until(() -> reported.size() == 1);
+        Thread.sleep(1500); // well past the 1 s default a device ignoring `never` would use
+        assertThat(reported).extracting(DeviceEventRecord::deviceId).containsExactly(barrier.deviceId());
+        assertThat(eventCalls()).isEqualTo(1);
     }
 
     @Test
@@ -384,5 +397,124 @@ class DeviceSimulatorIT {
         assertThat(count("DELETE /v1/devices/me")).isEqualTo(1);
         assertThat(simulator.devices("shop", "u1")).isEmpty();
         assertThatThrownBy(() -> simulator.device(d.deviceId())).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void readWithSameInstantAlwaysPostsDeliveredFirst() {
+        SimulatedDevice d = simulator.register("shop", "u1", Platform.IOS, null);
+        for (int i = 0; i < 10; i++) {
+            simulator.receivePush(UUID.randomUUID(), "shop", "u1", Map.of(d.deviceId(), DeviceBehaviour.parse("read:0s:0s")));
+        }
+        await().atMost(Duration.ofSeconds(5)).until(() -> reported.size() == 20);
+        for (int i = 0; i < 20; i += 2) {
+            assertThat(reported.get(i).type()).isEqualTo("DELIVERED");
+            assertThat(reported.get(i + 1).type()).isEqualTo("READ");
+            assertThat(reported.get(i + 1).trackingId()).isEqualTo(reported.get(i).trackingId());
+        }
+    }
+
+    @Test
+    void offlineEventsFlushInOrder() throws Exception {
+        SimulatedDevice d = simulator.register("shop", "u1", Platform.IOS, null);
+        simulator.setOnline(d.deviceId(), false);
+        List<UUID> ids = new ArrayList<>();
+        for (int i = 0; i < 6; i++) {
+            ids.add(UUID.randomUUID());
+            simulator.receivePush(ids.get(i), "shop", "u1", Map.of(d.deviceId(), DeviceBehaviour.parse("deliver:0s")));
+            Thread.sleep(20);
+        }
+        Thread.sleep(200);
+        // a fresh event right after going online must not overtake the queued ones
+        simulator.setOnline(d.deviceId(), true);
+        UUID fresh = UUID.randomUUID();
+        simulator.receivePush(fresh, "shop", "u1", Map.of(d.deviceId(), DeviceBehaviour.parse("deliver:0s")));
+        ids.add(fresh);
+
+        await().atMost(Duration.ofSeconds(5)).until(() -> reported.size() == 7);
+        assertThat(reported).extracting(DeviceEventRecord::trackingId).containsExactlyElementsOf(ids);
+    }
+
+    @Test
+    void goingOfflineMidFlushStopsTheRest() throws Exception {
+        SimulatedDevice d = simulator.register("shop", "u1", Platform.IOS, null);
+        simulator.setOnline(d.deviceId(), false);
+        List<UUID> ids = new ArrayList<>();
+        for (int i = 0; i < 5; i++) {
+            ids.add(UUID.randomUUID());
+            simulator.receivePush(ids.get(i), "shop", "u1", Map.of(d.deviceId(), DeviceBehaviour.parse("deliver:0s")));
+            Thread.sleep(20);
+        }
+        eventsDelayMs = 300;
+        simulator.setOnline(d.deviceId(), true);
+        await().atMost(Duration.ofSeconds(3)).until(() -> eventCalls() >= 1);
+        simulator.setOnline(d.deviceId(), false);
+        Thread.sleep(1200);
+        assertThat(eventCalls()).isLessThanOrEqualTo(2);
+        long before = reported.size();
+        assertThat(before).isLessThan(5);
+
+        eventsDelayMs = 0;
+        simulator.setOnline(d.deviceId(), true);
+        await().atMost(Duration.ofSeconds(5)).until(() -> reported.size() == 5);
+        Thread.sleep(300);
+        assertThat(reported).extracting(DeviceEventRecord::trackingId).containsExactlyElementsOf(ids);
+        assertThat(eventCalls()).isEqualTo(5);
+    }
+
+    @Test
+    void unregisterDropsPendingEventsAndNeverReRegisters() throws Exception {
+        SimulatedDevice d = simulator.register("shop", "u1", Platform.IOS, null);
+        rejectAllTokens = true; // any post would 401 -> refresh -> re-register if the device were still alive
+        simulator.receivePush(UUID.randomUUID(), "shop", "u1", Map.of(d.deviceId(), DeviceBehaviour.parse("deliver:300ms")));
+        simulator.unregister(d.deviceId());
+        Thread.sleep(900);
+        assertThat(count("POST /v1/devices")).isEqualTo(1);
+        assertThat(eventCalls()).isZero();
+        assertThat(reported).isEmpty();
+    }
+
+    @Test
+    void unregisterOfOfflineDeviceDropsQueuedEvents() throws Exception {
+        SimulatedDevice d = simulator.register("shop", "u1", Platform.IOS, null);
+        simulator.setOnline(d.deviceId(), false);
+        simulator.receivePush(UUID.randomUUID(), "shop", "u1", Map.of(d.deviceId(), DeviceBehaviour.parse("deliver:0s")));
+        Thread.sleep(300);
+        simulator.unregister(d.deviceId());
+        Thread.sleep(300);
+        assertThat(eventCalls()).isZero();
+        assertThat(count("POST /v1/devices")).isEqualTo(1);
+    }
+
+    @Test
+    void devicesReturnsQuicklyWhileRefreshIsBlocked() throws Exception {
+        validity = Duration.ofSeconds(10);
+        SimulatedDevice d = simulator.register("shop", "u1", Platform.IOS, null);
+        clock.now.set(T0.plusSeconds(9));
+        refreshDelayMs = 1500;
+        Thread refresher = Thread.ofVirtual().start(() -> simulator.refreshIfNearExpiry(d.deviceId()));
+        await().atMost(Duration.ofSeconds(3)).until(() -> count("POST /v1/devices/token:refresh") == 1);
+
+        long start = System.nanoTime();
+        simulator.devices("shop", "u1");
+        simulator.device(d.deviceId());
+        simulator.setOnline(d.deviceId(), true);
+        assertThat(Duration.ofNanos(System.nanoTime() - start)).isLessThan(Duration.ofMillis(300));
+        refresher.join();
+    }
+
+    @Test
+    void failedRefreshOtherThan401DoesNotReRegister() {
+        validity = Duration.ofSeconds(10);
+        SimulatedDevice d = simulator.register("shop", "u1", Platform.IOS, null);
+        server.removeContext("/");
+        server.createContext("/", ex -> {
+            if (ex.getRequestURI().getPath().equals("/v1/devices")) {
+                requests.add(new Recorded("POST /v1/devices", null, null));
+            }
+            reply(ex, 503, "{}");
+        });
+        clock.now.set(T0.plusSeconds(9));
+        simulator.refreshIfNearExpiry(d.deviceId());
+        assertThat(count("POST /v1/devices")).isEqualTo(1);
     }
 }

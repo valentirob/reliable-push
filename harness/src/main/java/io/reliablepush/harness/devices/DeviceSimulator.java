@@ -6,14 +6,15 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayDeque;
-import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -41,19 +42,26 @@ public class DeviceSimulator implements AutoCloseable {
 
     private record Pending(UUID trackingId, String type, Instant occurredAt) {}
 
-    /** Mutable device state; the token fields are guarded by {@code this}, the queue by {@code gate}. */
+    /**
+     * Mutable device state. Token fields and {@code online}/{@code removed} are volatile so {@link #view()} never
+     * blocks; token changes are serialised by {@code authLock} (held across network calls, never by readers);
+     * {@code queue} and {@code draining} are guarded by {@code gate} (never held across I/O).
+     */
     private static final class DeviceState {
         final UUID id;
         final String appId;
         final String userId;
         final Platform platform;
         final AndroidMode androidMode;
-        private String token;
-        private Instant issuedAt;
-        private Instant expiresAt;
+        final Object authLock = new Object();
         final Object gate = new Object();
-        private boolean online = true;
-        private final ArrayDeque<Pending> queue = new ArrayDeque<>();
+        volatile String token;
+        volatile Instant issuedAt;
+        volatile Instant expiresAt;
+        volatile boolean online = true;
+        volatile boolean removed;
+        final ArrayDeque<Pending> queue = new ArrayDeque<>();
+        boolean draining;
 
         DeviceState(UUID id, String appId, String userId, Platform platform, AndroidMode androidMode) {
             this.id = id;
@@ -63,22 +71,14 @@ public class DeviceSimulator implements AutoCloseable {
             this.androidMode = androidMode;
         }
 
-        synchronized String token() {
-            return token;
-        }
-
-        synchronized void setToken(String token, Instant issuedAt, Instant expiresAt) {
-            this.token = token;
+        void setToken(String token, Instant issuedAt, Instant expiresAt) {
             this.issuedAt = issuedAt;
             this.expiresAt = expiresAt;
+            this.token = token;
         }
 
         SimulatedDevice view() {
-            synchronized (this) {
-                synchronized (gate) {
-                    return new SimulatedDevice(id, appId, userId, platform, androidMode, expiresAt, online);
-                }
-            }
+            return new SimulatedDevice(id, appId, userId, platform, androidMode, expiresAt, online);
         }
 
         @Override
@@ -92,8 +92,11 @@ public class DeviceSimulator implements AutoCloseable {
     private final DeviceApiClient api;
     private final Map<UUID, DeviceState> devices = new ConcurrentHashMap<>();
     private final List<Consumer<DeviceEventRecord>> listeners = new CopyOnWriteArrayList<>();
-    private final ScheduledExecutorService executor =
-            Executors.newScheduledThreadPool(4, Thread.ofVirtual().name("device-sim-", 0).factory());
+    /** Only fires timers; all blocking HTTP runs on {@link #io}. */
+    private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(
+            r -> Thread.ofPlatform().daemon().name("device-sim-timer").unstarted(r));
+    private final ExecutorService io =
+            Executors.newThreadPerTaskExecutor(Thread.ofVirtual().name("device-sim-io-", 0).factory());
 
     @Autowired
     public DeviceSimulator(HarnessProperties properties, GrantMinter minter) {
@@ -138,8 +141,13 @@ public class DeviceSimulator implements AutoCloseable {
     /** Revokes the device on the backend ({@code DELETE /v1/devices/me}) and forgets it. */
     public void unregister(UUID deviceId) {
         DeviceState s = state(deviceId);
-        var r = api.revoke(s.token());
+        // forget first: pending timers, queued events and in-flight posts see `removed` and drop their work
+        s.removed = true;
         devices.remove(deviceId);
+        synchronized (s.gate) {
+            s.queue.clear();
+        }
+        var r = api.revoke(s.token);
         if (!r.ok() && r.status() != 401) {
             throw new IllegalStateException("device revocation failed: HTTP status " + r.status());
         }
@@ -160,12 +168,18 @@ public class DeviceSimulator implements AutoCloseable {
                 continue;
             }
             switch (behaviours.getOrDefault(s.id, DEFAULT_BEHAVIOUR)) {
-                case DeviceBehaviour.DeliverAfter b -> schedule(s, trackingId, "DELIVERED", b.d());
-                case DeviceBehaviour.ReadAfter b -> {
-                    schedule(s, trackingId, "DELIVERED", b.deliver());
-                    schedule(s, trackingId, "READ", b.read());
-                }
-                case DeviceBehaviour.OfflineThenLate b -> schedule(s, trackingId, "DELIVERED", b.late());
+                case DeviceBehaviour.DeliverAfter b -> schedule(s, b.d(), () -> emit(s, trackingId, "DELIVERED"));
+                case DeviceBehaviour.ReadAfter b -> schedule(s, b.deliver(), () -> {
+                    emit(s, trackingId, "DELIVERED");
+                    Duration gap = b.read().minus(b.deliver());
+                    // READ is armed only after DELIVERED was appended, so the two can never swap
+                    if (gap.isZero()) {
+                        emit(s, trackingId, "READ");
+                    } else {
+                        schedule(s, gap, () -> emit(s, trackingId, "READ"));
+                    }
+                });
+                case DeviceBehaviour.OfflineThenLate b -> schedule(s, b.late(), () -> emit(s, trackingId, "DELIVERED"));
                 case DeviceBehaviour.Never b -> { }
             }
         }
@@ -178,22 +192,17 @@ public class DeviceSimulator implements AutoCloseable {
 
     public void setOnline(UUID deviceId, boolean online) {
         DeviceState s = state(deviceId);
-        List<Pending> toFlush;
-        synchronized (s.gate) {
-            s.online = online;
-            if (!online || s.queue.isEmpty()) {
-                return;
-            }
-            toFlush = new ArrayList<>(s.queue);
-            s.queue.clear();
+        s.online = online;
+        if (online) {
+            kick(s);
         }
-        executor.execute(() -> toFlush.forEach(p -> post(s, p)));
     }
 
     @Override
     @PreDestroy
     public void close() {
-        executor.shutdownNow();
+        scheduler.shutdownNow();
+        io.shutdownNow();
     }
 
     @Override
@@ -211,31 +220,73 @@ public class DeviceSimulator implements AutoCloseable {
         return s;
     }
 
-    private void schedule(DeviceState s, UUID trackingId, String type, Duration delay) {
-        executor.schedule(() -> {
+    private void schedule(DeviceState s, Duration delay, Runnable task) {
+        scheduler.schedule(() -> {
+            if (s.removed) {
+                return;
+            }
             try {
-                emit(s, new Pending(trackingId, type, clock.instant()));
+                task.run();
             } catch (RuntimeException e) {
-                LOG.warn("device {} could not report {}: {}", s.id, type, e.getClass().getSimpleName());
+                LOG.warn("device {} timer task failed: {}", s.id, e.getClass().getSimpleName());
             }
         }, delay.toMillis(), TimeUnit.MILLISECONDS);
     }
 
-    private void emit(DeviceState s, Pending p) {
+    /** Appends to the device's FIFO queue and makes sure exactly one drain loop is running. */
+    private void emit(DeviceState s, UUID trackingId, String type) {
         synchronized (s.gate) {
-            if (!s.online) {
-                s.queue.add(p);
+            if (s.removed) {
                 return;
             }
+            s.queue.add(new Pending(trackingId, type, clock.instant()));
         }
-        post(s, p);
+        kick(s);
+    }
+
+    private void kick(DeviceState s) {
+        synchronized (s.gate) {
+            if (s.draining || s.removed || !s.online || s.queue.isEmpty()) {
+                return;
+            }
+            s.draining = true;
+        }
+        try {
+            io.execute(() -> drain(s));
+        } catch (RejectedExecutionException e) {
+            synchronized (s.gate) {
+                s.draining = false; // simulator closed
+            }
+        }
+    }
+
+    /** The only poster of a device's events: FIFO, stops (leaving the rest queued) as soon as the device is offline. */
+    private void drain(DeviceState s) {
+        while (true) {
+            Pending p;
+            synchronized (s.gate) {
+                if (s.removed || !s.online || s.queue.isEmpty()) {
+                    s.draining = false;
+                    return;
+                }
+                p = s.queue.poll();
+            }
+            try {
+                post(s, p);
+            } catch (RuntimeException e) {
+                LOG.warn("device {} could not report {}: {}", s.id, p.type(), e.getClass().getSimpleName());
+            }
+        }
     }
 
     private void post(DeviceState s, Pending p) {
-        String outcome;
         Instant sentAt = clock.instant();
+        refreshIfNearExpiry(s);
+        if (s.removed) {
+            return;
+        }
+        String outcome;
         try {
-            refreshIfNearExpiry(s);
             var result = withAuth(s, token -> api.postEvents(token, List.of(
                     new DeviceApiClient.EventItem(p.trackingId(), p.type(), p.occurredAt()))));
             outcome = switch (result.status()) {
@@ -258,55 +309,69 @@ public class DeviceSimulator implements AutoCloseable {
         }
     }
 
-    /** Runs the call; on 401 tries one refresh, then one re-registration, then gives up with the last result. */
+    /**
+     * Runs the call; on 401 tries one refresh and, if that succeeds but the retry is 401 again or the refresh itself
+     * was 401, one re-registration; then gives up with the last result.
+     */
     private <T> DeviceApiClient.Result<T> withAuth(DeviceState s,
             Function<String, DeviceApiClient.Result<T>> call) {
-        var result = call.apply(s.token());
+        var result = call.apply(s.token);
         if (result.status() != 401) {
             return result;
         }
-        if (refreshNow(s)) {
-            result = call.apply(s.token());
+        int refreshStatus = refreshNow(s);
+        boolean reRegister = refreshStatus == 401;
+        if (refreshStatus == 200) {
+            result = call.apply(s.token);
             if (result.status() != 401) {
                 return result;
             }
+            reRegister = true;
         }
-        if (reRegister(s)) {
-            return call.apply(s.token());
+        if (reRegister && reRegister(s)) {
+            return call.apply(s.token);
         }
         return result;
     }
 
     private void refreshIfNearExpiry(DeviceState s) {
-        synchronized (s) {
-            if (!s.online) {
-                return;
-            }
+        if (!s.online || s.removed) {
+            return;
+        }
+        synchronized (s.authLock) {
             long validity = Duration.between(s.issuedAt, s.expiresAt).toMillis();
             long remaining = Duration.between(clock.instant(), s.expiresAt).toMillis();
-            if (remaining * 5 < validity) {
-                if (!refreshNow(s)) {
-                    reRegister(s);
-                }
+            if (remaining * 5 < validity && refreshNow(s) == 401) {
+                reRegister(s);
             }
         }
     }
 
-    private boolean refreshNow(DeviceState s) {
-        synchronized (s) {
-            var r = api.refresh(s.token);
-            if (!r.ok()) {
-                return false;
+    /** @return the HTTP status of the refresh call (200 = new token stored), 0 on timeout / I/O failure */
+    private int refreshNow(DeviceState s) {
+        synchronized (s.authLock) {
+            if (s.removed) {
+                return 0;
             }
-            s.setToken(r.value().token(), clock.instant(), r.value().expiresAt());
-            return true;
+            var r = api.refresh(s.token);
+            if (r.ok()) {
+                s.setToken(r.value().token(), clock.instant(), r.value().expiresAt());
+            }
+            return r.status();
         }
     }
 
     private boolean reRegister(DeviceState s) {
-        synchronized (s) {
+        synchronized (s.authLock) {
+            if (s.removed) {
+                return false;
+            }
             var r = api.register(s.appId, minter.mint(s.appId, s.userId), s.platform, s.id);
             if (!r.ok()) {
+                return false;
+            }
+            if (s.removed) { // unregistered while the call was in flight: do not leave a live token behind
+                api.revoke(r.value().token());
                 return false;
             }
             s.setToken(r.value().token(), clock.instant(), r.value().expiresAt());
