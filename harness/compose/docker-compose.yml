@@ -72,6 +72,9 @@ services:
       RP_LOG_FILE: /tmp/rp-logs/backend-worker-a.json
       # poll-interval is a literal duration (not scaled by the fast clock): keep retry timing meaningful
       RELIABLEPUSH_WORKER_POLLINTERVAL: 500ms
+      # lease is scaled (12 s): longer than the 10 s webhook http-timeout as in production, so a worker never
+      # re-claims its own hung call; the crash scenarios rely on it (see WorkerCrash)
+      RELIABLEPUSH_WORKER_LEASE: 12m
 
   worker-b:
     <<: *backend
@@ -79,6 +82,7 @@ services:
       SPRING_PROFILES_ACTIVE: worker,json,e2e
       RP_LOG_FILE: /tmp/rp-logs/backend-worker-b.json
       RELIABLEPUSH_WORKER_POLLINTERVAL: 500ms
+      RELIABLEPUSH_WORKER_LEASE: 12m
 
   harness:
     image: reliable-push-harness:e2e

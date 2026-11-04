@@ -5,7 +5,7 @@ import java.time.Duration;
 
 /**
  * Shared timings of the catalogue, derived from the E2E environment (fast clock: 1 "minute" = 1 s; app {@code shop}:
- * timeout 5, trigger window 20, backoff 1,2,4,8, max-attempts 5, lease 2; worker poll 500 ms). Waits are generous
+ * timeout 5, trigger window 20, backoff 1,2,4,8, max-attempts 5; workers: lease 12, poll 500 ms). Waits are generous
  * but bounded; no assertion depends on exact wall-clock timings.
  */
 abstract class CatalogScenario implements Scenario {
