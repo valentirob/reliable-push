@@ -38,11 +38,17 @@ import tools.jackson.databind.json.JsonMapper;
 /**
  * Follows the backend's ECS JSON log files ({@code backend-*.json}, one per backend container) and keeps the most
  * recent entries in memory. Runs on its own single thread so a slow tail never delays other scheduled work.
+ *
+ * <p>Ordering: entries are kept in arrival order (the order this tail read them), not sorted by timestamp; with
+ * several files, lines from one poll are grouped per file. Lines that are not valid JSON objects, and the first 64 KB
+ * of oversize lines, are not queryable but are retained (last {@value #MAX_UNPARSED}) so {@link #findSecrets} still
+ * scans them.
  */
 @Component
 public class BackendLogTail {
 
     static final int MAX_ENTRIES = 20_000;
+    static final int MAX_UNPARSED = 2_000;
     static final int MAX_LINE_BYTES = 64 * 1024;
     private static final int MIN_SECRET_LENGTH = 8;
     private static final Logger LOG = LogManager.getLogger(BackendLogTail.class);
@@ -62,6 +68,8 @@ public class BackendLogTail {
     private final JsonMapper json = JsonMapper.builder().build();
     private final Map<Path, FileState> files = new HashMap<>();
     private final Deque<Entry> entries = new ArrayDeque<>();
+    private final Deque<String> unparsed = new ArrayDeque<>();
+    private final Set<String> warned = new HashSet<>();
     private final AtomicLong malformed = new AtomicLong();
     private final AtomicLong oversize = new AtomicLong();
     private volatile boolean missingLogged;
@@ -98,8 +106,10 @@ public class BackendLogTail {
     private void safePoll() {
         try {
             poll();
-        } catch (RuntimeException e) {
-            LOG.warn("backend log poll failed: {}", e.toString());
+        } catch (Throwable e) {
+            if (warned.add(e.getClass().getName())) {
+                LOG.warn("backend log poll failed: {}", e.toString());
+            }
         }
     }
 
@@ -162,6 +172,7 @@ public class BackendLogTail {
         } else if (!state.skipping) {
             if (state.partial.size() >= MAX_LINE_BYTES) {
                 state.skipping = true;
+                keepUnparsed(state.partial.toString(StandardCharsets.UTF_8));
                 state.partial.reset();
                 oversize.incrementAndGet();
             } else {
@@ -185,12 +196,22 @@ public class BackendLogTail {
         }
         if (fields == null) {
             malformed.incrementAndGet();
+            keepUnparsed(line);
             return;
         }
         synchronized (entries) {
             entries.addLast(new Entry(fields, line));
             if (entries.size() > MAX_ENTRIES) {
                 entries.removeFirst();
+            }
+        }
+    }
+
+    private void keepUnparsed(String raw) {
+        synchronized (entries) {
+            unparsed.addLast(raw);
+            if (unparsed.size() > MAX_UNPARSED) {
+                unparsed.removeFirst();
             }
         }
     }
@@ -206,7 +227,7 @@ public class BackendLogTail {
                 if (matches(f, "trace.id", q.traceId())
                         && matches(f, "rp.tracking_id", q.trackingId())
                         && matches(f, "event.action", q.eventAction())) {
-                    out.add(f);
+                    out.add(java.util.Collections.unmodifiableMap(f));
                 }
             }
         }
@@ -214,7 +235,7 @@ public class BackendLogTail {
     }
 
     private static boolean matches(Map<String, Object> f, String key, String wanted) {
-        return wanted == null || wanted.equals(String.valueOf(f.get(key)));
+        return wanted == null || Objects.equals(wanted, f.get(key));
     }
 
     /** Secrets (length at least 8) present in any retained raw line, each masked to its first 4 characters. */
@@ -230,6 +251,14 @@ public class BackendLogTail {
                     if (e.raw().contains(secret)) {
                         found.add(secret.substring(0, 4) + "…");
                         break;
+                    }
+                }
+                if (!found.contains(secret.substring(0, 4) + "…")) {
+                    for (String raw : unparsed) {
+                        if (raw.contains(secret)) {
+                            found.add(secret.substring(0, 4) + "…");
+                            break;
+                        }
                     }
                 }
             }
