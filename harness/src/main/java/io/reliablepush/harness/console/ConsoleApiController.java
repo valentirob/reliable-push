@@ -23,6 +23,8 @@ import io.reliablepush.harness.tracking.Timeline;
 import io.reliablepush.harness.tracking.TimelineEntry;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Collection;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -56,6 +58,7 @@ public class ConsoleApiController {
 
     private static final Logger LOG = LogManager.getLogger(ConsoleApiController.class);
 
+    static final String DEFAULT_APP = "shop";
     static final int RECENT_LIMIT = 200;
     static final int INBOX_LIMIT = 500;
     static final int MAX_TEXT = 1_000;
@@ -106,16 +109,24 @@ public class ConsoleApiController {
 
     // ---- apps ------------------------------------------------------------------------------------------------
 
+    /** Apps in {@link #displayOrder} order: the console's app selects default to the first entry ({@code shop}). */
     @GetMapping("/apps")
     public List<Map<String, Object>> apps() {
-        return properties.apps().entrySet().stream().sorted(Map.Entry.comparingByKey()).map(e -> {
-            HarnessApp app = e.getValue();
+        return displayOrder(properties.apps().keySet()).stream().map(id -> {
+            HarnessApp app = properties.apps().get(id);
             Map<String, Object> m = new LinkedHashMap<>();
-            m.put("appId", e.getKey());
+            m.put("appId", id);
             m.put("windowMinutes", app.windowMinutes());
             m.put("timeScaleSeconds", properties.timeScaleSeconds());
             return m;
         }).toList();
+    }
+
+    /** The default app {@value #DEFAULT_APP} (the scenarios' main app) first, then the others by id. */
+    static List<String> displayOrder(Collection<String> appIds) {
+        return appIds.stream()
+                .sorted(Comparator.comparing((String id) -> !id.equals(DEFAULT_APP)).thenComparing(Comparator.naturalOrder()))
+                .toList();
     }
 
     // ---- devices ---------------------------------------------------------------------------------------------
