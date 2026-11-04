@@ -178,7 +178,9 @@ public final class ScenarioContext {
     /**
      * Every value the backend must never log, for the log-hygiene scan: each app's sender API key, grant secret and
      * HMAC secret; every device token, signed grant and webhook signature the harness issued or saw; and the raw
-     * user ids and fallback texts scenarios used (harness lifetime, bounded). Never log or return it.
+     * user ids and fallback texts scenarios used (harness lifetime, bounded); plus the backend's device-token signing
+     * private key(s) and database password when the harness's environment carries them ({@link EnvironmentSecrets}).
+     * Never log or return it.
      */
     public List<String> secrets() {
         List<String> out = new ArrayList<>();
@@ -191,6 +193,7 @@ public final class ScenarioContext {
         addAll(out, c.grants().issuedGrantsForLogHygieneScan());
         addAll(out, c.inbox().signaturesForLogHygieneScan());
         out.addAll(history.snapshot());
+        out.addAll(EnvironmentSecrets.fromProcessEnvironment());
         return out;
     }
 
