@@ -11,6 +11,9 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.function.Consumer;
+import java.util.List;
 import org.springframework.stereotype.Component;
 
 /**
@@ -26,6 +29,15 @@ public class FakeSender {
     private final HarnessProperties properties;
     private final PushReceiver receiver;
     private final Map<String, SenderClient> clients = new ConcurrentHashMap<>();
+    private final List<Consumer<Sent>> listeners = new CopyOnWriteArrayList<>();
+
+    /** A notification the sender registered; {@code deviceCount} = devices given an explicit behaviour. */
+    public record Sent(String appId, Notification notification, int deviceCount) {}
+
+    /** Listener called synchronously after registration and before the push is simulated; it must not block. */
+    public void onSent(Consumer<Sent> listener) {
+        listeners.add(Objects.requireNonNull(listener));
+    }
 
     public FakeSender(HarnessProperties properties, PushReceiver receiver) {
         this.properties = properties;
@@ -34,12 +46,19 @@ public class FakeSender {
 
     public Notification send(SendPushCommand c) {
         Objects.requireNonNull(c, "command");
-        Notification n = client(c.appId()).register(RegisterRequest.builder()
+        Notification n = senderClient(c.appId()).register(RegisterRequest.builder()
                 .userId(c.userId())
                 .policy(c.policy())
                 .timeoutMinutes(c.timeoutMinutes())
                 .fallback(c.fallback() != null ? c.fallback() : defaultFallback(c.body()))
                 .build());
+        for (Consumer<Sent> l : listeners) {
+            try {
+                l.accept(new Sent(c.appId(), n, c.perDevice() == null ? 0 : c.perDevice().size()));
+            } catch (RuntimeException ignored) {
+                // a listener never breaks sending
+            }
+        }
         receiver.receivePush(n.trackingId(), c.appId(), c.userId(), c.perDevice());
         return n;
     }
@@ -51,7 +70,8 @@ public class FakeSender {
         return m;
     }
 
-    private SenderClient client(String appId) {
+    /** The cached sender client of an app (shared with the tracking poller). Throws for an unknown app. */
+    public SenderClient senderClient(String appId) {
         SenderClient existing = clients.get(appId);
         if (existing != null) {
             return existing;

@@ -156,9 +156,9 @@
   - `record TimelineEntry(Instant at, String kind /*registered|push_simulated|event_sent|state_changed|webhook_received|cancelled*/, Map<String,Object> details)`; `Timeline` — per trackingId ordered entries + current `Notification`; `List<Notification> recent(String appId, int limit)`.
   - `TrackingPoller` — `@Scheduled(fixedDelay = 1000)`: for each app, `list(null, null, since = now − 1h, 100, …)` paging; records `state_changed` entries on transitions; **one poller regardless of browser tabs**; rebuilds the timeline from the backend on startup (Review Focus 3).
   - `ConsoleStream` — `GET /console/api/stream` (`text/event-stream`) emitting `{"type":"timeline","trackingId":…,"entry":…}` and `{"type":"webhook",…}`; `SseEmitter` per tab, timeout 0, dead emitters removed.
-- [ ] **Step 1: Failing tests** — `TimelineTest.ordersEntriesAndDetectsTransitions()`; `TrackingPollerIT.recordsStateChangesFromBackend()` (fake backend list endpoint returns PENDING then DELIVERED), `.rebuildsAfterRestart()` (new poller instance with empty memory shows backend notifications), `.oneBackendCallPerSecondWithThreeStreamClients()` (3 SSE clients connected → fake backend sees ≤ 2 list calls in 1.5 s per app).
-- [ ] **Step 2: Run** → FAIL. **Step 3: Implement.** **Step 4: Run** → PASS.
-- [ ] **Step 5: Commit** `feat(harness): tracking timeline and sse stream`
+- [x] **Step 1: Failing tests** — `TimelineTest.ordersEntriesAndDetectsTransitions()`; `TrackingPollerIT.recordsStateChangesFromBackend()` (fake backend list endpoint returns PENDING then DELIVERED), `.rebuildsAfterRestart()` (new poller instance with empty memory shows backend notifications), `.oneBackendCallPerSecondWithThreeStreamClients()` (3 SSE clients connected → fake backend sees ≤ 2 list calls in 1.5 s per app).
+- [x] **Step 2: Run** → FAIL. **Step 3: Implement.** **Step 4: Run** → PASS.
+- [x] **Step 5: Commit** `feat(harness): tracking timeline and sse stream`
 
 ### Task 9: Backend log tail
 

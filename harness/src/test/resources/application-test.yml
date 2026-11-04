@@ -8,3 +8,5 @@ harness:
       grant-secret: test-grant-secret-0b5d6e1a9c37f284
       hmac-secret: test-hmac-secret-4c8e2a7d1f6b9035
       grant-issuer: https://shop.test.invalid
+  # no background polling in context tests that do not exercise it
+  poll-interval: 1h
