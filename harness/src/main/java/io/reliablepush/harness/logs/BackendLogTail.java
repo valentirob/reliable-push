@@ -247,19 +247,10 @@ public class BackendLogTail {
         List<String> found = new ArrayList<>();
         synchronized (entries) {
             for (String secret : candidates) {
-                for (Entry e : entries) {
-                    if (e.raw().contains(secret)) {
-                        found.add(secret.substring(0, 4) + "…");
-                        break;
-                    }
-                }
-                if (!found.contains(secret.substring(0, 4) + "…")) {
-                    for (String raw : unparsed) {
-                        if (raw.contains(secret)) {
-                            found.add(secret.substring(0, 4) + "…");
-                            break;
-                        }
-                    }
+                boolean hit = entries.stream().anyMatch(e -> e.raw().contains(secret))
+                        || unparsed.stream().anyMatch(raw -> raw.contains(secret));
+                if (hit) {
+                    found.add(secret.substring(0, 4) + "…");
                 }
             }
         }

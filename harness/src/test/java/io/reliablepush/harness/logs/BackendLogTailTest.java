@@ -140,6 +140,14 @@ class BackendLogTailTest {
     }
 
     @Test
+    void reportsEverySecretSharingAPrefix() throws IOException {
+        BackendLogTail tail = tail();
+        append("backend-a.json", line("a", "t", "x", "leak hunter2AAA") + "raw dump hunter2BBB\n");
+        tail.poll();
+        assertThat(tail.findSecrets(List.of("hunter2AAA", "hunter2BBB"))).containsExactly("hunt…", "hunt…");
+    }
+
+    @Test
     void multiByteCharacterSplitAcrossPolls() throws IOException {
         BackendLogTail tail = tail();
         byte[] bytes = line("a", "t", "x", "caf\u00e9 \u20ac").getBytes(UTF_8);
