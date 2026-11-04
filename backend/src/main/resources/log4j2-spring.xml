@@ -2,6 +2,8 @@
 <!-- Logging profiles (spec 9.1): "json" (default) = ECS JSON on stdout; "local" = human-readable pattern.
      follow="true" re-resolves System.out on every write, so stdout capture in tests also works for
      application contexts that reuse an already-initialised Log4j (the logging system is JVM-wide).
+     Profiles "e2e | demo" additionally append the same ECS JSON lines to a file (RP_LOG_FILE, or -Drp.log.file) that the
+     local harness tails from a shared volume; stdout is unchanged and the file always gets JSON, even with "local".
      ${project.version} is injected by Maven resource filtering (@...@ delimiters). -->
 <Configuration status="WARN">
     <Appenders>
@@ -18,10 +20,24 @@
                 <PatternLayout pattern="%d{ISO8601} %-5level [%t] %c{1.} [trace=%X{trace.id}] - %m%n%throwable"/>
             </Console>
         </SpringProfile>
+        <SpringProfile name="e2e | demo">
+            <!-- Keep this layout identical to the "json | !local" Console layout above (Log4j cannot share a layout
+                 element between appenders). createOnDemand: no file unless an event is written. -->
+            <File name="JsonFile" fileName="${sys:rp.log.file:-${env:RP_LOG_FILE:-/tmp/rp-logs/backend.json}}"
+                  append="true" immediateFlush="true" createOnDemand="true">
+                <JsonTemplateLayout eventTemplateUri="classpath:log4j2/ecs-reliable-push.json">
+                    <EventTemplateAdditionalField key="service.name" value="reliable-push"/>
+                    <EventTemplateAdditionalField key="service.version" value="@project.version@"/>
+                </JsonTemplateLayout>
+            </File>
+        </SpringProfile>
     </Appenders>
     <Loggers>
         <Root level="INFO">
             <AppenderRef ref="Console"/>
+            <SpringProfile name="e2e | demo">
+                <AppenderRef ref="JsonFile"/>
+            </SpringProfile>
         </Root>
     </Loggers>
 </Configuration>

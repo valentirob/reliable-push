@@ -79,9 +79,9 @@
 
 **Interfaces:**
 - Produces: in profiles `e2e | demo` an extra appender writes the same ECS JSON lines to `${env:RP_LOG_FILE:-/tmp/rp-logs/backend.json}` (append, no rotation; stdout unchanged). The harness (Task 9) tails this file from a shared volume.
-- [ ] **Step 1: Failing test** `E2eLogFileIT` (profiles `test,e2e`, `RP_LOG_FILE` set to a `@TempDir` file via system property/env equivalent supported by Log4j lookup — use `${sys:rp.log.file:-${env:RP_LOG_FILE:-/tmp/rp-logs/backend.json}}`): after GET `/actuator/health` the file contains a JSON line with `event.action`=`api.request`; `notWrittenWithoutProfile()` (profile `test` only → file absent).
-- [ ] **Step 2: Run** `cd backend && ./mvnw -B verify -Dit.test=E2eLogFileIT` → FAIL. **Step 3: Implement** a `<SpringProfile name="e2e | demo">` `File` appender with the same `JsonTemplateLayout`, referenced from Root only inside that profile (use `<SpringProfile>` around an `AppenderRef` or a second `Root` definition per Log4j/Spring docs). **Step 4: Run** full `./mvnw -B verify` → PASS. Update `docs/operations.md` (profiles table).
-- [ ] **Step 5: Commit** `feat(backend): json log file in e2e and demo profiles`
+- [x] **Step 1: Failing test** `E2eLogFileIT` (profiles `test,e2e`, `RP_LOG_FILE` set to a `@TempDir` file via system property/env equivalent supported by Log4j lookup — use `${sys:rp.log.file:-${env:RP_LOG_FILE:-/tmp/rp-logs/backend.json}}`): after GET `/actuator/health` the file contains a JSON line with `event.action`=`api.request`; `notWrittenWithoutProfile()` (profile `test` only → file absent).
+- [x] **Step 2: Run** `cd backend && ./mvnw -B verify -Dit.test=E2eLogFileIT` → FAIL. **Step 3: Implement** a `<SpringProfile name="e2e | demo">` `File` appender with the same `JsonTemplateLayout`, referenced from Root only inside that profile (use `<SpringProfile>` around an `AppenderRef` or a second `Root` definition per Log4j/Spring docs). **Step 4: Run** full `./mvnw -B verify` → PASS. Update `docs/operations.md` (profiles table).
+- [x] **Step 5: Commit** `feat(backend): json log file in e2e and demo profiles`
 
 ### Task 4: Harness skeleton, configuration and container
 
