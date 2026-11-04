@@ -17,14 +17,14 @@ class LateDeliveryAfterFallback extends CatalogScenario {
 
     LateDeliveryAfterFallback() {
         super("late-delivery-after-fallback",
-                "Device delivers only at 8 s, after the fallback fired: state stays FALLBACK_TRIGGERED, event is LATE.");
+                "Device delivers only at 10 s, after the fallback fired: state stays FALLBACK_TRIGGERED, event is LATE.");
     }
 
     @Override
     public void run(ScenarioContext ctx) throws Exception {
         String user = ctx.userId(1);
         SimulatedDevice d = ctx.register(SHOP, user, Platform.ANDROID);
-        UUID id = ctx.send(SHOP, user, FallbackPolicy.NOT_DELIVERED, TIMEOUT_MINUTES, Map.of(d.deviceId(), "late:8s"));
+        UUID id = ctx.send(SHOP, user, FallbackPolicy.NOT_DELIVERED, TIMEOUT_MINUTES, Map.of(d.deviceId(), "late:10s"));
         ctx.awaitState(id, NotificationState.FALLBACK_TRIGGERED, FALLBACK_WAIT);
         DeviceEventRecord e = ctx.awaitDeviceEvents(id, 1, QUICK.plus(QUICK)).get(0);
         ctx.check("LATE".equals(e.outcome()), "the late DELIVERED event answered LATE",

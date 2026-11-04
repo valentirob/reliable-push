@@ -54,6 +54,19 @@ class GrantMinterTest {
     }
 
     @Test
+    void hygieneScanSeesMintedGrantsBounded() {
+        GrantMinter minter = new GrantMinter(props(URI.create("http://localhost:1")), Clock.systemUTC());
+        String first = minter.mint("shop", "u1");
+
+        assertThat(minter.issuedGrantsForLogHygieneScan()).containsExactly(first);
+        for (int i = 0; i < GrantMinter.GRANT_HISTORY + 1; i++) {
+            minter.mint("shop", "other-" + i);
+        }
+        assertThat(minter.issuedGrantsForLogHygieneScan()).hasSize(GrantMinter.GRANT_HISTORY).doesNotContain(first);
+        assertThat(minter.toString()).doesNotContain(first);
+    }
+
+    @Test
     void unknownAppIsRejected() {
         GrantMinter minter = new GrantMinter(props(URI.create("http://localhost:1")), Clock.systemUTC());
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> minter.mint("nope", "u"))

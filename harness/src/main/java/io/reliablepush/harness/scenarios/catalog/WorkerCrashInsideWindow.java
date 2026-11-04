@@ -14,8 +14,8 @@ class WorkerCrashInsideWindow extends WorkerCrash {
 
     WorkerCrashInsideWindow() {
         super("worker-crash-inside-window",
-                "Workers killed while the webhook is in flight and restarted after 3 s: the row is re-claimed "
-                        + "(fallback.reclaimed) and re-sent with the same Idempotency-Key; FALLBACK_TRIGGERED.");
+                "Worker killed while the webhook hangs in flight, workers restarted after 3 s: the row is "
+                        + "re-claimed (fallback.reclaimed) and re-sent with the same Idempotency-Key; FALLBACK_TRIGGERED.");
     }
 
     @Override

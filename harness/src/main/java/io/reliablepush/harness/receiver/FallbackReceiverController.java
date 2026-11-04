@@ -58,6 +58,7 @@ public class FallbackReceiverController {
         boolean valid = SignatureVerifier.verify(
                 app.hmacSecret().getBytes(StandardCharsets.UTF_8), timestamp, signature, bytes, now);
         Map<String, Object> body = parse(bytes);
+        inbox.recordSignature(signature);
 
         UUID trackingId = uuid(idempotencyKey);
         if (trackingId == null) {
@@ -76,7 +77,7 @@ public class FallbackReceiverController {
                 status = HttpStatus.UNAUTHORIZED.value();
             } else {
                 try {
-                    status = answer(appId);
+                    status = answer(appId, trackingId);
                 } catch (InterruptedException e) {
                     interrupted = true;
                 }
@@ -96,9 +97,14 @@ public class FallbackReceiverController {
         return ResponseEntity.status(status).build();
     }
 
-    private int answer(String appId) throws InterruptedException {
-        if (inbox.takeForcedFailure(appId)) {
+    private int answer(String appId, UUID trackingId) throws InterruptedException {
+        if (inbox.takeForcedFailure(trackingId)) {
             return HttpStatus.INTERNAL_SERVER_ERROR.value();
+        }
+        Duration forcedHang = inbox.takeForcedHang(appId);
+        if (forcedHang != null) {
+            Thread.sleep(forcedHang.compareTo(MAX_HANG) > 0 ? MAX_HANG : forcedHang);
+            return HttpStatus.OK.value();
         }
         WebhookInbox.Mode mode = inbox.mode(appId);
         return switch (mode.mode()) {

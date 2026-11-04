@@ -8,6 +8,7 @@ import static org.mockito.Mockito.mock;
 import io.reliablepush.harness.config.HarnessApp;
 import io.reliablepush.harness.config.HarnessProperties;
 import io.reliablepush.harness.devices.DeviceSimulator;
+import io.reliablepush.harness.devices.GrantMinter;
 import io.reliablepush.harness.logs.BackendLogTail;
 import io.reliablepush.harness.receiver.ReceiverMode;
 import io.reliablepush.harness.receiver.WebhookInbox;
@@ -54,11 +55,20 @@ class ScenarioRunnerTest {
 
     /** External scenario: prepare returns a fixed id, verify records what it got. */
     static final class TestExternal implements Scenario.External {
+        final String name;
         final UUID id = UUID.randomUUID();
         final AtomicReference<UUID> verified = new AtomicReference<>();
         volatile boolean failVerify;
 
-        @Override public String name() { return "ext"; }
+        TestExternal() {
+            this("ext");
+        }
+
+        TestExternal(String name) {
+            this.name = name;
+        }
+
+        @Override public String name() { return name; }
         @Override public String description() { return "external"; }
 
         @Override
@@ -78,13 +88,20 @@ class ScenarioRunnerTest {
         }
     }
 
+    GrantMinter minter;
+
     ScenarioRunner runner(Duration timeout, Scenario... scenarios) {
+        return runner(timeout, Duration.ofMinutes(2), scenarios);
+    }
+
+    ScenarioRunner runner(Duration timeout, Duration reservation, Scenario... scenarios) {
         HarnessProperties props = new HarnessProperties(URI.create("http://127.0.0.1:1"), logDir, Map.of(
                 "shop", new HarnessApp("sender-key-0123456789", "grant-secret-0123456789", "hmac-secret-0123456789",
                         "https://shop.test.invalid")));
-        var components = new ScenarioContext.Components(mock(FakeSender.class), mock(DeviceSimulator.class), inbox,
-                new Timeline(), new BackendLogTail(logDir, Duration.ofHours(1)), props);
-        runner = new ScenarioRunner(List.of(scenarios), components, timeout, Duration.ofMillis(10));
+        minter = new GrantMinter(props);
+        var components = new ScenarioContext.Components(mock(FakeSender.class), mock(DeviceSimulator.class), minter,
+                inbox, new Timeline(), new BackendLogTail(logDir, Duration.ofHours(1)), props);
+        runner = new ScenarioRunner(List.of(scenarios), components, timeout, Duration.ofMillis(10), reservation);
         return runner;
     }
 
@@ -219,18 +236,54 @@ class ScenarioRunnerTest {
     }
 
     @Test
-    void secretsContainAppSecretsAndRunUserIds() {
+    void secretsContainAppSecretsGrantsAndUserIdsOfEarlierRunsToo() {
+        AtomicReference<String> firstUser = new AtomicReference<>();
         AtomicReference<List<String>> seen = new AtomicReference<>();
         ScenarioRunner r = runner(Duration.ofSeconds(5), new TestScenario("s", false, ctx -> {
             String user = ctx.userId(7);
+            firstUser.compareAndSet(null, user);
             seen.set(ctx.secrets());
-            if (!ctx.secrets().contains(user)) {
-                ctx.fail("user id in secrets", "missing", "");
-            }
         }));
 
         assertThat(r.run("s").status()).isEqualTo("PASSED");
-        assertThat(seen.get()).contains("sender-key-0123456789", "grant-secret-0123456789", "hmac-secret-0123456789");
+        String grant = minter.mint("shop", "someone");
+        assertThat(r.run("s").status()).isEqualTo("PASSED"); // a later run, new prefix
+
+        assertThat(seen.get()).contains("sender-key-0123456789", "grant-secret-0123456789", "hmac-secret-0123456789",
+                grant, firstUser.get());
+    }
+
+    @Test
+    void preparedExternalReservesTheRunnerUntilVerified() {
+        TestExternal ext = new TestExternal("ext");
+        ScenarioRunner r = runner(Duration.ofSeconds(5), new TestScenario("a", false, ctx -> { }), ext,
+                new TestExternal("ext2"));
+        r.prepare("ext");
+
+        assertThatThrownBy(r::runAll).isInstanceOf(ScenarioRunner.RunInProgressException.class)
+                .hasMessageContaining("external scenario ext is prepared; verify it first");
+        assertThatThrownBy(() -> r.prepare("ext2")).isInstanceOf(ScenarioRunner.RunInProgressException.class);
+        assertThat(r.running()).isFalse();
+        assertThat(inbox.mode("shop").mode()).isEqualTo(ReceiverMode.HANG);
+
+        assertThat(r.verify("ext", null).status()).isEqualTo("PASSED");
+        assertThat(r.runAll()).extracting(ScenarioResult::status).containsExactly("PASSED");
+    }
+
+    @Test
+    void expiredReservationIsReleasedAndReceiversReset() throws Exception {
+        ScenarioRunner r = runner(Duration.ofSeconds(5), Duration.ofMillis(50),
+                new TestScenario("a", false, ctx -> {
+                    if (ctx.inbox().mode("shop").mode() != ReceiverMode.OK) {
+                        ctx.fail("receiver OK", ctx.inbox().mode("shop").mode().name(), "expired reservation reset");
+                    }
+                }), new TestExternal());
+        r.prepare("ext");
+        Thread.sleep(150);
+
+        assertThat(r.runAll()).extracting(ScenarioResult::status).containsExactly("PASSED");
+        assertThatThrownBy(() -> r.verify("ext", null)).isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("prepare");
     }
 
     @Test

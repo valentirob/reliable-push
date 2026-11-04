@@ -36,5 +36,17 @@ class LogCatalogue extends CatalogScenario {
             ctx.check(id.toString().equals(tid), e.getKey() + " with rp.tracking_id=" + id,
                     () -> "rp.tracking_id=" + tid, "spec 9.1 correlation");
         }
+        // the worker sets one trace.id per claimed row; the API request that registered it has its own
+        Object registered = found.get("notification.registered").get("trace.id");
+        Object claimed = found.get("fallback.claimed").get("trace.id");
+        Object dispatched = found.get("fallback.dispatched").get("trace.id");
+        ctx.check(claimed instanceof String c && !c.isBlank() && c.equals(dispatched),
+                "fallback.claimed and fallback.dispatched share one worker trace.id",
+                () -> "claimed trace.id=" + claimed + ", dispatched trace.id=" + dispatched,
+                "spec 9.1: the worker sets a new trace.id per claimed row");
+        ctx.check(registered instanceof String r && !r.isBlank() && !r.equals(claimed),
+                "notification.registered carries the API request's own trace.id (not the worker's)",
+                () -> "registered trace.id=" + registered + ", worker trace.id=" + claimed,
+                "spec 9.1: API requests and worker rows are correlated by rp.tracking_id, not by trace.id");
     }
 }

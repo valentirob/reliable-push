@@ -23,10 +23,11 @@ class ReceiverRetriesThenSucceeds extends CatalogScenario {
 
     @Override
     public void run(ScenarioContext ctx) throws Exception {
-        ctx.inbox().failNext(SHOP, 2);
         String user = ctx.userId(1);
         SimulatedDevice d = ctx.register(SHOP, user, Platform.ANDROID);
         UUID id = ctx.send(SHOP, user, FallbackPolicy.NOT_DELIVERED, TIMEOUT_MINUTES, Map.of(d.deviceId(), "never"));
+        // per trackingId, so a stray webhook of an earlier scenario cannot consume it; the first call comes at ~5 s
+        ctx.inbox().failNext(id, 2);
         ctx.awaitState(id, NotificationState.FALLBACK_TRIGGERED, FALLBACK_WAIT);
         ctx.pause(SETTLE);
         List<ReceivedWebhook> calls = ctx.expectWebhookCount(id, 3);

@@ -105,14 +105,31 @@ class FallbackReceiverIT {
     }
 
     @Test
-    void failNextAnswers500ThenFollowsTheMode() throws Exception {
-        inbox.failNext("shop", 2);
+    void failNextAnswers500ForThatTrackingIdOnlyThenFollowsTheMode() throws Exception {
         UUID id = UUID.randomUUID();
+        inbox.failNext(id, 2);
 
+        assertThat(signedPost(UUID.randomUUID(), 1).statusCode()).isEqualTo(200); // a stray call does not consume it
         assertThat(signedPost(id, 1).statusCode()).isEqualTo(500);
         assertThat(signedPost(id, 2).statusCode()).isEqualTo(500);
         assertThat(signedPost(id, 3).statusCode()).isEqualTo(200);
         assertThat(inbox.forTracking(id)).extracting(ReceivedWebhook::respondedStatus).containsExactly(500, 500, 200);
+    }
+
+    @Test
+    void hangNextDelaysOnlyTheNextCallAndKeepsItsSignature() throws Exception {
+        inbox.hangNext("shop", 1, Duration.ofSeconds(1));
+
+        long start = System.nanoTime();
+        HttpResponse<String> hung = signedPost(UUID.randomUUID(), 1);
+        assertThat(Duration.ofNanos(System.nanoTime() - start)).isGreaterThanOrEqualTo(Duration.ofSeconds(1));
+        assertThat(hung.statusCode()).isEqualTo(200);
+
+        start = System.nanoTime();
+        assertThat(signedPost(UUID.randomUUID(), 1).statusCode()).isEqualTo(200);
+        assertThat(Duration.ofNanos(System.nanoTime() - start)).isLessThan(Duration.ofSeconds(1));
+        assertThat(inbox.signaturesForLogHygieneScan()).hasSizeGreaterThanOrEqualTo(2)
+                .allSatisfy(sig -> assertThat(sig).hasSize(64).doesNotStartWith("v1="));
     }
 
     @Test

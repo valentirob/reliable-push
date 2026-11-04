@@ -1,6 +1,7 @@
 package io.reliablepush.harness.receiver;
 
 import java.time.Duration;
+import java.util.ArrayDeque;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -18,6 +19,7 @@ import org.springframework.stereotype.Component;
 public class WebhookInbox {
 
     static final int CAPACITY = 10_000;
+    static final int SIGNATURE_HISTORY = 10_000;
     private static final Logger LOG = LogManager.getLogger(WebhookInbox.class);
 
     /** Current answer mode of an app; {@code hang} only matters for {@link ReceiverMode#HANG}. */
@@ -28,40 +30,100 @@ public class WebhookInbox {
     private final Object lock = new Object();
     private final LinkedHashMap<UUID, ReceivedWebhook> entries = new LinkedHashMap<>();
     private final Map<String, Mode> modes = new ConcurrentHashMap<>();
-    /** Per app: how many of the next correctly signed calls answer 500 before the mode applies again. */
-    private final Map<String, Integer> forcedFailures = new ConcurrentHashMap<>();
+    /** Per trackingId: how many of its next correctly signed calls answer 500 before the mode applies again. */
+    private final Map<UUID, Integer> forcedFailures = new ConcurrentHashMap<>();
+    /** Per app: a one-shot "hang the next N calls" override (then 200), independent of the mode. */
+    private final Map<String, ForcedHang> forcedHangs = new ConcurrentHashMap<>();
+    /** Hex part of every X-RP-Signature seen (last {@value #SIGNATURE_HISTORY}); internal, survives {@link #clear}. */
+    private final ArrayDeque<String> signatures = new ArrayDeque<>();
     private final List<Consumer<ReceivedWebhook>> listeners = new CopyOnWriteArrayList<>();
     private final List<Consumer<ReceivedWebhook>> startListeners = new CopyOnWriteArrayList<>();
 
-    /** Sets the answer mode of an app and cancels any pending {@link #failNext} countdown of that app. */
+    private record ForcedHang(int left, Duration hang) {}
+
+    /** Sets the answer mode of an app and cancels a pending {@link #hangNext} of that app. */
     public void setMode(String appId, ReceiverMode mode, Duration hang) {
-        forcedFailures.remove(appId);
+        forcedHangs.remove(appId);
         modes.put(appId, new Mode(mode, hang == null ? Duration.ZERO : hang));
     }
 
     /**
-     * The next {@code calls} correctly signed calls of this app answer 500 (a retryable failure); afterwards the
-     * app's mode applies again. Replaces an earlier countdown; {@code 0} cancels it.
+     * The next {@code calls} correctly signed calls for this trackingId answer 500 (a retryable failure); afterwards
+     * the app's mode applies again. Calls for other trackingIds are not affected. Replaces an earlier countdown;
+     * {@code 0} cancels it.
      */
-    public void failNext(String appId, int calls) {
+    public void failNext(UUID trackingId, int calls) {
         if (calls < 0) {
             throw new IllegalArgumentException("calls must not be negative");
         }
         if (calls == 0) {
-            forcedFailures.remove(appId);
+            forcedFailures.remove(trackingId);
         } else {
-            forcedFailures.put(appId, calls);
+            forcedFailures.put(trackingId, calls);
         }
     }
 
-    /** Consumes one forced failure of the app; true when this call must answer 500. */
-    boolean takeForcedFailure(String appId) {
+    /**
+     * The next {@code calls} correctly signed calls of this app hang for {@code hang} (bounded by the receiver's
+     * maximum) and then answer 200; afterwards the mode applies again. A one-shot override, so the mode can stay
+     * {@link ReceiverMode#OK}. Replaces an earlier one; {@code 0} cancels it.
+     */
+    public void hangNext(String appId, int calls, Duration hang) {
+        if (calls < 0 || hang == null || hang.isNegative()) {
+            throw new IllegalArgumentException("calls and hang must not be negative");
+        }
+        if (calls == 0) {
+            forcedHangs.remove(appId);
+        } else {
+            forcedHangs.put(appId, new ForcedHang(calls, hang));
+        }
+    }
+
+    /** Consumes one forced failure of the trackingId; true when this call must answer 500. */
+    boolean takeForcedFailure(UUID trackingId) {
+        if (trackingId == null) {
+            return false;
+        }
         boolean[] taken = {false};
-        forcedFailures.computeIfPresent(appId, (k, left) -> {
+        forcedFailures.computeIfPresent(trackingId, (k, left) -> {
             taken[0] = true;
             return left > 1 ? left - 1 : null;
         });
         return taken[0];
+    }
+
+    /** Consumes one forced hang of the app; the hang to apply, or null. */
+    Duration takeForcedHang(String appId) {
+        Duration[] taken = {null};
+        forcedHangs.computeIfPresent(appId, (k, f) -> {
+            taken[0] = f.hang();
+            return f.left() > 1 ? new ForcedHang(f.left() - 1, f.hang()) : null;
+        });
+        return taken[0];
+    }
+
+    /** Remembers a received signature header for the log-hygiene scan (the hex part when it has the v1= prefix). */
+    void recordSignature(String header) {
+        if (header == null || header.isBlank()) {
+            return;
+        }
+        String value = header.startsWith("v1=") ? header.substring(3) : header;
+        synchronized (signatures) {
+            signatures.addLast(value);
+            while (signatures.size() > SIGNATURE_HISTORY) {
+                signatures.removeFirst();
+            }
+        }
+    }
+
+    /**
+     * INTERNAL — for the log-hygiene scan only ({@code scenarios} package): the signatures the receiver saw. Never
+     * return it through any endpoint and never log it.
+     */
+    public List<String> signaturesForLogHygieneScan() {
+        synchronized (signatures) {
+            return List.copyOf(signatures);
+        }
     }
 
     public Mode mode(String appId) {
@@ -93,13 +155,17 @@ public class WebhookInbox {
         }
     }
 
-    /** Drops all entries and resets every app to {@link ReceiverMode#OK} (no forced failures). */
+    /**
+     * Drops all entries and resets every app to {@link ReceiverMode#OK} without forced failures or hangs. The
+     * signature history is kept (the log-hygiene scan covers the harness lifetime).
+     */
     public void clear() {
         synchronized (lock) {
             entries.clear();
         }
         modes.clear();
         forcedFailures.clear();
+        forcedHangs.clear();
     }
 
     public void onReceived(Consumer<ReceivedWebhook> listener) {

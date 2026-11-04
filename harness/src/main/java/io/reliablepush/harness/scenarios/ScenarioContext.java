@@ -10,6 +10,7 @@ import io.reliablepush.harness.devices.AndroidMode;
 import io.reliablepush.harness.devices.DeviceBehaviour;
 import io.reliablepush.harness.devices.DeviceSimulator;
 import io.reliablepush.harness.devices.DeviceSimulator.DeviceEventRecord;
+import io.reliablepush.harness.devices.GrantMinter;
 import io.reliablepush.harness.devices.Platform;
 import io.reliablepush.harness.devices.SimulatedDevice;
 import io.reliablepush.harness.logs.BackendLogTail;
@@ -27,6 +28,7 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.EnumSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -34,6 +36,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
@@ -48,17 +51,42 @@ import java.util.stream.Collectors;
 public final class ScenarioContext {
 
     /** The harness components scenarios drive. */
-    public record Components(FakeSender sender, DeviceSimulator devices, WebhookInbox inbox, Timeline timeline,
-                             BackendLogTail backendLog, HarnessProperties properties) {}
+    public record Components(FakeSender sender, DeviceSimulator devices, GrantMinter grants, WebhookInbox inbox,
+                             Timeline timeline, BackendLogTail backendLog, HarnessProperties properties) {}
 
     /** State shared by all scenarios of one run. */
     static final class Run {
         final String prefix;
-        final Set<String> userIds = ConcurrentHashMap.newKeySet();
         final Map<UUID, String> appOf = new ConcurrentHashMap<>();
+        final AtomicInteger texts = new AtomicInteger();
 
         Run(String prefix) {
             this.prefix = prefix;
+        }
+    }
+
+    /**
+     * Values scenarios generated during the harness lifetime that must never reach the backend log: raw user ids
+     * and fallback texts (insertion-ordered, last {@value #CAPACITY}). Never logged or returned.
+     */
+    static final class History {
+        static final int CAPACITY = 10_000;
+        private final LinkedHashSet<String> values = new LinkedHashSet<>();
+
+        synchronized void add(String value) {
+            values.add(value);
+            while (values.size() > CAPACITY) {
+                values.remove(values.iterator().next());
+            }
+        }
+
+        synchronized List<String> snapshot() {
+            return List.copyOf(values);
+        }
+
+        @Override
+        public String toString() {
+            return "History[size=" + values.size() + "]";
         }
     }
 
@@ -68,16 +96,18 @@ public final class ScenarioContext {
 
     private final Components c;
     private final Run run;
+    private final History history;
     private final String scenario;
     private final Duration poll;
     private final Map<UUID, List<DeviceEventRecord>> deviceEvents;
     private final long startNanos;
     private final List<String> messages;
 
-    ScenarioContext(Components components, Run run, String scenario, Duration poll,
+    ScenarioContext(Components components, Run run, History history, String scenario, Duration poll,
                     Map<UUID, List<DeviceEventRecord>> deviceEvents, long startNanos, List<String> priorMessages) {
         this.c = components;
         this.run = run;
+        this.history = history;
         this.scenario = scenario;
         this.poll = poll;
         this.deviceEvents = deviceEvents;
@@ -122,10 +152,10 @@ public final class ScenarioContext {
         return run.prefix;
     }
 
-    /** {@code <run-prefix>-<scenario>-<n>}; remembered for the log-hygiene scan. */
+    /** {@code <run-prefix>-<scenario>-<n>}; remembered (harness lifetime, bounded) for the log-hygiene scan. */
     public String userId(int n) {
         String id = run.prefix + "-" + scenario + "-" + n;
-        run.userIds.add(id);
+        history.add(id);
         return id;
     }
 
@@ -146,8 +176,9 @@ public final class ScenarioContext {
     }
 
     /**
-     * Every secret of this run for the log-hygiene scan: each app's sender API key, grant secret and HMAC secret,
-     * every device token the simulator issued, and the run's raw user ids. Never log or return it.
+     * Every value the backend must never log, for the log-hygiene scan: each app's sender API key, grant secret and
+     * HMAC secret; every device token, signed grant and webhook signature the harness issued or saw; and the raw
+     * user ids and fallback texts scenarios used (harness lifetime, bounded). Never log or return it.
      */
     public List<String> secrets() {
         List<String> out = new ArrayList<>();
@@ -156,12 +187,17 @@ public final class ScenarioContext {
             out.add(app.grantSecret());
             out.add(app.hmacSecret());
         }
-        List<String> tokens = c.devices().issuedTokensForLogHygieneScan();
-        if (tokens != null) {
-            out.addAll(tokens);
-        }
-        out.addAll(run.userIds);
+        addAll(out, c.devices().issuedTokensForLogHygieneScan());
+        addAll(out, c.grants().issuedGrantsForLogHygieneScan());
+        addAll(out, c.inbox().signaturesForLogHygieneScan());
+        out.addAll(history.snapshot());
         return out;
+    }
+
+    private static void addAll(List<String> out, List<String> values) {
+        if (values != null) {
+            out.addAll(values);
+        }
     }
 
     // ---- devices and sending ---------------------------------------------------------------------------------
@@ -176,14 +212,21 @@ public final class ScenarioContext {
 
     /**
      * Registers a notification through the sender API and simulates the push; {@code behaviours} maps device ids to
-     * behaviour strings such as {@code deliver:1s}. Returns the trackingId (remembered for {@link #awaitState}).
+     * behaviour strings such as {@code deliver:1s}. The fallback is {@code {channel: sms, text: <unique text>}}; the
+     * text is message content the backend must never log, so the hygiene scan looks for it. Returns the trackingId
+     * (remembered for {@link #awaitState}).
      */
     public UUID send(String appId, String userId, FallbackPolicy policy, Integer timeoutMinutes,
                      Map<UUID, String> behaviours) {
         Map<UUID, DeviceBehaviour> parsed = new LinkedHashMap<>();
         behaviours.forEach((device, text) -> parsed.put(device, DeviceBehaviour.parse(text)));
-        Notification n = c.sender().send(new SendPushCommand(appId, userId, "Scenario " + scenario,
-                "Harness scenario " + scenario, policy, timeoutMinutes, null, parsed));
+        String text = "Fallback text " + run.prefix + " " + scenario + " #" + run.texts.incrementAndGet();
+        history.add(text);
+        Map<String, Object> fallback = new LinkedHashMap<>();
+        fallback.put("channel", "sms");
+        fallback.put("text", text);
+        Notification n = c.sender().send(new SendPushCommand(appId, userId, "Scenario " + scenario, text, policy,
+                timeoutMinutes, fallback, parsed));
         track(n.trackingId(), appId);
         log("sent " + n.trackingId() + " app=" + appId + " policy=" + policy + " timeoutMinutes=" + timeoutMinutes
                 + " behaviours=" + behaviours.values());

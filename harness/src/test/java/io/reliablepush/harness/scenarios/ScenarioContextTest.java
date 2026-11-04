@@ -3,6 +3,7 @@ package io.reliablepush.harness.scenarios;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.when;
 
 import io.reliablepush.client.FallbackPolicy;
@@ -13,6 +14,7 @@ import io.reliablepush.client.SenderClient;
 import io.reliablepush.harness.config.HarnessApp;
 import io.reliablepush.harness.config.HarnessProperties;
 import io.reliablepush.harness.devices.DeviceSimulator;
+import io.reliablepush.harness.devices.GrantMinter;
 import io.reliablepush.harness.logs.BackendLogTail;
 import io.reliablepush.harness.receiver.WebhookInbox;
 import io.reliablepush.harness.sender.FakeSender;
@@ -41,6 +43,7 @@ class ScenarioContextTest {
     final FakeSender sender = mock(FakeSender.class);
     final SenderClient client = mock(SenderClient.class);
     final UUID id = UUID.randomUUID();
+    final WebhookInbox inbox = spy(new WebhookInbox());
     ScenarioRunner runner;
 
     static Notification n(UUID id, NotificationState state) {
@@ -54,8 +57,8 @@ class ScenarioContextTest {
         HarnessProperties props = new HarnessProperties(URI.create("http://127.0.0.1:1"), logDir, Map.of(
                 "shop", new HarnessApp("sender-key-0123456789", "grant-secret-0123456789", "hmac-secret-0123456789",
                         "https://shop.test.invalid")));
-        var components = new ScenarioContext.Components(sender, mock(DeviceSimulator.class), new WebhookInbox(),
-                new Timeline(), new BackendLogTail(logDir, Duration.ofHours(1)), props);
+        var components = new ScenarioContext.Components(sender, mock(DeviceSimulator.class), new GrantMinter(props),
+                inbox, new Timeline(), new BackendLogTail(logDir, Duration.ofHours(1)), props);
         runner = new ScenarioRunner(List.of(), components, Duration.ofSeconds(10), Duration.ofMillis(10));
     }
 
@@ -133,6 +136,28 @@ class ScenarioContextTest {
         });
 
         assertThat(r.status()).isEqualTo("PASSED");
+    }
+
+    @Test
+    void sendUsesAUniqueFallbackTextThatTheHygieneScanLooksFor() {
+        org.mockito.ArgumentCaptor<SendPushCommand> sent = org.mockito.ArgumentCaptor.forClass(SendPushCommand.class);
+        when(sender.send(sent.capture())).thenReturn(n(id, NotificationState.PENDING));
+        when(inbox.signaturesForLogHygieneScan()).thenReturn(List.of("0123456789abcdef"));
+        java.util.concurrent.atomic.AtomicReference<List<String>> secrets =
+                new java.util.concurrent.atomic.AtomicReference<>();
+
+        ScenarioResult r = run(ctx -> {
+            ctx.send("shop", ctx.userId(1), FallbackPolicy.NOT_DELIVERED, 5, Map.of());
+            ctx.send("shop", ctx.userId(1), FallbackPolicy.NOT_DELIVERED, 5, Map.of());
+            secrets.set(ctx.secrets());
+        });
+
+        assertThat(r.status()).isEqualTo("PASSED");
+        List<Object> texts = sent.getAllValues().stream().map(c -> (Object) c.fallback().get("text")).toList();
+        assertThat(texts).doesNotHaveDuplicates().allSatisfy(t -> assertThat((String) t).hasSizeGreaterThan(8));
+        assertThat(sent.getValue().fallback().get("channel")).isEqualTo("sms");
+        assertThat(secrets.get()).containsAll(texts.stream().map(String.class::cast).toList())
+                .contains("0123456789abcdef");
     }
 
     @Test

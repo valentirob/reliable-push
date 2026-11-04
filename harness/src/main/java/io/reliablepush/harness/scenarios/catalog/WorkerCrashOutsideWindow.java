@@ -13,8 +13,8 @@ class WorkerCrashOutsideWindow extends WorkerCrash {
 
     WorkerCrashOutsideWindow() {
         super("worker-crash-outside-window",
-                "Workers killed while the webhook is in flight and restarted after 25 s (past the 20 s window): "
-                        + "FALLBACK_EXPIRED and no second webhook call.");
+                "Worker killed while the webhook hangs in flight, workers restarted after 25 s (past the 20 s "
+                        + "window): FALLBACK_EXPIRED and no second webhook call.");
     }
 
     @Override

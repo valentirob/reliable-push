@@ -3,6 +3,7 @@ package io.reliablepush.harness.scenarios;
 import io.reliablepush.harness.config.HarnessProperties;
 import io.reliablepush.harness.devices.DeviceSimulator;
 import io.reliablepush.harness.devices.DeviceSimulator.DeviceEventRecord;
+import io.reliablepush.harness.devices.GrantMinter;
 import io.reliablepush.harness.logs.BackendLogTail;
 import io.reliablepush.harness.receiver.ReceiverMode;
 import io.reliablepush.harness.receiver.WebhookInbox;
@@ -44,6 +45,8 @@ public class ScenarioRunner implements AutoCloseable {
 
     static final Duration SCENARIO_TIMEOUT = Duration.ofSeconds(90);
     static final Duration POLL_INTERVAL = Duration.ofMillis(200);
+    /** How long a prepared external scenario blocks other runs while the script kills and restarts workers. */
+    static final Duration RESERVATION_TTL = Duration.ofSeconds(120);
     static final int MAX_TRACKED_EVENTS = 10_000;
     static final String SKIPPED_EXTERNAL = "external control: driven by scripts/e2e.sh through prepare/verify";
     private static final int MAX_MESSAGE = 500;
@@ -55,7 +58,11 @@ public class ScenarioRunner implements AutoCloseable {
         private static final long serialVersionUID = 1L;
 
         RunInProgressException() {
-            super("A scenario run is already in progress; wait for it to finish and retry.");
+            this("A scenario run is already in progress; wait for it to finish and retry.");
+        }
+
+        RunInProgressException(String message) {
+            super(message);
         }
     }
 
@@ -72,10 +79,16 @@ public class ScenarioRunner implements AutoCloseable {
 
     private record PreparedState(UUID trackingId, long startNanos, List<String> messages, ScenarioContext.Run run) {}
 
+    /** A prepared external scenario holds the runner until it is verified or the reservation expires. */
+    private record Reservation(String name, long expiresAtNanos) {}
+
     private final Map<String, Scenario> scenarios = new LinkedHashMap<>();
     private final ScenarioContext.Components components;
     private final Duration timeout;
     private final Duration poll;
+    private final Duration reservationTtl;
+    private final ScenarioContext.History history = new ScenarioContext.History();
+    private volatile Reservation reservation;
     private final AtomicBoolean running = new AtomicBoolean();
     private final Map<UUID, List<DeviceEventRecord>> deviceEvents = new ConcurrentHashMap<>();
     private final Map<String, PreparedState> prepared = new ConcurrentHashMap<>();
@@ -84,13 +97,19 @@ public class ScenarioRunner implements AutoCloseable {
     private volatile List<ScenarioResult> lastResults = List.of();
 
     @Autowired
-    public ScenarioRunner(List<Scenario> scenarios, FakeSender sender, DeviceSimulator devices, WebhookInbox inbox,
-                          Timeline timeline, BackendLogTail backendLog, HarnessProperties properties) {
-        this(scenarios, new ScenarioContext.Components(sender, devices, inbox, timeline, backendLog, properties),
-                SCENARIO_TIMEOUT, POLL_INTERVAL);
+    public ScenarioRunner(List<Scenario> scenarios, FakeSender sender, DeviceSimulator devices, GrantMinter grants,
+                          WebhookInbox inbox, Timeline timeline, BackendLogTail backendLog,
+                          HarnessProperties properties) {
+        this(scenarios, new ScenarioContext.Components(sender, devices, grants, inbox, timeline, backendLog,
+                properties), SCENARIO_TIMEOUT, POLL_INTERVAL, RESERVATION_TTL);
     }
 
     ScenarioRunner(List<Scenario> scenarios, ScenarioContext.Components components, Duration timeout, Duration poll) {
+        this(scenarios, components, timeout, poll, RESERVATION_TTL);
+    }
+
+    ScenarioRunner(List<Scenario> scenarios, ScenarioContext.Components components, Duration timeout, Duration poll,
+                   Duration reservationTtl) {
         for (Scenario s : scenarios) {
             if (this.scenarios.putIfAbsent(s.name(), s) != null) {
                 throw new IllegalStateException("duplicate scenario name: " + s.name());
@@ -99,6 +118,7 @@ public class ScenarioRunner implements AutoCloseable {
         this.components = components;
         this.timeout = timeout;
         this.poll = poll;
+        this.reservationTtl = reservationTtl;
         components.devices().onEvent(this::recordDeviceEvent);
     }
 
@@ -127,7 +147,7 @@ public class ScenarioRunner implements AutoCloseable {
     /** Runs the named scenarios in the given order; external-control ones are reported as SKIPPED. */
     public List<ScenarioResult> run(List<String> names) {
         names.forEach(this::scenario);
-        acquire();
+        acquire(null);
         try {
             ScenarioContext.Run run = newRun();
             List<ScenarioResult> results = new ArrayList<>();
@@ -149,11 +169,16 @@ public class ScenarioRunner implements AutoCloseable {
         }
     }
 
-    /** Sets up an external-control scenario; the receiver mode it set stays until {@link #verify}. */
+    /**
+     * Sets up an external-control scenario. On success the runner stays reserved for it (every other run or prepare
+     * gets {@link RunInProgressException}) until {@link #verify} or its reservation (120 s) expires; receiver
+     * overrides it set stay until then.
+     */
     public Prepared prepare(String name) {
         Scenario.External ext = external(name);
-        acquire();
+        acquire(name);
         try {
+            reservation = null;
             ScenarioContext.Run run = newRun();
             long start = System.nanoTime();
             ScenarioContext ctx = context(run, name, start, List.of());
@@ -171,6 +196,7 @@ public class ScenarioRunner implements AutoCloseable {
             }
             if (failure == null) {
                 prepared.put(name, new PreparedState(id, start, ctx.messages(), run));
+                reservation = new Reservation(name, System.nanoTime() + reservationTtl.toNanos());
                 LOG.info("scenario {} PREPARED durationMs={}", name, elapsedMs(start));
                 return new Prepared(id, null);
             }
@@ -196,7 +222,7 @@ public class ScenarioRunner implements AutoCloseable {
         if (id == null) {
             throw new IllegalArgumentException("no trackingId given and " + name + " was not prepared: call prepare first");
         }
-        acquire();
+        acquire(name);
         try {
             boolean same = p != null && p.trackingId().equals(id);
             long start = same ? p.startNanos() : System.nanoTime();
@@ -210,6 +236,7 @@ public class ScenarioRunner implements AutoCloseable {
             } finally {
                 resetReceivers();
                 prepared.remove(name);
+                reservation = null;
             }
             ScenarioResult result = new ScenarioResult(name, failure == null ? ScenarioResult.PASSED
                     : ScenarioResult.FAILED, elapsedMs(start), failure, ctx.messages());
@@ -292,7 +319,7 @@ public class ScenarioRunner implements AutoCloseable {
     }
 
     private ScenarioContext context(ScenarioContext.Run run, String name, long start, List<String> prior) {
-        return new ScenarioContext(components, run, name, poll, deviceEvents, start, prior);
+        return new ScenarioContext(components, run, history, name, poll, deviceEvents, start, prior);
     }
 
     private ScenarioContext.Run newRun() {
@@ -301,9 +328,26 @@ public class ScenarioRunner implements AutoCloseable {
         return new ScenarioContext.Run(prefix);
     }
 
-    private void acquire() {
+    /**
+     * Takes the one-run guard. While an external scenario is prepared, only a prepare or verify of that scenario
+     * ({@code reservedName}) may run; an expired reservation is dropped and the receivers reset.
+     */
+    private void acquire(String reservedName) {
         if (!running.compareAndSet(false, true)) {
             throw new RunInProgressException();
+        }
+        Reservation r = reservation;
+        if (r == null) {
+            return;
+        }
+        if (System.nanoTime() - r.expiresAtNanos() >= 0) {
+            reservation = null;
+            prepared.remove(r.name());
+            resetReceivers();
+            LOG.info("scenario {} reservation expired without verify", r.name());
+        } else if (!r.name().equals(reservedName)) {
+            running.set(false);
+            throw new RunInProgressException("external scenario " + r.name() + " is prepared; verify it first");
         }
     }
 

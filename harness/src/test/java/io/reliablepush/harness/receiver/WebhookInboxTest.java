@@ -88,29 +88,72 @@ class WebhookInboxTest {
     }
 
     @Test
-    void failNextCountsDownPerAppAndIsResetBySetModeAndClear() {
+    void failNextCountsDownPerTrackingIdOnlyAndIsResetByClear() {
         WebhookInbox inbox = new WebhookInbox();
-        inbox.failNext("shop", 2);
+        UUID mine = UUID.randomUUID();
+        UUID stray = UUID.randomUUID();
+        inbox.failNext(mine, 2);
 
-        assertThat(inbox.takeForcedFailure("news")).isFalse();
-        assertThat(inbox.takeForcedFailure("shop")).isTrue();
-        assertThat(inbox.takeForcedFailure("shop")).isTrue();
-        assertThat(inbox.takeForcedFailure("shop")).isFalse();
+        assertThat(inbox.takeForcedFailure(stray)).isFalse();
+        assertThat(inbox.takeForcedFailure(null)).isFalse();
+        assertThat(inbox.takeForcedFailure(mine)).isTrue();
+        assertThat(inbox.takeForcedFailure(mine)).isTrue();
+        assertThat(inbox.takeForcedFailure(mine)).isFalse();
 
-        inbox.failNext("shop", 5);
-        inbox.setMode("shop", ReceiverMode.OK, Duration.ZERO);
-        assertThat(inbox.takeForcedFailure("shop")).isFalse();
+        inbox.failNext(mine, 5);
+        inbox.failNext(mine, 0);
+        assertThat(inbox.takeForcedFailure(mine)).isFalse();
 
-        inbox.failNext("shop", 5);
+        inbox.failNext(mine, 5);
         inbox.clear();
-        assertThat(inbox.takeForcedFailure("shop")).isFalse();
+        assertThat(inbox.takeForcedFailure(mine)).isFalse();
     }
 
     @Test
-    void failNextRejectsNegativeCount() {
+    void hangNextIsAOneShotPerAppAndIsResetBySetModeAndClear() {
         WebhookInbox inbox = new WebhookInbox();
-        org.assertj.core.api.Assertions.assertThatThrownBy(() -> inbox.failNext("shop", -1))
+        inbox.hangNext("shop", 1, Duration.ofSeconds(8));
+
+        assertThat(inbox.takeForcedHang("news")).isNull();
+        assertThat(inbox.takeForcedHang("shop")).isEqualTo(Duration.ofSeconds(8));
+        assertThat(inbox.takeForcedHang("shop")).isNull();
+        assertThat(inbox.mode("shop").mode()).isEqualTo(ReceiverMode.OK);
+
+        inbox.hangNext("shop", 2, Duration.ofSeconds(1));
+        inbox.setMode("shop", ReceiverMode.OK, Duration.ZERO);
+        assertThat(inbox.takeForcedHang("shop")).isNull();
+
+        inbox.hangNext("shop", 2, Duration.ofSeconds(1));
+        inbox.clear();
+        assertThat(inbox.takeForcedHang("shop")).isNull();
+    }
+
+    @Test
+    void forcedCountsRejectBadArguments() {
+        WebhookInbox inbox = new WebhookInbox();
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> inbox.failNext(UUID.randomUUID(), -1))
                 .isInstanceOf(IllegalArgumentException.class);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> inbox.hangNext("shop", -1, Duration.ofSeconds(1)))
+                .isInstanceOf(IllegalArgumentException.class);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> inbox.hangNext("shop", 1, Duration.ofSeconds(-1)))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void signatureHistoryIsInternalBoundedAndSurvivesClear() {
+        WebhookInbox inbox = new WebhookInbox();
+        inbox.recordSignature("v1=" + "ab".repeat(32));
+        inbox.recordSignature(null);
+        inbox.clear();
+
+        assertThat(inbox.signaturesForLogHygieneScan()).containsExactly("ab".repeat(32));
+        for (int i = 0; i < WebhookInbox.SIGNATURE_HISTORY + 5; i++) {
+            inbox.recordSignature("v1=" + i);
+        }
+        assertThat(inbox.signaturesForLogHygieneScan()).hasSize(WebhookInbox.SIGNATURE_HISTORY)
+                .doesNotContain("ab".repeat(32));
+        assertThat(ReceivedWebhook.class.getRecordComponents()).extracting(c -> c.getName())
+                .noneMatch(n -> n.toLowerCase(java.util.Locale.ROOT).contains("signature") && !n.equals("signatureValid"));
     }
 
     @Test
