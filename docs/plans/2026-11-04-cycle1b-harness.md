@@ -107,9 +107,9 @@
 - Produces:
   - `POST /hooks/{appId}` — reads raw body bytes; verifies `X-RP-Signature` = `v1=hex(HMAC-SHA256(hmacSecret, X-RP-Timestamp + "." + body))` in constant time and timestamp skew ≤ 300 s; records a `ReceivedWebhook(String appId, UUID trackingId, String idempotencyKey, int attempt, String reason, boolean signatureValid, Instant receivedAt, int respondedStatus, Map<String,Object> body)`; then responds per mode.
   - `enum ReceiverMode { OK, FAIL_500, FAIL_400, HANG }` + `Duration hang` (default 0); `WebhookInbox` — `void setMode(String appId, ReceiverMode mode, Duration hang)`, `List<ReceivedWebhook> received(String appId)`, `List<ReceivedWebhook> forTracking(UUID id)`, `void clear()`, listener hook `onReceived(Consumer<ReceivedWebhook>)` (used by SSE, Task 8). Invalid signature → 401, recorded with `signatureValid=false`. Inbox bounded to the last 10,000 entries.
-- [ ] **Step 1: Failing tests** — `SignatureVerifierTest.knownVector()` (expected computed in the test with `javax.crypto.Mac`), `.rejectsTamperedBody()`, `.rejectsStaleTimestamp()` (301 s); `FallbackReceiverIT.okModeRecordsAnd200()`, `.fail500Mode()`, `.hangModeDelaysResponse()` (hang 1 s → response ≥ 1 s), `.invalidSignature401AndRecorded()`, `.idempotencyKeyRecorded()`.
-- [ ] **Step 2: Run** → FAIL. **Step 3: Implement.** **Step 4: Run** `./mvnw -B -pl harness -am verify` → PASS.
-- [ ] **Step 5: Commit** `feat(harness): fallback receiver with signature check and failure modes`
+- [x] **Step 1: Failing tests** — `SignatureVerifierTest.knownVector()` (expected computed in the test with `javax.crypto.Mac`), `.rejectsTamperedBody()`, `.rejectsStaleTimestamp()` (301 s); `FallbackReceiverIT.okModeRecordsAnd200()`, `.fail500Mode()`, `.hangModeDelaysResponse()` (hang 1 s → response ≥ 1 s), `.invalidSignature401AndRecorded()`, `.idempotencyKeyRecorded()`.
+- [x] **Step 2: Run** → FAIL. **Step 3: Implement.** **Step 4: Run** `./mvnw -B -pl harness -am verify` → PASS.
+- [x] **Step 5: Commit** `feat(harness): fallback receiver with signature check and failure modes`
 
 ### Task 6: Device simulator
 
