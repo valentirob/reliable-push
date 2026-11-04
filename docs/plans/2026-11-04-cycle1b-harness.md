@@ -93,9 +93,9 @@
 - Produces:
   - `@ConfigurationProperties("harness") record HarnessProperties(URI backendUrl, Path backendLogDir, Map<String, HarnessApp> apps)`; `record HarnessApp(String senderApiKey, String grantSecret, String hmacSecret, String grantIssuer)`; `HarnessProperties.app(String appId)` → `HarnessApp` or `IllegalArgumentException`. `toString()` of both records redacts all secrets.
   - Server port `8090`; Actuator `health` exposed; console static root `/` → `classpath:/static/console/`.
-- [ ] **Step 1: Failing tests** — `HarnessPropertiesTest.secretsRedactedInToString()`, `.unknownAppThrows()`; `HarnessStartsIT.healthUp()` (random port, test apps from `src/test/resources/application-test.yml` with generated values).
-- [ ] **Step 2: Run** `./mvnw -B -pl harness -am verify` → FAIL (`-am` builds client-java in the reactor; no separate install needed). **Step 3: Implement.** **Step 4: Run** → PASS; `docker build -f harness/Dockerfile .` succeeds.
-- [ ] **Step 5: Commit** `feat(harness): skeleton, configuration and container`
+- [x] **Step 1: Failing tests** — `HarnessPropertiesTest.secretsRedactedInToString()`, `.unknownAppThrows()`; `HarnessStartsIT.healthUp()` (random port, test apps from `src/test/resources/application-test.yml` with generated values).
+- [x] **Step 2: Run** `./mvnw -B -pl harness -am verify` → FAIL (`-am` builds client-java in the reactor; no separate install needed). **Step 3: Implement.** **Step 4: Run** → PASS; `docker build -f harness/Dockerfile .` succeeds.
+- [x] **Step 5: Commit** `feat(harness): skeleton, configuration and container`
 
 ### Task 5: Fallback receiver
 

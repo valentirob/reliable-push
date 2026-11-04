@@ -12,5 +12,6 @@
 
     <modules>
         <module>client-java</module>
+        <module>harness</module>
     </modules>
 </project>

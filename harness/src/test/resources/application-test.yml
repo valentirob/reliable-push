@@ -1,0 +1,10 @@
+# Test-only placeholder values: generated-looking, not real secrets.
+harness:
+  backend-url: http://localhost:18080
+  backend-log-dir: target/test-backend-logs
+  apps:
+    shop:
+      sender-api-key: test-sender-key-7f3a91c2d4e8
+      grant-secret: test-grant-secret-0b5d6e1a9c37f284
+      hmac-secret: test-hmac-secret-4c8e2a7d1f6b9035
+      grant-issuer: https://shop.test.invalid

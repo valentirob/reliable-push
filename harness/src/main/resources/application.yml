@@ -1,0 +1,26 @@
+spring:
+  application:
+    name: reliable-push-harness
+  threads:
+    virtual:
+      enabled: true
+  main:
+    banner-mode: off
+  web:
+    resources:
+      static-locations: classpath:/static/console/
+
+server:
+  port: 8090
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+
+harness:
+  backend-url: ${HARNESS_BACKEND_URL:http://localhost:8080}
+  backend-log-dir: ${HARNESS_BACKEND_LOG_DIR:/tmp/rp-logs}
+  # apps.<id>.{sender-api-key, grant-secret, hmac-secret, grant-issuer} are supplied per environment
+  # (HARNESS_APPS_<ID>_SENDER_API_KEY, ...); at least one app is required.
