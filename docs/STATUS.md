@@ -2,6 +2,13 @@
 
 Newest entry first. Updated at the end of every work session (see `.agents/skills/session-handoff/SKILL.md`).
 
+## 2026-11-05 — Claude Code — `feature/cycle1b-harness`
+
+- **Done:** final whole-branch review of plan 1B and its fix wave. The `console-smoke` flake was root-caused: a stale device-list response in the console's Send push screen could reset a chosen behaviour (e.g. `never` silently sent as `deliver:1s`); fixed with request-sequence guards in all console views and pinned by a deterministic Playwright regression test (held route) plus failure diagnostics. Also: inbox mode select no longer overwritten by the 3 s poll; console defaults to app `shop`; backend errors carry their real status (429 + Retry-After); cross-site guard on console writes (same-origin, JSON bodies); log-hygiene scans the signing private key and DB password; serialized log-tail polls.
+- **State:** `./mvnw -B -pl harness -am verify`: 34 client + 106 harness unit + 73 harness integration tests, 0 failures. `./scripts/e2e.sh`: `[e2e] summary: 17/17 passed (expected 17 scenarios)`. Console smoke against `./scripts/demo.sh`: 5/5 runs passed. Not merged, not pushed (`develop` on GitHub lacks the latest local commits).
+- **Next:** merge `feature/cycle1b-harness` into `develop` (`--no-ff`), push `develop`, check `backend-ci` and `harness-ci`; then plan 1C (Helm chart, Gatling load test, API/worker pool sizing) and the Android SDK cycle.
+- **Open:** (a) `scripts/e2e.ps1` / `scripts/demo.ps1` untested on Windows. (b) Console write guard: harden with a Host allowlist (127.0.0.1/localhost/[::1], `/hooks/` exempt) against DNS rebinding and match on the normalized path. (c) `harness-ci.yml` not yet run on GitHub.
+
 ## 2026-11-04 (2) — Claude Code — `feature/cycle1b-harness`
 
 - **Done:** plan 1B complete: zero-dependency Java sender client (`client-java/`), harness (`harness/`: signed-grant device simulator, fake sender, HMAC-verifying fallback receiver, scenario runner, six-screen web console with SSE), local E2E (`./scripts/e2e.sh`, 16 scenarios + `console-smoke`), demo (`./scripts/demo.sh [--realtime]`, console at http://127.0.0.1:8090/), CI workflow `harness-ci.yml` (jobs `client` and `harness`, never E2E), Dependabot entries (maven `/`, docker `/harness`) and `commit-message` prefixes on all entries (`build(deps)`, `ci(deps)`). Docs: `docs/testing.md`, `docs/integration-guide.md` (client usage), README, `AGENTS.md`, `CONTRIBUTING.md`, `.agents/skills/run-e2e/SKILL.md`; spec §10.1/§10.2 drift fixed and noted under "Changes during implementation (plan 1B)".
