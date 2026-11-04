@@ -1,0 +1,41 @@
+:root { --bg:#f7f7f9; --fg:#1c1c22; --muted:#5c5c6a; --line:#d4d4dc; --card:#fff; --accent:#2457c5; --warn:#b3261e; }
+* { box-sizing: border-box; }
+body { margin:0; font:15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; background:var(--bg); color:var(--fg); }
+.banner { background:#fff3c4; color:#5a4300; border-bottom:2px solid #e0b400; padding:6px 12px; font-weight:600; text-align:center; position:sticky; top:0; z-index:5; }
+header { display:flex; flex-wrap:wrap; align-items:center; gap:8px 24px; padding:8px 16px; background:var(--card); border-bottom:1px solid var(--line); }
+h1 { font-size:18px; margin:0; }
+h2 { font-size:17px; margin:0 0 8px; }
+h3 { font-size:15px; margin:12px 0 6px; }
+nav { display:flex; flex-wrap:wrap; gap:4px; }
+nav button[aria-current="page"] { background:var(--accent); color:#fff; border-color:var(--accent); }
+main { padding:16px; max-width:1200px; margin:0 auto; }
+section.card, .card { background:var(--card); border:1px solid var(--line); border-radius:6px; padding:12px; margin-bottom:16px; }
+button { font:inherit; padding:5px 12px; border:1px solid var(--line); border-radius:4px; background:#fff; cursor:pointer; }
+button:hover { border-color:var(--accent); }
+button:disabled { opacity:.5; cursor:default; }
+button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+label { display:block; font-weight:600; margin-bottom:8px; }
+label > input, label > select, label > textarea { display:block; font:inherit; margin-top:2px; padding:5px; min-width:220px; max-width:100%; }
+.row { display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end; }
+.table-wrap { overflow-x:auto; }
+table { border-collapse:collapse; width:100%; }
+th, td { text-align:left; padding:5px 8px; border-bottom:1px solid var(--line); vertical-align:top; word-break:break-word; }
+th { font-size:13px; color:var(--muted); }
+tr.selected { background:#eaf0ff; }
+code, pre { font-family: ui-monospace, Menlo, Consolas, monospace; font-size:13px; }
+pre { background:#f0f0f4; padding:8px; overflow:auto; max-height:260px; border-radius:4px; margin:4px 0; }
+.badge { display:inline-block; padding:1px 8px; border-radius:10px; font-size:12px; font-weight:700; background:#e5e5ec; }
+.badge.PENDING { background:#e5e5ec; }
+.badge.DELIVERED, .badge.READ { background:#d3f0da; color:#17532a; }
+.badge.FALLBACK_PENDING { background:#ffe9b8; color:#6b4a00; }
+.badge.FALLBACK_TRIGGERED { background:#cfe0ff; color:#14378a; }
+.badge.FALLBACK_FAILED, .badge.FALLBACK_EXPIRED { background:#fcd3d0; color:#7a1812; }
+.badge.CANCELLED, .badge.UNKNOWN { background:#ddd; color:#444; }
+.badge.inflight { background:#ffe9b8; color:#6b4a00; }
+.error { color:var(--warn); font-weight:600; }
+.muted { color:var(--muted); }
+.ok { color:#17532a; font-weight:600; }
+.cols { display:grid; grid-template-columns:repeat(auto-fit, minmax(300px, 1fr)); gap:12px; }
+.timeline { list-style:none; padding:0; margin:0; }
+.timeline li { padding:3px 0; border-bottom:1px dotted var(--line); }
+@media (max-width:600px) { main { padding:8px; } label > input, label > select, label > textarea { min-width:0; width:100%; } }

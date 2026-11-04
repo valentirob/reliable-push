@@ -222,9 +222,9 @@
 - Consumes: Tasks 5–10.
 - Produces REST under `/console/api`: `GET apps`; `GET/POST devices` (`{appId,userId,platform,androidMode}`), `POST devices/{id}/refresh`, `POST devices/{id}/online` (`{online}`); `POST push` (`SendPushCommand` JSON, behaviours as strings like `deliver:3s`) → `{trackingId}`; `GET notifications?appId=` (from `Timeline.recent`); `GET notifications/{id}` (notification + timeline); `POST notifications/{id}/cancel`; `GET payload-preview?trackingId=&title=&body=` → `{apns, fcmV1, fcmV2}`; `GET inbox?appId=`; `POST inbox/mode` (`{appId, mode, hangMs}`); `GET logs?traceId=&trackingId=&eventAction=&limit=`; plus Task 8 stream and Task 10 scenario endpoints. No endpoint returns device tokens or harness secrets.
 - UI: single page, tab navigation for the six screens of spec §10.2 (Devices, Send push, Live tracking, Fallback inbox, Scenarios, Logs); permanent banner text exactly "Test harness — simulated data, not for production"; live tracking table with state badges, countdowns to `dueAt` and to `dueAt + window` (window from `GET apps`), detail timeline; copy buttons for payload previews; works in current Chrome, Firefox, Safari, Edge; no external requests (no CDN, no fonts).
-- [ ] **Step 1: Failing tests** — `ConsoleApiIT.createDeviceAndList()`, `.pushReturnsTrackingId()`, `.notificationDetailHasTimeline()`, `.payloadPreviewHasThreeShapes()`, `.inboxModeSwitch()`, `.noTokenOrSecretInAnyResponse()` (crawl all GET endpoints after a push; assert none of the run's secrets/device tokens appear), `.staticConsoleServedWithBanner()`.
-- [ ] **Step 2: Run** → FAIL. **Step 3: Implement** controller and static UI. **Step 4: Run** `./mvnw -B -pl harness -am verify` → PASS.
-- [ ] **Step 5: Commit** `feat(harness): web console`
+- [x] **Step 1: Failing tests** — `ConsoleApiIT.createDeviceAndList()`, `.pushReturnsTrackingId()`, `.notificationDetailHasTimeline()`, `.payloadPreviewHasThreeShapes()`, `.inboxModeSwitch()`, `.noTokenOrSecretInAnyResponse()` (crawl all GET endpoints after a push; assert none of the run's secrets/device tokens appear), `.staticConsoleServedWithBanner()`.
+- [x] **Step 2: Run** → FAIL. **Step 3: Implement** controller and static UI. **Step 4: Run** `./mvnw -B -pl harness -am verify` → PASS.
+- [x] **Step 5: Commit** `feat(harness): web console`
 
 ### Task 13: Demo scripts and console smoke test
 

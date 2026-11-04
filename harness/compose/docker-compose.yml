@@ -101,6 +101,8 @@ services:
     environment:
       HARNESS_BACKENDURL: http://api:8080
       HARNESS_BACKENDLOGDIR: /tmp/rp-logs
+      # the backend runs the fast clock (1 minute = 1 s): console countdowns use the same scale
+      HARNESS_MINUTESECONDS: "1"
     ports:
       - "127.0.0.1:8090:8090"
     depends_on:

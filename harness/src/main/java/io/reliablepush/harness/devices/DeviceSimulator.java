@@ -149,6 +149,16 @@ public class DeviceSimulator implements PushReceiver, AutoCloseable {
                 .toList();
     }
 
+    /** Every simulated device (optionally of one app), ordered by app, user and id. No token is exposed. */
+    public List<SimulatedDevice> allDevices(String appId) {
+        return devices.values().stream()
+                .filter(d -> appId == null || d.appId.equals(appId))
+                .map(DeviceState::view)
+                .sorted(Comparator.comparing(SimulatedDevice::appId).thenComparing(SimulatedDevice::userId)
+                        .thenComparing(SimulatedDevice::deviceId))
+                .toList();
+    }
+
     public SimulatedDevice device(UUID deviceId) {
         return state(deviceId).view();
     }

@@ -106,6 +106,12 @@ public class Timeline {
         return h == null ? List.of() : List.copyOf(h.entries);
     }
 
+    /** The app a notification belongs to, when known. */
+    public synchronized Optional<String> appId(UUID trackingId) {
+        Holder h = items.get(trackingId);
+        return h == null ? Optional.empty() : Optional.ofNullable(h.appId);
+    }
+
     public synchronized Optional<Notification> current(UUID trackingId) {
         Holder h = items.get(trackingId);
         return h == null ? Optional.empty() : Optional.ofNullable(h.current);

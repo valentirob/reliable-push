@@ -1,0 +1,328 @@
+package io.reliablepush.harness.console;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+import com.sun.net.httpserver.HttpExchange;
+import com.sun.net.httpserver.HttpServer;
+import io.reliablepush.harness.config.HarnessProperties;
+import io.reliablepush.harness.devices.DeviceSimulator;
+import java.io.IOException;
+import java.net.InetSocketAddress;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.web.server.LocalServerPort;
+import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
+
+/** The console REST API against a fake backend (sender + device API on a JDK HttpServer). */
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = "harness.poll-interval=1h")
+@ActiveProfiles("test")
+class ConsoleApiIT {
+
+    static final AtomicInteger tokens = new AtomicInteger();
+    static final List<UUID> registered = new ArrayList<>();
+    static volatile int registerStatus = 201;
+    static volatile int cancelStatus = 204;
+    static final HttpServer backend = startBackend();
+
+    static HttpServer startBackend() {
+        try {
+            HttpServer s = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+            s.createContext("/", ConsoleApiIT::handle);
+            s.start();
+            return s;
+        } catch (IOException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    static void handle(HttpExchange ex) throws IOException {
+        String m = ex.getRequestMethod();
+        String p = ex.getRequestURI().getPath();
+        ex.getRequestBody().readAllBytes();
+        if (m.equals("POST") && p.equals("/v1/devices")) {
+            reply(ex, 201, "{\"deviceId\":\"" + UUID.randomUUID() + "\",\"deviceToken\":\"tok-"
+                    + tokens.incrementAndGet() + "-zzsecretzz\",\"expiresAt\":\""
+                    + Instant.now().plus(30, ChronoUnit.DAYS) + "\"}");
+        } else if (m.equals("POST") && p.equals("/v1/devices/token:refresh")) {
+            reply(ex, 200, "{\"deviceToken\":\"tok-" + tokens.incrementAndGet() + "-zzsecretzz\",\"expiresAt\":\""
+                    + Instant.now().plus(30, ChronoUnit.DAYS) + "\"}");
+        } else if (m.equals("POST") && p.equals("/v1/events")) {
+            reply(ex, 200, "{\"items\":[]}");
+        } else if (m.equals("POST") && p.equals("/v1/notifications")) {
+            if (registerStatus != 201) {
+                reply(ex, registerStatus, "{\"title\":\"Conflict\",\"status\":" + registerStatus + "}");
+                return;
+            }
+            UUID id = UUID.randomUUID();
+            synchronized (registered) {
+                registered.add(id);
+            }
+            reply(ex, 201, "{\"trackingId\":\"" + id + "\",\"state\":\"PENDING\",\"userId\":\"u1\","
+                    + "\"policy\":\"NOT_DELIVERED\",\"timeoutMinutes\":10,\"createdAt\":\"" + Instant.now()
+                    + "\",\"dueAt\":\"" + Instant.now().plus(10, ChronoUnit.MINUTES) + "\"}");
+        } else if (m.equals("DELETE") && p.startsWith("/v1/notifications/")) {
+            if (cancelStatus == 204) {
+                ex.sendResponseHeaders(204, -1);
+                ex.close();
+            } else {
+                reply(ex, cancelStatus, "{\"title\":\"Conflict\",\"status\":" + cancelStatus + "}");
+            }
+        } else {
+            reply(ex, 404, "{\"title\":\"nope\",\"status\":404}");
+        }
+    }
+
+    static void reply(HttpExchange ex, int status, String body) throws IOException {
+        byte[] b = body.getBytes(StandardCharsets.UTF_8);
+        ex.getResponseHeaders().add("Content-Type", status < 300 ? "application/json" : "application/problem+json");
+        ex.sendResponseHeaders(status, b.length);
+        ex.getResponseBody().write(b);
+        ex.close();
+    }
+
+    @DynamicPropertySource
+    static void props(DynamicPropertyRegistry r) {
+        r.add("harness.backend-url", () -> "http://127.0.0.1:" + backend.getAddress().getPort());
+    }
+
+    @AfterAll
+    static void stop() {
+        backend.stop(0);
+    }
+
+    @LocalServerPort
+    int port;
+
+    @Autowired
+    HarnessProperties properties;
+
+    @Autowired
+    DeviceSimulator simulator;
+
+    final HttpClient http = HttpClient.newHttpClient();
+    final JsonMapper json = JsonMapper.builder().build();
+
+    @BeforeEach
+    void reset() {
+        registerStatus = 201;
+        cancelStatus = 204;
+    }
+
+    HttpResponse<String> get(String path) throws Exception {
+        return http.send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + path)).build(),
+                HttpResponse.BodyHandlers.ofString());
+    }
+
+    HttpResponse<String> post(String path, String body) throws Exception {
+        return http.send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + path))
+                .header("Content-Type", "application/json").POST(HttpRequest.BodyPublishers.ofString(body)).build(),
+                HttpResponse.BodyHandlers.ofString());
+    }
+
+    String createDevice(String userId) throws Exception {
+        HttpResponse<String> r = post("/console/api/devices",
+                "{\"appId\":\"shop\",\"userId\":\"" + userId + "\",\"platform\":\"ANDROID\",\"androidMode\":\"V2\"}");
+        assertThat(r.statusCode()).isEqualTo(201);
+        return json.readTree(r.body()).get("deviceId").asString();
+    }
+
+    String push(String userId, String perDevice) throws Exception {
+        HttpResponse<String> r = post("/console/api/push", "{\"appId\":\"shop\",\"userId\":\"" + userId
+                + "\",\"title\":\"Hi\",\"body\":\"Hello\",\"policy\":\"NOT_DELIVERED\",\"timeoutMinutes\":5,"
+                + "\"perDevice\":" + perDevice + "}");
+        assertThat(r.statusCode()).as(r.body()).isEqualTo(200);
+        return json.readTree(r.body()).get("trackingId").asString();
+    }
+
+    @Test
+    void appsExposeWindowAndTimeScaleButNoSecrets() throws Exception {
+        HttpResponse<String> r = get("/console/api/apps");
+
+        assertThat(r.statusCode()).isEqualTo(200);
+        JsonNode shop = json.readTree(r.body()).get(0);
+        assertThat(shop.get("appId").asString()).isEqualTo("shop");
+        assertThat(shop.get("windowMinutes").asInt()).isEqualTo(20);
+        assertThat(shop.get("timeScaleSeconds").asInt()).isEqualTo(60);
+        assertThat(r.body()).doesNotContain("key", "secret");
+    }
+
+    @Test
+    void createDeviceAndList() throws Exception {
+        String id = createDevice("list-user");
+
+        JsonNode list = json.readTree(get("/console/api/devices?appId=shop").body());
+
+        boolean found = false;
+        for (JsonNode d : list) {
+            if (id.equals(d.get("deviceId").asString())) {
+                found = true;
+                assertThat(d.get("userId").asString()).isEqualTo("list-user");
+                assertThat(d.get("platform").asString()).isEqualTo("ANDROID");
+                assertThat(d.get("androidMode").asString()).isEqualTo("V2");
+                assertThat(d.get("tokenExpiresAt").asString()).isNotBlank();
+                assertThat(d.get("online").asBoolean()).isTrue();
+            }
+        }
+        assertThat(found).isTrue();
+        assertThat(post("/console/api/devices/" + id + "/refresh", "").statusCode()).isEqualTo(200);
+        HttpResponse<String> off = post("/console/api/devices/" + id + "/online", "{\"online\":false}");
+        assertThat(json.readTree(off.body()).get("online").asBoolean()).isFalse();
+        assertThat(post("/console/api/devices/" + UUID.randomUUID() + "/refresh", "").statusCode()).isEqualTo(404);
+    }
+
+    @Test
+    void pushReturnsTrackingId() throws Exception {
+        String dev = createDevice("push-user");
+
+        String tid = push("push-user", "{\"" + dev + "\":\"never\"}");
+
+        assertThat(UUID.fromString(tid)).isNotNull();
+        JsonNode list = json.readTree(get("/console/api/notifications?appId=shop").body());
+        assertThat(list.toString()).contains(tid);
+    }
+
+    @Test
+    void pushRejectsBadBehaviourAndMapsBackendFailureTo502() throws Exception {
+        HttpResponse<String> bad = post("/console/api/push", "{\"appId\":\"shop\",\"userId\":\"u\",\"title\":\"t\","
+                + "\"body\":\"b\",\"perDevice\":{\"" + UUID.randomUUID() + "\":\"sometimes\"}}");
+        assertThat(bad.statusCode()).isEqualTo(400);
+
+        registerStatus = 409;
+        HttpResponse<String> down = post("/console/api/push",
+                "{\"appId\":\"shop\",\"userId\":\"u\",\"title\":\"t\",\"body\":\"b\"}");
+        assertThat(down.statusCode()).isEqualTo(502);
+        assertThat(down.headers().firstValue("Content-Type").orElse("")).contains("application/problem+json");
+        assertThat(down.body()).contains("409").doesNotContain("test-sender-key");
+    }
+
+    @Test
+    void notificationDetailHasTimeline() throws Exception {
+        String dev = createDevice("detail-user");
+        String tid = push("detail-user", "{\"" + dev + "\":\"never\"}");
+
+        JsonNode detail = json.readTree(get("/console/api/notifications/" + tid).body());
+
+        assertThat(detail.get("notification").get("trackingId").asString()).isEqualTo(tid);
+        assertThat(detail.get("notification").get("state").asString()).isEqualTo("PENDING");
+        assertThat(detail.get("notification").get("dueAt").asString()).isNotBlank();
+        List<String> kinds = new ArrayList<>();
+        detail.get("timeline").forEach(e -> kinds.add(e.get("kind").asString()));
+        assertThat(kinds).contains("registered", "push_simulated");
+        assertThat(get("/console/api/notifications/" + UUID.randomUUID()).statusCode()).isEqualTo(404);
+        assertThat(get("/console/api/notifications/not-a-uuid").statusCode()).isEqualTo(400);
+    }
+
+    @Test
+    void cancelCallsBackendAndConflictIs502() throws Exception {
+        String tid = push("cancel-user", "{}");
+
+        assertThat(post("/console/api/notifications/" + tid + "/cancel", "").statusCode()).isEqualTo(200);
+        cancelStatus = 409;
+        assertThat(post("/console/api/notifications/" + tid + "/cancel", "").statusCode()).isEqualTo(502);
+        assertThat(post("/console/api/notifications/" + UUID.randomUUID() + "/cancel", "").statusCode())
+                .isEqualTo(404);
+    }
+
+    @Test
+    void payloadPreviewHasThreeShapes() throws Exception {
+        UUID tid = UUID.randomUUID();
+
+        HttpResponse<String> r = get("/console/api/payload-preview?trackingId=" + tid + "&title=T%20%3C1%3E&body=B");
+
+        assertThat(r.statusCode()).isEqualTo(200);
+        JsonNode n = json.readTree(r.body());
+        assertThat(n.get("apns").asString()).contains(tid.toString(), "mutable-content");
+        assertThat(n.get("fcmV1").asString()).contains(tid.toString(), "\"priority\": \"HIGH\"");
+        assertThat(n.get("fcmV2").asString()).contains(tid.toString(), "android_v2");
+        assertThat(get("/console/api/payload-preview?trackingId=zzz").statusCode()).isEqualTo(400);
+    }
+
+    @Test
+    void inboxModeSwitch() throws Exception {
+        assertThat(post("/console/api/inbox/mode", "{\"appId\":\"shop\",\"mode\":\"FAIL_500\",\"hangMs\":0}")
+                .statusCode()).isEqualTo(200);
+
+        JsonNode inbox = json.readTree(get("/console/api/inbox?appId=shop").body());
+        assertThat(inbox.get("mode").get("mode").asString()).isEqualTo("FAIL_500");
+        assertThat(inbox.get("calls").isArray()).isTrue();
+
+        post("/console/api/inbox/mode", "{\"appId\":\"shop\",\"mode\":\"HANG\",\"hangMs\":1500}");
+        JsonNode hang = json.readTree(get("/console/api/inbox?appId=shop").body());
+        assertThat(hang.get("mode").get("mode").asString()).isEqualTo("HANG");
+        assertThat(hang.get("mode").get("hangMs").asLong()).isEqualTo(1500);
+
+        assertThat(post("/console/api/inbox/mode", "{\"appId\":\"nope\",\"mode\":\"OK\"}").statusCode())
+                .isEqualTo(404);
+        assertThat(post("/console/api/inbox/mode", "{\"appId\":\"shop\",\"mode\":\"WAT\"}").statusCode())
+                .isEqualTo(400);
+        post("/console/api/inbox/mode", "{\"appId\":\"shop\",\"mode\":\"OK\",\"hangMs\":0}");
+    }
+
+    @Test
+    void logsEndpointFiltersAndNeverFails() throws Exception {
+        HttpResponse<String> r = get("/console/api/logs?traceId=abc&trackingId=" + UUID.randomUUID()
+                + "&eventAction=x&limit=10");
+
+        assertThat(r.statusCode()).isEqualTo(200);
+        assertThat(json.readTree(r.body()).isArray()).isTrue();
+    }
+
+    @Test
+    void noTokenOrSecretInAnyResponse() throws Exception {
+        String dev = createDevice("crawl-user");
+        String tid = push("crawl-user", "{\"" + dev + "\":\"deliver:100ms\"}");
+        Thread.sleep(400);
+        List<String> forbidden = new ArrayList<>(simulator.issuedTokensForLogHygieneScan());
+        properties.apps().values().forEach(a -> {
+            forbidden.add(a.senderApiKey());
+            forbidden.add(a.grantSecret());
+            forbidden.add(a.hmacSecret());
+        });
+        assertThat(forbidden).isNotEmpty();
+
+        for (String path : List.of("/console/api/apps", "/console/api/devices", "/console/api/devices?appId=shop",
+                "/console/api/notifications?appId=shop", "/console/api/notifications/" + tid,
+                "/console/api/payload-preview?trackingId=" + tid + "&title=a&body=b",
+                "/console/api/inbox?appId=shop", "/console/api/inbox/in-flight?appId=shop",
+                "/console/api/logs", "/console/api/scenarios", "/console/api/scenarios/report/summary.json",
+                "/console/api/scenarios/report/junit.xml", "/", "/app.js", "/api.js", "/console.css")) {
+            HttpResponse<String> r = get(path);
+            assertThat(r.statusCode()).as(path).isEqualTo(200);
+            for (String secret : forbidden) {
+                assertThat(r.body()).as(path).doesNotContain(secret);
+            }
+            assertThat(r.body()).as(path).doesNotContain("deviceToken");
+        }
+    }
+
+    @Test
+    void staticConsoleServedWithBanner() throws Exception {
+        HttpResponse<String> page = get("/");
+
+        assertThat(page.statusCode()).isEqualTo(200);
+        assertThat(page.headers().firstValue("Content-Type").orElse("")).contains("text/html");
+        assertThat(page.body()).contains("Test harness — simulated data, not for production");
+        assertThat(page.body()).contains("role=\"status\"");
+        for (String name : List.of("devices", "send", "tracking", "inbox", "scenarios", "logs")) {
+            assertThat(get("/views/" + name + ".js").statusCode()).as(name).isEqualTo(200);
+        }
+    }
+}

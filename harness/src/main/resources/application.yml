@@ -25,4 +25,6 @@ harness:
   # Environment variables (use these exact dash-less names; Task 11 GenSecrets and compose follow them):
   #   HARNESS_BACKENDURL, HARNESS_BACKENDLOGDIR (HARNESS_BACKEND_URL / HARNESS_BACKEND_LOG_DIR also work via the
   #   placeholders above), and per app <ID>: HARNESS_APPS_<ID>_SENDERAPIKEY, _GRANTSECRET, _HMACSECRET, _GRANTISSUER.
+  # Optional: HARNESS_MINUTESECONDS (harness.minute-seconds, default 60; 1 = the backend's fast clock) and per app
+  # HARNESS_APPS_<ID>_TRIGGERWINDOWMINUTES (default 20): console countdowns only, they must mirror the backend.
   # At least one app is required. Pinned by HarnessPropertiesEnvBindingTest.
