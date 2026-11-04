@@ -91,14 +91,20 @@ jobs:
         id: image
         run: echo "name=$(./mvnw -B -q help:evaluate -Dexpression=image.name -DforceStdout)" >> "$GITHUB_OUTPUT"
 
+      # Trivy runs from its official image, pinned by tag. trivy-action/setup-trivy fetch Trivy's
+      # install script from the unpinned main branch, which broke installation (exit 6) in Nov 2026.
+      # Bump TRIVY_VERSION by hand: Dependabot does not track images referenced in run steps.
       - name: Trivy image scan
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        with:
-          image-ref: ${{ steps.image.outputs.name }}
-          format: table
-          severity: CRITICAL,HIGH
-          ignore-unfixed: true
-          exit-code: '1'
+        env:
+          TRIVY_VERSION: 0.76.1
+          IMAGE: ${{ steps.image.outputs.name }}
+        run: |
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "$HOME/.cache/trivy:/root/.cache/trivy" \
+            "aquasec/trivy:${TRIVY_VERSION}" image \
+            --severity CRITICAL,HIGH --ignore-unfixed --exit-code 1 --no-progress \
+            "$IMAGE"
 
   dependency-review:
     name: Dependency review
