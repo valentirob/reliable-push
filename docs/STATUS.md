@@ -2,6 +2,16 @@
 
 Newest entry first. Updated at the end of every work session (see `.agents/skills/session-handoff/SKILL.md`).
 
+## 2026-11-04 (2) — Claude Code — `feature/cycle1b-harness`
+
+- **Done:** plan 1B complete: zero-dependency Java sender client (`client-java/`), harness (`harness/`: signed-grant device simulator, fake sender, HMAC-verifying fallback receiver, scenario runner, six-screen web console with SSE), local E2E (`./scripts/e2e.sh`, 16 scenarios + `console-smoke`), demo (`./scripts/demo.sh [--realtime]`, console at http://127.0.0.1:8090/), CI workflow `harness-ci.yml` (jobs `client` and `harness`, never E2E), Dependabot entries (maven `/`, docker `/harness`) and `commit-message` prefixes on all entries (`build(deps)`, `ci(deps)`). Docs: `docs/testing.md`, `docs/integration-guide.md` (client usage), README, `AGENTS.md`, `CONTRIBUTING.md`, `.agents/skills/run-e2e/SKILL.md`; spec §10.1/§10.2 drift fixed and noted under "Changes during implementation (plan 1B)".
+- **State:** `./mvnw -B -pl client-java verify`: 34 tests, 0 failures (enforcer: no runtime dependencies). `./mvnw -B -pl harness -am verify`: harness 100 unit + 68 integration tests, 0 failures, coverage gate met. `./scripts/e2e.sh`, exit 0: `[e2e] summary: 17/17 passed (expected 17 scenarios)` (2026-11-04). `./scripts/demo.sh` and `-Pconsole-smoke` against the demo stack run as documented. actionlint 1.7.12 clean. Not merged, not pushed.
+- **Next:**
+  1. Final whole-branch review of `feature/cycle1b-harness`, then merge `feature/cycle1a-backend` and `feature/cycle1b-harness` to `develop` (`--no-ff`); report `E2E: 17/17 passed` in the merge commit.
+  2. `gh auth login`, push `main`, `develop`; check the first CI runs (`backend-ci`, `harness-ci`).
+  3. Plan 1C: Helm chart, Gatling load test, API/worker pool sizing. Then the Android SDK cycle.
+- **Open:** (a) `scripts/e2e.ps1` and `scripts/demo.ps1` (Windows) are untested; PowerShell commands in the docs were not run. (b) Watch for a `console-smoke` first-run flake: once, a smoke run against a freshly started demo stack timed out waiting for the fallback row; two reruns passed and the E2E run passed. (c) `harness-ci.yml` has not run on GitHub yet (actionlint only); the client job builds with JDK 21 and `--release 17`.
+
 ## 2026-11-04 — Claude Code — `feature/cycle1a-backend`
 
 - **Done:** whole-branch review of plan 1A (no critical findings) and its fix wave: `TrackingServiceTest` → `TrackingServiceIT`; device tokens of an app no longer configured → generic 401 (`unknown_app`); bare numbers mean minutes for `backoff`/`lease` and days for `device-token-validity`; startup fails when no app is configured; worker drains the due backlog within one tick (bounded by lease/2) with `worker.max-concurrency`; Hikari connection timeout 5 s and pool timeouts answered 503 + `Retry-After: 5`; cancel of an already-closed notification → 409; retention cron configurable and disabled in tests. Docs updated accordingly.
@@ -10,7 +20,7 @@ Newest entry first. Updated at the end of every work session (see `.agents/skill
   1. Maintainer decides: merge `feature/cycle1a-backend` into `develop` (`--no-ff`).
   2. `gh auth login`, then push `main`, `develop` (and optionally the feature branch); check the first CI run.
   3. Plan 1B (client-java, harness, `scripts/e2e.sh`, web console), then plan 1C (Helm, Gatling, API/worker load and pool sizing).
-- **Open (follow-ups from reviews):** graceful worker shutdown (stop flag on context close); claim coalescing under sustained backlog; client-abort IOException logged as ERROR; `/actuator/prometheus` on a management port (Helm); cap stale JWKS key use (~24 h); `api` profile gates nothing (log active roles at startup); Dependabot commit-message prefixes.
+- **Open (follow-ups from reviews):** graceful worker shutdown (stop flag on context close); claim coalescing under sustained backlog; client-abort IOException logged as ERROR; `/actuator/prometheus` on a management port (Helm); cap stale JWKS key use (~24 h); `api` profile gates nothing (log active roles at startup). (Dependabot commit-message prefixes: done in plan 1B.)
 
 ## 2026-11-03 (3) — Claude Code — `feature/cycle1a-backend`
 

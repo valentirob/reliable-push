@@ -35,7 +35,14 @@ and keeps the FCM/APNs credentials.
 | `docs/` | Requirements, specs, plans, guides, status | Markdown |
 
 Components land incrementally; see [docs/STATUS.md](docs/STATUS.md) for what
-exists today.
+exists today (`backend/`, `client-java/` and `harness/` exist; the mobile SDKs are planned).
+
+### Try it: demo console
+
+`./scripts/demo.sh` starts the whole stack locally (Docker only) and opens the harness web console at
+<http://127.0.0.1:8090/>: create simulated devices, send pushes, watch delivery tracking and fallbacks live. Details in
+[docs/testing.md](docs/testing.md#web-console-and-demo). The end-to-end suite is `./scripts/e2e.sh` (local only, never in CI).
+Java sender client: [client-java/README.md](client-java/README.md).
 
 ## Quick start
 
@@ -102,7 +109,7 @@ still unmet at `dueAt` (with the placeholder URL above the call fails and is ret
 with `docker logs rp-app`). Cleanup: `docker rm -f rp-app rp-db && docker network rm rp-net`.
 
 Building from source needs JDK 21 and Docker: `cd backend && ./mvnw -B verify` (tests) and
-`./mvnw -B verify -Pimage` (image tests), see [docs/testing.md](docs/testing.md). All configuration keys, the log format and
+`./mvnw -B verify -Pimage` (image tests); `client-java` and `harness` build from the repo root with `./mvnw -B -pl client-java verify` and `./mvnw -B -pl harness -am verify`. See [docs/testing.md](docs/testing.md). All configuration keys, the log format and
 the metrics are in [docs/operations.md](docs/operations.md).
 
 ## Documentation

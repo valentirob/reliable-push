@@ -1,6 +1,6 @@
 ---
 name: run-e2e
-description: Run the reliable-push end-to-end scenarios on the local PC (docker-compose stack: backend API and two workers, PostgreSQL, harness with fallback receiver, device simulator and fake sender) and drive the fix-and-rerun feedback loop. Use after changes to backend, harness or SDKs, before merging a feature branch, or when asked to run E2E tests.
+description: Run the reliable-push end-to-end scenarios on the local PC (docker-compose stack: backend API and two workers, PostgreSQL, harness with fallback receiver, device simulator and fake sender, signed-grant identity) and drive the fix-and-rerun feedback loop. Use after changes to backend, harness or SDKs, before merging a feature branch, or when asked to run E2E tests.
 ---
 
 # Run end-to-end scenarios (local)
@@ -13,19 +13,25 @@ Spec: `docs/specs/2026-11-03-reliable-push-design.md` §10.1.
   on 127.0.0.1. No JDK or Maven needed on the host: the images build inside Docker.
 - On a Mac with Colima: `export DOCKER_HOST=unix://$HOME/.colima/default/docker.sock`.
 - Mobile scenarios (cycles 2–3): Android emulator / Xcode iOS simulator booted.
+- Not in CI: `.github/workflows/harness-ci.yml` builds `client-java` and `harness` only.
 
 ## Run
-1. Full suite: `./scripts/e2e.sh` (Windows, PowerShell 7: `pwsh scripts/e2e.ps1`). About 3.5 minutes after the first
-   image build (the crash scenarios alone take about 1.5 minutes).
-   One scenario: `./scripts/e2e.sh --scenario <name>` (names: `curl -s http://127.0.0.1:8090/console/api/scenarios`
-   on a kept stack, or the scenario classes in `harness/src/main/java/io/reliablepush/harness/scenarios/catalog/`).
+1. Full suite: `./scripts/e2e.sh` (Windows, PowerShell 7: `pwsh scripts/e2e.ps1 -Scenario <name> -Keep`, untested on
+   Windows). About 5 minutes including the image build (the crash scenarios alone take about 1.5 minutes).
+   One scenario: `./scripts/e2e.sh --scenario <name>`. The 17 entries: `delivered-before-timeout`,
+   `read-policy-delivered-only`, `read-policy-read`, `not-delivered-single-fallback`, `late-delivery-after-fallback`,
+   `multi-device`, `cancellation`, `token-refresh-near-expiry`, `rate-limited`, `receiver-retries-then-succeeds`,
+   `receiver-final-failure`, `retries-exhausted-fails`, `worker-crash-inside-window`, `worker-crash-outside-window`,
+   `log-catalogue`, `log-hygiene`, `console-smoke` (the browser test of the web console; the first run downloads
+   Playwright's Chromium, about 150 MB).
    Keep the stack running afterwards for debugging or the console (http://127.0.0.1:8090): `--keep`; stop it with
    `docker compose -p reliable-push-e2e -f harness/compose/docker-compose.yml down -v`.
    `E2E_READY_TIMEOUT=<seconds>` changes the readiness wait (default 120).
-2. Read the exit code (`0` = every scenario PASSED), then `harness/build/e2e/summary.json`
+2. Read the exit code (`0` = all 17 entries PASSED), then `harness/build/e2e/summary.json`
    (`[{scenario, status, durationMs, failure: {expected, actual, hint} | null, logs}]`); JUnit XML in
    `harness/build/e2e/junit/e2e.xml`.
-3. On failure, read `failure.expected`, `failure.actual`, `failure.hint` and the scenario's `logs`, then the matching
+   Logs are collected and the stack is torn down even when scenarios fail (unless `--keep`).
+3. Find failures: `grep -B2 -A6 '"FAILED"' harness/build/e2e/summary.json`. Then read `failure.expected`, `failure.actual`, `failure.hint` and the scenario's `logs`, then the matching
    container logs in `harness/build/e2e/logs/` (`<service>.log` from `docker compose logs`, plus the backend JSON log
    files `backend-api.json`, `backend-worker-a.json`, `backend-worker-b.json`; search by `rp.tracking_id` / `trace.id`).
    Raw harness answers are in `harness/build/e2e/responses/`.
@@ -54,4 +60,4 @@ Spec: `docs/specs/2026-11-03-reliable-push-design.md` §10.1.
 
 ## Report
 State the result in the merge commit / PR description, e.g.
-`E2E: 14/14 passed (./scripts/e2e.sh, 2026-11-03)`, and in `docs/STATUS.md`.
+`E2E: 17/17 passed (./scripts/e2e.sh, 2026-11-04)`, and in `docs/STATUS.md`.

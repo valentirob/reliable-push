@@ -243,8 +243,8 @@
 **Files:**
 - Create: `.github/workflows/harness-ci.yml`
 - Modify: `.github/dependabot.yml` (maven `/client-java`, `/harness`; docker `/harness`), `docs/testing.md` (E2E + console sections replacing "arrives with plan 1B"), `docs/integration-guide.md` (client-java usage), `README.md` (components table, demo pointer), `AGENTS.md` (Commands: client, harness, e2e, demo), `docs/STATUS.md`, `CONTRIBUTING.md` (E2E line now real)
-- [ ] **Step 1: Write workflow** — triggers like backend-ci with paths `client-java/**`, `harness/**`, workflow file; jobs: `client` (`./mvnw -B -pl client-java verify`, assert no runtime deps via enforcer), `harness` (`./mvnw -B -pl harness -am verify`, excluding `console` tag); actions pinned to the same SHAs as backend-ci; **no** e2e/compose job (spec §10.1).
-- [ ] **Step 2: Validate** `docker run --rm -v "$PWD":/repo -w /repo rhysd/actionlint:1.7.12` → no errors.
-- [ ] **Step 3: Docs** — every command in docs runs as written (execute each once); all links resolve.
-- [ ] **Step 4: Final verification** — `./mvnw -B -pl client-java verify` and `./mvnw -B -pl harness -am verify` green; `./scripts/e2e.sh` exit 0; record counts and the E2E line in `docs/STATUS.md`.
-- [ ] **Step 5: Commit** `ci: client and harness builds; docs: e2e and console`; then run the `session-handoff` skill.
+- [x] **Step 1: Write workflow** — triggers like backend-ci with paths `client-java/**`, `harness/**`, workflow file; jobs: `client` (`./mvnw -B -pl client-java verify`, assert no runtime deps via enforcer), `harness` (`./mvnw -B -pl harness -am verify`, excluding `console` tag); actions pinned to the same SHAs as backend-ci; **no** e2e/compose job (spec §10.1).
+- [x] **Step 2: Validate** `docker run --rm -v "$PWD":/repo -w /repo rhysd/actionlint:1.7.12` → no errors.
+- [x] **Step 3: Docs** — every command in docs runs as written (execute each once); all links resolve.
+- [x] **Step 4: Final verification** — `./mvnw -B -pl client-java verify` and `./mvnw -B -pl harness -am verify` green; `./scripts/e2e.sh` exit 0; record counts and the E2E line in `docs/STATUS.md`.
+- [x] **Step 5: Commit** `ci: client and harness builds; docs: e2e and console`; then run the `session-handoff` skill.

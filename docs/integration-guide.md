@@ -42,6 +42,30 @@ curl -sS -X POST "$RP_URL/v1/notifications" \
 
 Full reference: [api.md](api.md).
 
+### From Java: the sender client
+
+Java and Kotlin backends can use the zero-dependency client instead of raw HTTP (JDK 17+, `java.net.http`, no runtime
+dependencies). Install, error handling and thread-safety notes are in [`client-java/README.md`](../client-java/README.md):
+
+```java
+SenderClient client = SenderClient.builder()
+        .baseUrl(URI.create(System.getenv("RP_URL")))
+        .apiKey(System.getenv("RP_SENDER_KEY"))
+        .build();
+
+Notification n = client.register(RegisterRequest.builder()
+        .userId("user-42")
+        .externalId("order-1001-shipped")
+        .policy(FallbackPolicy.NOT_DELIVERED)
+        .timeoutMinutes(10)
+        .fallback(Map.of("channel", "sms", "to", "+15550100", "text", "Your order 1001 has shipped."))
+        .build());
+String rpTid = n.trackingId();   // put it into the push as rp_tid
+```
+
+`register`, `get`, `list` and `cancel` map to the endpoints above. The timeout covers the whole exchange, failures are
+`ReliablePushException` (HTTP status or `-1`, parsed problem details, `Retry-After` on 429 and 503).
+
 ## 2. Embed `rp_tid` in the push
 
 The tracking id travels as the string `rp_tid` (a UUID). The policy and timeout are **not** sent to the device.
