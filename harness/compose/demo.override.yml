@@ -1,0 +1,37 @@
+# Override of docker-compose.yml for scripts/demo.sh (project reliable-push-demo): Spring profile `demo` instead of `e2e`
+# and generated files under harness/build/demo/. Same images, same services. LOCAL ONLY.
+#   docker compose -p reliable-push-demo -f harness/compose/docker-compose.yml -f harness/compose/demo.override.yml ...
+# With --realtime scripts/demo.sh also uses demo.realtime.override.yml and strips the fast clock from the secrets file.
+
+services:
+  secrets:
+    volumes: !override
+      - ./GenSecrets.java:/work/GenSecrets.java:ro
+      - ./backend.env.template:/work/backend.env.template:ro
+      - ../build/demo:/out
+  postgres:
+    env_file: !override
+      - path: ../build/demo/db.env
+        required: false
+  api:
+    env_file: !override
+      - path: ../build/demo/secrets.env
+        required: false
+    environment:
+      SPRING_PROFILES_ACTIVE: api,json,demo
+  worker-a:
+    env_file: !override
+      - path: ../build/demo/secrets.env
+        required: false
+    environment:
+      SPRING_PROFILES_ACTIVE: worker,json,demo
+  worker-b:
+    env_file: !override
+      - path: ../build/demo/secrets.env
+        required: false
+    environment:
+      SPRING_PROFILES_ACTIVE: worker,json,demo
+  harness:
+    env_file: !override
+      - path: ../build/demo/secrets.env
+        required: false

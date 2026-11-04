@@ -3,21 +3,25 @@
 
 RP_ROOT="${RP_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 RP_COMPOSE_FILE="$RP_ROOT/harness/compose/docker-compose.yml"
-RP_PROJECT="reliable-push-e2e"
-RP_OUT="$RP_ROOT/harness/build/e2e"
+# scripts/demo.sh sets these before sourcing: another compose project, output directory and override files
+RP_PROJECT="${RP_PROJECT:-reliable-push-e2e}"
+RP_OUT="${RP_OUT:-$RP_ROOT/harness/build/e2e}"
 RP_API_URL="http://127.0.0.1:8080"
 RP_HARNESS_URL="http://127.0.0.1:8090"
 
-rp_log() { printf '[e2e] %s\n' "$*"; }
-rp_warn() { printf '[e2e] WARNING: %s\n' "$*" >&2; }
+RP_TAG="${RP_TAG:-e2e}"
+rp_log() { printf '[%s] %s\n' "$RP_TAG" "$*"; }
+rp_warn() { printf '[%s] WARNING: %s\n' "$RP_TAG" "$*" >&2; }
 rp_die() {
-    printf '[e2e] ERROR: %s\n' "$*" >&2
+    printf '[%s] ERROR: %s\n' "$RP_TAG" "$*" >&2
     exit 1
 }
 
 # docker compose on the E2E project; generated files belong to the invoking user
 rp_compose() {
-    E2E_UID="$(id -u)" E2E_GID="$(id -g)" docker compose -p "$RP_PROJECT" -f "$RP_COMPOSE_FILE" "$@"
+    local files=(-f "$RP_COMPOSE_FILE") f
+    for f in ${RP_COMPOSE_OVERRIDES[@]+"${RP_COMPOSE_OVERRIDES[@]}"}; do files+=(-f "$f"); done
+    E2E_UID="$(id -u)" E2E_GID="$(id -g)" docker compose -p "$RP_PROJECT" "${files[@]}" "$@"
 }
 
 rp_require_tools() {

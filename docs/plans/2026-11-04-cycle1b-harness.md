@@ -234,9 +234,9 @@
 
 **Interfaces:**
 - Produces: `demo.sh [--realtime]` — same stack as E2E but profile `demo` instead of `e2e`, keeps running, opens `http://127.0.0.1:8090` (`open`/`xdg-open`; print URL if neither), prints how to stop (`docker compose -p reliable-push-demo down -v`); `--realtime` removes `RELIABLEPUSH_TESTING_MINUTEDURATION`.
-- [ ] **Step 1: Failing test** `ConsoleSmokeE2E.registerDeviceSendPushSeeDeliveredAndFallback()` — headless Chromium via Playwright: banner text visible; create device (Android v1) for a fresh user; send push with behaviour `deliver:1s` → tracking row shows `DELIVERED` within 10 s; send push with `never` → inbox shows one webhook with "signature valid" within 20 s.
-- [ ] **Step 2: Run** against a running demo (`./scripts/demo.sh` in another shell, then `./mvnw -B -pl harness -am verify -Pconsole-smoke`) → FAIL before UI fixes / PASS after. **Step 3: Implement** scripts and profile. **Step 4: Run** `./scripts/e2e.sh` → exit 0 including `console-smoke`.
-- [ ] **Step 5: Commit** `feat(harness): demo scripts and console smoke test`
+- [x] **Step 1: Failing test** `ConsoleSmokeE2E.registerDeviceSendPushSeeDeliveredAndFallback()` — headless Chromium via Playwright: banner text visible; create device (Android v1) for a fresh user; send push with behaviour `deliver:1s` → tracking row shows `DELIVERED` within 10 s; send push with `never` → inbox shows one webhook with "signature valid" within 20 s.
+- [x] **Step 2: Run** against a running demo (`./scripts/demo.sh` in another shell, then `./mvnw -B -pl harness -am verify -Pconsole-smoke`) → FAIL before UI fixes / PASS after. **Step 3: Implement** scripts and profile. **Step 4: Run** `./scripts/e2e.sh` → exit 0 including `console-smoke`.
+- [x] **Step 5: Commit** `feat(harness): demo scripts and console smoke test`
 
 ### Task 14: CI for client and harness, docs and handoff
 

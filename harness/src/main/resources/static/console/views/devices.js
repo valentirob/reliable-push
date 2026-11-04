@@ -26,7 +26,7 @@ export function mount(root, ctx) {
         el('td', { text: d.online ? 'online' : 'offline' }),
         el('td', {},
           el('button', { type: 'button', text: 'Refresh token', onclick: () => act(() => api('/devices/' + d.deviceId + '/refresh', { method: 'POST' })) }), ' ',
-          el('button', { type: 'button', text: d.online ? 'Go offline' : 'Go online', onclick: () => act(() => api('/devices/' + d.deviceId + '/online', { method: 'POST', body: { online: !d.online } })) }))));
+          el('button', { type: 'button', text: d.online ? 'Go offline' : 'Go online', onclick: () => act(() => api('/devices/' + d.deviceId + '/online', { method: 'POST', body: { online: !d.online } })) })))));
       if (!list.length) body.replaceChildren(el('tr', {}, el('td', { colspan: '6', class: 'muted', text: 'No simulated devices yet.' })));
     } catch (e) { err.show(e); }
   }

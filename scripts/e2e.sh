@@ -2,12 +2,15 @@
 # End-to-end scenarios of reliable-push on the local PC (never in CI). Same command for humans and AI agents.
 #
 #   ./scripts/e2e.sh                     # whole catalogue (internal scenarios, then the worker-crash ones)
-#   ./scripts/e2e.sh --scenario <name>   # one scenario
+#   ./scripts/e2e.sh --scenario <name>   # one scenario (console-smoke: only the console UI test, see below)
 #   ./scripts/e2e.sh --keep              # leave the stack running afterwards (console: http://127.0.0.1:8090)
 #
 # Stack: harness/compose/docker-compose.yml (PostgreSQL, api, worker-a, worker-b, harness), per-run secrets from the
 # one-shot `secrets` service. Outputs in harness/build/e2e/: summary.json, junit/e2e.xml, logs/<service>.log and the
 # backend JSON log files. Exit code 0 only if every scenario PASSED.
+# console-smoke: after the catalogue the web console is driven by a headless Chromium (Playwright for Java, Maven profile
+# console-smoke of the harness module); its JUnit XML goes to junit/console-smoke.xml and it is the last entry of summary.json.
+# The first run downloads Playwright's Chromium (about 150 MB, cached in the user's cache directory).
 # Environment: E2E_READY_TIMEOUT (seconds to wait for readiness, default 120).
 set -euo pipefail
 
@@ -16,7 +19,7 @@ RP_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 . "$RP_ROOT/scripts/lib/common.sh"
 
 usage() {
-    sed -n '2,11p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    sed -n '2,15p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
 }
 
 SCENARIO=""
@@ -211,9 +214,21 @@ run_external() {
     print_results "$out"
 }
 
+RUN_CATALOGUE=1
+RUN_CONSOLE=1
 if [ -n "$SCENARIO" ]; then
-    printf '%s\n' "$ALL_NAMES" | grep -qx -- "$SCENARIO" \
-        || rp_die "unknown scenario '$SCENARIO'; known: $(printf '%s ' $ALL_NAMES)"
+    if [ "$SCENARIO" = console-smoke ]; then
+        RUN_CATALOGUE=0
+    else
+        printf '%s\n' "$ALL_NAMES" | grep -qx -- "$SCENARIO" \
+            || rp_die "unknown scenario '$SCENARIO'; known: $(printf '%s ' $ALL_NAMES) console-smoke"
+        RUN_CONSOLE=0
+    fi
+fi
+
+if [ "$RUN_CATALOGUE" = 0 ]; then
+    EXPECTED=0
+elif [ -n "$SCENARIO" ]; then
     EXPECTED=1
     if is_external "$SCENARIO"; then
         run_external "$SCENARIO"
@@ -231,10 +246,80 @@ else
 fi
 
 # ---- reports and verdict ---------------------------------------------------------------------------------------
-code="$(rp_http GET "$RP_HARNESS_URL/console/api/scenarios/report/summary.json" "$RP_OUT/summary.json")"
-[ "$code" = 200 ] || rp_die "GET report/summary.json answered $code"
-code="$(rp_http GET "$RP_HARNESS_URL/console/api/scenarios/report/junit.xml" "$RP_OUT/junit/e2e.xml")"
-[ "$code" = 200 ] || rp_die "GET report/junit.xml answered $code"
+if [ "$RUN_CATALOGUE" = 1 ]; then
+    code="$(rp_http GET "$RP_HARNESS_URL/console/api/scenarios/report/summary.json" "$RP_OUT/summary.json")"
+    [ "$code" = 200 ] || rp_die "GET report/summary.json answered $code"
+    code="$(rp_http GET "$RP_HARNESS_URL/console/api/scenarios/report/junit.xml" "$RP_OUT/junit/e2e.xml")"
+    [ "$code" = 200 ] || rp_die "GET report/junit.xml answered $code"
+else
+    printf '[]\n' >"$RP_OUT/summary.json"
+fi
+
+# ---- console smoke test (Playwright, headless Chromium) against the running stack, before the teardown -------------
+json_escape() {
+    # backslash, double quote, then every control character (tab, newline, ...) to a space
+    printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' | tr '[:cntrl:]' ' '
+}
+
+# appends one entry to the JSON array in summary.json (the harness writes it pretty-printed, ending in "]")
+append_summary_entry() {
+    local body
+    body="$(cat "$RP_OUT/summary.json")"
+    body="${body%]*}"
+    body="$(printf '%s' "$body" | sed -e 's/[[:space:]]*$//')"
+    if [ "$body" = "[" ]; then
+        body="[
+$1"
+    else
+        body="$body,
+$1"
+    fi
+    printf '%s\n]\n' "$body" >"$RP_OUT/summary.json"
+}
+
+if [ "$RUN_CONSOLE" = 1 ]; then
+    EXPECTED=$((EXPECTED + 1))
+    rp_log "console-smoke: driving the console with headless Chromium (first run downloads the browser); output in harness/build/e2e/logs/console-smoke.log"
+    report="$RP_ROOT/harness/target/failsafe-reports/TEST-io.reliablepush.harness.console.ConsoleSmokeE2E.xml"
+    rm -f "$report"
+    started=$(date +%s)
+    mvn_rc=0
+    (cd "$RP_ROOT" && ./mvnw -B -pl harness -am verify -Pconsole-smoke "-Dconsole.url=$RP_HARNESS_URL") \
+        >"$RP_OUT/logs/console-smoke.log" 2>&1 || mvn_rc=$?
+    duration_ms=$((($(date +%s) - started) * 1000))
+    [ -f "$report" ] && cp "$report" "$RP_OUT/junit/console-smoke.xml"
+    if [ "$mvn_rc" = 0 ] && [ -f "$report" ] && grep -qE '<testsuite [^>]*tests="[1-9]' "$report" \
+        && ! grep -qE '<(failure|error)[ >]' "$report"; then
+        rp_log "console-smoke: PASSED (${duration_ms} ms)"
+        entry='{
+  "scenario" : "console-smoke",
+  "status" : "PASSED",
+  "durationMs" : '"$duration_ms"',
+  "failure" : null,
+  "logs" : [ "ConsoleSmokeE2E.registerDeviceSendPushSeeDeliveredAndFallback" ]
+}'
+    else
+        if [ -f "$report" ] && grep -qE '<(failure|error)[ >]' "$report"; then
+            what="$(grep -oE '<(failure|error) message="[^"]*"' "$report" | head -n 1 | sed -e 's/^[^"]*"//' -e 's/"$//' \
+                | sed -e 's/&#10;/ /g' -e 's/&quot;/'"'"'/g' -e 's/&lt;/</g' -e 's/&gt;/>/g' -e 's/&amp;/\&/g' | cut -c1-600)"
+        else
+            what="maven exited $mvn_rc without a test report (build, Playwright download or startup problem)"
+        fi
+        rp_warn "console-smoke FAILED: $what"
+        entry='{
+  "scenario" : "console-smoke",
+  "status" : "FAILED",
+  "durationMs" : '"$duration_ms"',
+  "failure" : {
+    "expected" : "the console registers a device, shows the push DELIVERED and the fallback webhook with a valid signature",
+    "actual" : "'"$(json_escape "$what")"'",
+    "hint" : "harness/build/e2e/logs/console-smoke.log and harness/build/e2e/junit/console-smoke.xml; Playwright call log shows the element that was awaited"
+  },
+  "logs" : [ ]
+}'
+    fi
+    append_summary_entry "$entry"
+fi
 
 TOTAL="$(rp_json_strings scenario <"$RP_OUT/summary.json" | grep -c . || true)"
 PASSED="$(rp_json_strings status <"$RP_OUT/summary.json" | grep -cx PASSED || true)"

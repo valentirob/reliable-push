@@ -5,13 +5,17 @@
   End-to-end scenarios of reliable-push on the local PC (never in CI). PowerShell 7 twin of scripts/e2e.sh.
 
 .DESCRIPTION
-  scripts\e2e.ps1                     # whole catalogue (internal scenarios, then the worker-crash ones)
-  scripts\e2e.ps1 -Scenario <name>    # one scenario   (also: --scenario <name>)
-  scripts\e2e.ps1 -Keep               # leave the stack running (console: http://127.0.0.1:8090)   (also: --keep)
+  scripts\e2e.ps1                     # whole catalogue (internal scenarios, then the worker-crash ones), then console-smoke
+  scripts\e2e.ps1 -Scenario <name>    # one scenario (console-smoke: only the console UI test)
+  scripts\e2e.ps1 -Keep               # leave the stack running (console: http://127.0.0.1:8090)
+  (-Scenario and -Keep are the PowerShell forms; the bash-style --scenario <name> / --keep are accepted as a courtesy.)
 
   Stack: harness/compose/docker-compose.yml (PostgreSQL, api, worker-a, worker-b, harness), per-run secrets from the
   one-shot `secrets` service. Outputs in harness/build/e2e/: summary.json, junit/e2e.xml, logs/<service>.log and the
   backend JSON log files. Exit code 0 only if every scenario PASSED.
+  console-smoke: after the catalogue a headless Chromium (Playwright for Java, Maven profile console-smoke) drives the
+  web console; its JUnit XML goes to junit/console-smoke.xml and it is the last entry of summary.json.
+  NOTE: this script has not been run on Windows (written and reviewed against scripts/e2e.sh only).
   Environment: E2E_READY_TIMEOUT (seconds to wait for readiness, default 120).
 #>
 param(
@@ -102,6 +106,10 @@ function Test-Ready([string] $Service) {
 }
 
 function Save-Logs {
+    try { Save-LogsUnsafe } catch { Warn "could not collect all logs: $($_.Exception.Message)" }
+}
+
+function Save-LogsUnsafe {
     $logDir = Join-Path $Out 'logs'
     New-Item -ItemType Directory -Force -Path $logDir | Out-Null
     foreach ($svc in @(Compose config --services 2>$null)) {
@@ -228,8 +236,14 @@ try {
     if ($list.Code -ne 200) { Die "GET /console/api/scenarios answered $($list.Code)" }
     $catalogue = @($list.Body | ConvertFrom-Json)
     $external = @($catalogue | Where-Object { $_.externalControl } | ForEach-Object { $_.name })
-    if ($Scenario) {
-        if (-not (@($catalogue.name) -contains $Scenario)) { Die "unknown scenario '$Scenario'; known: $($catalogue.name -join ' ')" }
+    $runCatalogue = $true
+    $runConsole = $true
+    if ($Scenario -eq 'console-smoke') {
+        $runCatalogue = $false
+        $expected = 0
+    } elseif ($Scenario) {
+        if (-not (@($catalogue.name) -contains $Scenario)) { Die "unknown scenario '$Scenario'; known: $($catalogue.name -join ' ') console-smoke" }
+        $runConsole = $false
         $expected = 1
         if ($external -contains $Scenario) { Invoke-External $Scenario }
         else { Log "running $Scenario"; Invoke-Internal (@{ names = @($Scenario) } | ConvertTo-Json -Compress) }
@@ -241,11 +255,62 @@ try {
     }
 
     # ---- reports and verdict -----------------------------------------------------------------------------------
-    $s = Invoke-Http GET "$HarnessUrl/console/api/scenarios/report/summary.json" (Join-Path $Out 'summary.json')
-    if ($s.Code -ne 200) { Die "GET report/summary.json answered $($s.Code)" }
-    $j = Invoke-Http GET "$HarnessUrl/console/api/scenarios/report/junit.xml" (Join-Path $Out 'junit/e2e.xml')
-    if ($j.Code -ne 200) { Die "GET report/junit.xml answered $($j.Code)" }
-    $summary = @($s.Body | ConvertFrom-Json)
+    $summaryFile = Join-Path $Out 'summary.json'
+    if ($runCatalogue) {
+        $s = Invoke-Http GET "$HarnessUrl/console/api/scenarios/report/summary.json" $summaryFile
+        if ($s.Code -ne 200) { Die "GET report/summary.json answered $($s.Code)" }
+        $j = Invoke-Http GET "$HarnessUrl/console/api/scenarios/report/junit.xml" (Join-Path $Out 'junit/e2e.xml')
+        if ($j.Code -ne 200) { Die "GET report/junit.xml answered $($j.Code)" }
+        $summary = @($s.Body | ConvertFrom-Json)
+    } else {
+        $summary = @()
+    }
+
+    # ---- console smoke test (Playwright, headless Chromium) against the running stack, before the teardown -------
+    if ($runConsole) {
+        $expected++
+        Log 'console-smoke: driving the console with headless Chromium (first run downloads the browser); output in harness/build/e2e/logs/console-smoke.log'
+        $report = Join-Path $Root 'harness/target/failsafe-reports/TEST-io.reliablepush.harness.console.ConsoleSmokeE2E.xml'
+        Remove-Item -Force -ErrorAction SilentlyContinue $report
+        $sw = [System.Diagnostics.Stopwatch]::StartNew()
+        Push-Location $Root
+        try {
+            $mvnw = if ($IsWindows) { '.\mvnw.cmd' } else { './mvnw' }
+            & $mvnw -B -pl harness -am verify -Pconsole-smoke "-Dconsole.url=$HarnessUrl" *> (Join-Path $Out 'logs/console-smoke.log')
+            $mvnRc = $LASTEXITCODE
+        } finally { Pop-Location }
+        $sw.Stop()
+        $failure = $null
+        if (Test-Path $report) {
+            Copy-Item $report (Join-Path $Out 'junit/console-smoke.xml') -Force
+            [xml] $xml = Get-Content $report -Raw
+            $suite = $xml.testsuite
+            $bad = @($xml.SelectNodes('//failure | //error'))
+            if ($bad.Count -gt 0) { $failure = [string]$bad[0].message }
+            elseif ([int]$suite.tests -lt 1) { $failure = 'the console test did not run (0 tests)' }
+        } else {
+            $failure = "maven exited $mvnRc without a test report (build, Playwright download or startup problem)"
+        }
+        if ($mvnRc -ne 0 -and -not $failure) { $failure = "maven exited $mvnRc" }
+        $entry = [ordered]@{ scenario = 'console-smoke'; status = $(if ($failure) { 'FAILED' } else { 'PASSED' }); durationMs = [int]$sw.ElapsedMilliseconds }
+        if ($failure) {
+            if ($failure.Length -gt 600) { $failure = $failure.Substring(0, 600) }
+            Warn "console-smoke FAILED: $failure"
+            $entry.failure = [ordered]@{
+                expected = 'the console registers a device, shows the push DELIVERED and the fallback webhook with a valid signature'
+                actual = $failure
+                hint = 'harness/build/e2e/logs/console-smoke.log and harness/build/e2e/junit/console-smoke.xml; the Playwright call log shows the element that was awaited'
+            }
+            $entry.logs = @()
+        } else {
+            Log "console-smoke: PASSED ($($entry.durationMs) ms)"
+            $entry.failure = $null
+            $entry.logs = @('ConsoleSmokeE2E.registerDeviceSendPushSeeDeliveredAndFallback')
+        }
+        $summary = @($summary) + @([pscustomobject]$entry)
+        # ConvertTo-Json -InputObject keeps a one-element array an array
+        Set-Content -Path $summaryFile -Value (ConvertTo-Json -InputObject @($summary) -Depth 10) -Encoding utf8NoBOM
+    }
     $passed = @($summary | Where-Object { $_.status -eq 'PASSED' }).Count
     Log "summary: $passed/$($summary.Count) passed (expected $expected scenarios)"
     if ($summary.Count -ne $expected -or $passed -ne $summary.Count -or $summary.Count -eq 0) {
@@ -264,10 +329,10 @@ try {
             Log "stack kept running (-Keep): console $HarnessUrl, API $ApiUrl"
             Log "stop it with: docker compose -p $Project -f harness/compose/docker-compose.yml down -v"
         } else {
-            Compose down -v --remove-orphans *> $null
+            try { Compose down -v --remove-orphans *> $null } catch { Warn "docker compose down failed: $($_.Exception.Message)" }
         }
     }
-    Log "outputs: $Out (summary.json, junit/e2e.xml, logs/)"
+    Log "outputs: $Out (summary.json, junit/, logs/)"
     if ($exitCode -eq 0) { Log 'RESULT: all scenarios PASSED' } else { Log "RESULT: FAILED (exit $exitCode)" }
 }
 exit $exitCode
