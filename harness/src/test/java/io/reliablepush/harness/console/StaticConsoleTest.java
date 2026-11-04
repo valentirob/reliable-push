@@ -50,4 +50,31 @@ class StaticConsoleTest {
         assertThat(html).contains("<script type=\"module\" src=\"app.js\">");
         assertThat(html).contains("<link rel=\"stylesheet\" href=\"console.css\">");
     }
+
+    @Test
+    void everyScriptParsesAsAnEsModule() throws Exception {
+        org.junit.jupiter.api.Assumptions.assumeTrue(nodeAvailable(), "node is not on the PATH");
+        Path tmp = Files.createTempDirectory("console-js");
+        try {
+            for (Path js : sources().stream().filter(p -> p.toString().endsWith(".js")).toList()) {
+                Path copy = tmp.resolve(js.getFileName().toString().replace(".js", ".mjs"));
+                Files.copy(js, copy, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                Process p = new ProcessBuilder("node", "--check", copy.toString()).redirectErrorStream(true).start();
+                String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+                assertThat(p.waitFor()).as("node --check %s%n%s", js, out).isZero();
+            }
+        } finally {
+            try (Stream<Path> s = Files.walk(tmp)) {
+                s.sorted(java.util.Comparator.reverseOrder()).forEach(f -> f.toFile().delete());
+            }
+        }
+    }
+
+    private static boolean nodeAvailable() {
+        try {
+            return new ProcessBuilder("node", "--version").redirectErrorStream(true).start().waitFor() == 0;
+        } catch (IOException | InterruptedException e) {
+            return false;
+        }
+    }
 }

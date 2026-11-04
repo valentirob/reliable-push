@@ -289,7 +289,8 @@ if [ "$RUN_CONSOLE" = 1 ]; then
     duration_ms=$((($(date +%s) - started) * 1000))
     [ -f "$report" ] && cp "$report" "$RP_OUT/junit/console-smoke.xml"
     if [ "$mvn_rc" = 0 ] && [ -f "$report" ] && grep -qE '<testsuite [^>]*tests="[1-9]' "$report" \
-        && ! grep -qE '<(failure|error)[ >]' "$report"; then
+        && grep -qE '<testsuite [^>]*failures="0"' "$report" && grep -qE '<testsuite [^>]*errors="0"' "$report" \
+        && grep -qE '<testsuite [^>]*skipped="0"' "$report" && ! grep -qE '<(failure|error|skipped)[ >/]' "$report"; then
         rp_log "console-smoke: PASSED (${duration_ms} ms)"
         entry='{
   "scenario" : "console-smoke",
@@ -302,6 +303,8 @@ if [ "$RUN_CONSOLE" = 1 ]; then
         if [ -f "$report" ] && grep -qE '<(failure|error)[ >]' "$report"; then
             what="$(grep -oE '<(failure|error) message="[^"]*"' "$report" | head -n 1 | sed -e 's/^[^"]*"//' -e 's/"$//' \
                 | sed -e 's/&#10;/ /g' -e 's/&quot;/'"'"'/g' -e 's/&lt;/</g' -e 's/&gt;/>/g' -e 's/&amp;/\&/g' | cut -c1-600)"
+        elif [ -f "$report" ] && [ "$mvn_rc" = 0 ]; then
+            what="the console test was skipped or did not run (failures, errors and skipped must all be 0)"
         else
             what="maven exited $mvn_rc without a test report (build, Playwright download or startup problem)"
         fi

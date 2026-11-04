@@ -8,7 +8,9 @@ import com.microsoft.playwright.Locator;
 import com.microsoft.playwright.Page;
 import com.microsoft.playwright.Playwright;
 import com.microsoft.playwright.options.AriaRole;
+import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.junit.jupiter.api.AfterAll;
@@ -52,6 +54,11 @@ class ConsoleSmokeE2E {
         context = browser.newContext();
         try {
             Page page = context.newPage();
+            List<String> problems = new CopyOnWriteArrayList<>();
+            page.onPageError(e -> problems.add("page error: " + e));
+            page.onConsoleMessage(m -> {
+                if ("error".equals(m.type())) problems.add("console error: " + m.text());
+            });
             page.setDefaultTimeout(5_000);
             page.navigate(url);
 
@@ -76,11 +83,9 @@ class ConsoleSmokeE2E {
             Locator deliveredRow = page.getByRole(AriaRole.ROW).filter(new Locator.FilterOptions().setHasText(delivered.substring(0, 8)));
             assertThat(deliveredRow.locator(".badge")).hasText("DELIVERED", new com.microsoft.playwright.assertions.LocatorAssertions.HasTextOptions().setTimeout(10_000));
 
-            // Fallback inbox: earlier scenarios may have left the receiver failing or hanging; make it answer 200
+            // Fallback inbox: the scenario runner resets the receiver after every scenario; the UI must show it answering OK
             page.getByRole(AriaRole.BUTTON, new Page.GetByRoleOptions().setName("Fallback inbox")).click();
             selectApp(page);
-            page.getByLabel("Answer with").selectOption("OK");
-            page.getByRole(AriaRole.BUTTON, new Page.GetByRoleOptions().setName("Apply")).click();
             assertThat(page.getByRole(AriaRole.STATUS).filter(new Locator.FilterOptions().setHasText("Receiver mode: OK")))
                     .isVisible();
 
@@ -92,6 +97,7 @@ class ConsoleSmokeE2E {
             assertThat(hook).hasCount(1, new com.microsoft.playwright.assertions.LocatorAssertions.HasCountOptions().setTimeout(20_000));
             assertThat(hook).containsText("valid");
             assertThat(hook).not().containsText("INVALID");
+            org.assertj.core.api.Assertions.assertThat(problems).as("JavaScript errors in the console").isEmpty();
         } finally {
             context.close();
         }

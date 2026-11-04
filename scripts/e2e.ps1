@@ -287,7 +287,7 @@ try {
             $suite = $xml.testsuite
             $bad = @($xml.SelectNodes('//failure | //error'))
             if ($bad.Count -gt 0) { $failure = [string]$bad[0].message }
-            elseif ([int]$suite.tests -lt 1) { $failure = 'the console test did not run (0 tests)' }
+            elseif ([int]$suite.tests -lt 1 -or [int]$suite.failures -ne 0 -or [int]$suite.errors -ne 0 -or [int]$suite.skipped -ne 0) { $failure = 'the console test was skipped or did not run (tests >= 1 and failures, errors, skipped = 0 required)' }
         } else {
             $failure = "maven exited $mvnRc without a test report (build, Playwright download or startup problem)"
         }
