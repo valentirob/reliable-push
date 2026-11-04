@@ -6,6 +6,7 @@ import io.reliablepush.client.ReliablePushException;
 import io.reliablepush.harness.config.HarnessApp;
 import io.reliablepush.harness.config.HarnessProperties;
 import io.reliablepush.harness.devices.AndroidMode;
+import io.reliablepush.harness.devices.BackendCallException;
 import io.reliablepush.harness.devices.DeviceBehaviour;
 import io.reliablepush.harness.devices.DeviceSimulator;
 import io.reliablepush.harness.devices.Platform;
@@ -26,6 +27,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ProblemDetail;
@@ -45,11 +48,13 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
  * REST API of the web console (spec 10.2) besides the scenario endpoints ({@code ScenarioController}) and the SSE
  * stream ({@code ConsoleStream}). Local test/demo tool: no endpoint returns device tokens, sender API keys, grant or
  * HMAC secrets. Backend failures answer 502 problem+json with a generic detail and the backend's status in
- * {@code backendStatus}.
+ * {@code backendStatus} (0 or -1: no answer); a backend 429 is passed on as 429 with its {@code Retry-After}.
  */
 @RestController
 @RequestMapping("/console/api")
 public class ConsoleApiController {
+
+    private static final Logger LOG = LogManager.getLogger(ConsoleApiController.class);
 
     static final int RECENT_LIMIT = 200;
     static final int INBOX_LIMIT = 500;
@@ -143,8 +148,9 @@ public class ConsoleApiController {
         if (!d.online()) {
             throw new ConflictException("device is offline");
         }
-        if (simulator.forceRefresh(d.deviceId()) != 200) {
-            throw new IllegalStateException("refresh failed");
+        int status = simulator.forceRefresh(d.deviceId());
+        if (status != 200) {
+            throw new BackendCallException("token refresh failed", status, null);
         }
         return deviceJson(device(id));
     }
@@ -277,12 +283,20 @@ public class ConsoleApiController {
 
     @ExceptionHandler(ReliablePushException.class)
     ResponseEntity<Object> backendFailure(ReliablePushException e) {
-        return backendProblem(e.status());
+        return backendProblem(e.status(), e.retryAfter().map(d -> d.toSeconds()).orElse(null));
     }
 
+    @ExceptionHandler(BackendCallException.class)
+    ResponseEntity<Object> deviceApiFailure(BackendCallException e) {
+        return backendProblem(e.status(), e.retryAfterSeconds() == null ? null : e.retryAfterSeconds().longValue());
+    }
+
+    /** Anything else that is not a backend answer: a generic 502 (the cause is logged here, never returned). */
     @ExceptionHandler(IllegalStateException.class)
-    ResponseEntity<Object> backendUnavailable(IllegalStateException e) {
-        return backendProblem(-1);
+    ResponseEntity<Object> unexpected(IllegalStateException e) {
+        LOG.warn("console request failed: {}", e.getClass().getName());
+        LOG.debug("console request failure", e);
+        return problem(HttpStatus.BAD_GATEWAY, "Request failed", "The harness could not complete the request", null);
     }
 
     @ExceptionHandler(ConflictException.class)
@@ -305,7 +319,21 @@ public class ConsoleApiController {
         return problem(HttpStatus.BAD_REQUEST, "Bad request", "malformed request", null);
     }
 
-    private static ResponseEntity<Object> backendProblem(int backendStatus) {
+    /**
+     * A backend error answer: 429 is passed on as 429 (with {@code Retry-After} when the backend gave one) so callers
+     * can back off; every other status, and no answer at all ({@code <= 0}), is a 502. {@code backendStatus} carries
+     * the backend's status.
+     */
+    private static ResponseEntity<Object> backendProblem(int backendStatus, Long retryAfterSeconds) {
+        if (backendStatus == 429) {
+            ResponseEntity<Object> r = problem(HttpStatus.TOO_MANY_REQUESTS, "Backend rate limit",
+                    "The backend rate-limited the call (backend status 429)", 429);
+            if (retryAfterSeconds == null || retryAfterSeconds < 0) {
+                return r;
+            }
+            return ResponseEntity.status(r.getStatusCode()).headers(r.getHeaders())
+                    .header("Retry-After", Long.toString(retryAfterSeconds)).body(r.getBody());
+        }
         String detail = backendStatus > 0
                 ? "The backend call failed (backend status " + backendStatus + ")"
                 : "The backend call failed (backend unreachable or timed out)";

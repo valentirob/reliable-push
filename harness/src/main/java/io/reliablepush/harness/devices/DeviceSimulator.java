@@ -131,7 +131,7 @@ public class DeviceSimulator implements PushReceiver, AutoCloseable {
         }
         var result = api.register(appId, minter.mint(appId, userId), platform, null);
         if (!result.ok()) {
-            throw new IllegalStateException("device registration failed: HTTP status " + result.status());
+            throw new BackendCallException("device registration failed", result.status(), result.retryAfterSeconds());
         }
         DeviceApiClient.Registered r = result.value();
         DeviceState state = new DeviceState(r.deviceId(), appId, userId, platform, mode);
@@ -174,7 +174,7 @@ public class DeviceSimulator implements PushReceiver, AutoCloseable {
         }
         var r = api.revoke(s.token);
         if (!r.ok() && r.status() != 401) {
-            throw new IllegalStateException("device revocation failed: HTTP status " + r.status());
+            throw new BackendCallException("device revocation failed", r.status(), r.retryAfterSeconds());
         }
     }
 

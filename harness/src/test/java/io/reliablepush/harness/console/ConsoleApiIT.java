@@ -41,6 +41,7 @@ class ConsoleApiIT {
     static final List<UUID> registered = new ArrayList<>();
     static volatile int registerStatus = 201;
     static volatile int cancelStatus = 204;
+    static volatile int deviceStatus = 201;
     static final HttpServer backend = startBackend();
 
     static HttpServer startBackend() {
@@ -58,7 +59,12 @@ class ConsoleApiIT {
         String m = ex.getRequestMethod();
         String p = ex.getRequestURI().getPath();
         ex.getRequestBody().readAllBytes();
-        if (m.equals("POST") && p.equals("/v1/devices")) {
+        if (m.equals("POST") && p.equals("/v1/devices") && deviceStatus != 201) {
+            if (deviceStatus == 429) {
+                ex.getResponseHeaders().add("Retry-After", "7");
+            }
+            reply(ex, deviceStatus, "{\"title\":\"nope\",\"status\":" + deviceStatus + "}");
+        } else if (m.equals("POST") && p.equals("/v1/devices")) {
             reply(ex, 201, "{\"deviceId\":\"" + UUID.randomUUID() + "\",\"deviceToken\":\"tok-"
                     + tokens.incrementAndGet() + "-zzsecretzz\",\"expiresAt\":\""
                     + Instant.now().plus(30, ChronoUnit.DAYS) + "\"}");
@@ -69,6 +75,9 @@ class ConsoleApiIT {
             reply(ex, 200, "{\"items\":[]}");
         } else if (m.equals("POST") && p.equals("/v1/notifications")) {
             if (registerStatus != 201) {
+                if (registerStatus == 429) {
+                    ex.getResponseHeaders().add("Retry-After", "9");
+                }
                 reply(ex, registerStatus, "{\"title\":\"Conflict\",\"status\":" + registerStatus + "}");
                 return;
             }
@@ -129,6 +138,7 @@ class ConsoleApiIT {
     void reset() {
         registerStatus = 201;
         cancelStatus = 204;
+        deviceStatus = 201;
     }
 
     HttpResponse<String> get(String path) throws Exception {
@@ -233,6 +243,35 @@ class ConsoleApiIT {
         assertThat(down.statusCode()).isEqualTo(502);
         assertThat(down.headers().firstValue("Content-Type").orElse("")).contains("application/problem+json");
         assertThat(down.body()).contains("409").doesNotContain("test-sender-key");
+    }
+
+    @Test
+    void backendRateLimitIsPassedOnWithRetryAfter() throws Exception {
+        deviceStatus = 429;
+        HttpResponse<String> device = post("/console/api/devices",
+                "{\"appId\":\"shop\",\"userId\":\"rl-user\",\"platform\":\"IOS\"}");
+        assertThat(device.statusCode()).as(device.body()).isEqualTo(429);
+        assertThat(device.headers().firstValue("Retry-After")).hasValue("7");
+        assertThat(device.headers().firstValue("Content-Type").orElse("")).contains("application/problem+json");
+        assertThat(json.readTree(device.body()).get("backendStatus").asInt()).isEqualTo(429);
+
+        registerStatus = 429;
+        HttpResponse<String> push = post("/console/api/push",
+                "{\"appId\":\"shop\",\"userId\":\"u\",\"title\":\"t\",\"body\":\"b\"}");
+        assertThat(push.statusCode()).as(push.body()).isEqualTo(429);
+        assertThat(push.headers().firstValue("Retry-After")).hasValue("9");
+    }
+
+    @Test
+    void deviceRegistrationFailureCarriesTheBackendStatus() throws Exception {
+        deviceStatus = 500;
+        HttpResponse<String> r = post("/console/api/devices",
+                "{\"appId\":\"shop\",\"userId\":\"err-user\",\"platform\":\"IOS\"}");
+
+        assertThat(r.statusCode()).isEqualTo(502);
+        JsonNode p = json.readTree(r.body());
+        assertThat(p.get("backendStatus").asInt()).isEqualTo(500);
+        assertThat(p.get("detail").asString()).contains("500").doesNotContain("unreachable");
     }
 
     @Test
