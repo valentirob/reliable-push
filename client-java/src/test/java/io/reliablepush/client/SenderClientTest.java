@@ -285,6 +285,40 @@ class SenderClientTest {
     }
 
     @Test
+    void programmingErrorsPropagateUnchanged() {
+        IllegalStateException boom = new IllegalStateException("bug");
+        SenderClient c = clientFailingWith(boom);
+        assertThatThrownBy(() -> c.get(TID)).isSameAs(boom);
+        StackOverflowError so = new StackOverflowError();
+        assertThatThrownBy(() -> clientFailingWith(so).get(TID)).isSameAs(so);
+        assertThatThrownBy(() -> clientFailingWith(new java.io.IOException("io")).get(TID))
+                .isInstanceOfSatisfying(ReliablePushException.class, e -> assertThat(e.status()).isEqualTo(-1));
+    }
+
+    private static SenderClient clientFailingWith(Throwable t) {
+        return new SenderClient(URI.create("http://127.0.0.1:1"), KEY, Duration.ofSeconds(5), new java.net.http.HttpClient() {
+            @Override public java.util.Optional<java.net.CookieHandler> cookieHandler() { return java.util.Optional.empty(); }
+            @Override public java.util.Optional<Duration> connectTimeout() { return java.util.Optional.empty(); }
+            @Override public Redirect followRedirects() { return Redirect.NEVER; }
+            @Override public java.util.Optional<java.net.ProxySelector> proxy() { return java.util.Optional.empty(); }
+            @Override public javax.net.ssl.SSLContext sslContext() { return null; }
+            @Override public javax.net.ssl.SSLParameters sslParameters() { return null; }
+            @Override public java.util.Optional<java.net.Authenticator> authenticator() { return java.util.Optional.empty(); }
+            @Override public Version version() { return Version.HTTP_1_1; }
+            @Override public java.util.Optional<java.util.concurrent.Executor> executor() { return java.util.Optional.empty(); }
+            @Override public <T> java.net.http.HttpResponse<T> send(java.net.http.HttpRequest r,
+                    java.net.http.HttpResponse.BodyHandler<T> h) { throw new UnsupportedOperationException(); }
+            @Override public <T> java.util.concurrent.CompletableFuture<java.net.http.HttpResponse<T>> sendAsync(
+                    java.net.http.HttpRequest r, java.net.http.HttpResponse.BodyHandler<T> h) {
+                return java.util.concurrent.CompletableFuture.failedFuture(t);
+            }
+            @Override public <T> java.util.concurrent.CompletableFuture<java.net.http.HttpResponse<T>> sendAsync(
+                    java.net.http.HttpRequest r, java.net.http.HttpResponse.BodyHandler<T> h,
+                    java.net.http.HttpResponse.PushPromiseHandler<T> p) { return sendAsync(r, h); }
+        });
+    }
+
+    @Test
     void builderRejectsUserInfoQueryFragment() {
         for (String u : List.of("http://user:pw@127.0.0.1:1", "http://127.0.0.1:1/?a=b", "http://127.0.0.1:1/#f")) {
             assertThatThrownBy(() -> SenderClient.builder().baseUrl(URI.create(u)).apiKey(KEY).build())

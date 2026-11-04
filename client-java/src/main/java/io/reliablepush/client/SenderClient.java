@@ -35,15 +35,20 @@ public final class SenderClient {
     private final HttpClient http;
 
     SenderClient(URI baseUrl, String apiKey, Duration timeout) {
+        this(baseUrl, apiKey, timeout, HttpClient.newBuilder()
+                .version(HttpClient.Version.HTTP_1_1)
+                .followRedirects(HttpClient.Redirect.NEVER)
+                .connectTimeout(timeout)
+                .build());
+    }
+
+    /** Test seam. */
+    SenderClient(URI baseUrl, String apiKey, Duration timeout, HttpClient http) {
         String b = baseUrl.toString();
         this.base = b.endsWith("/") ? b.substring(0, b.length() - 1) : b;
         this.apiKey = apiKey;
         this.timeout = timeout;
-        this.http = HttpClient.newBuilder()
-                .version(HttpClient.Version.HTTP_1_1)
-                .followRedirects(HttpClient.Redirect.NEVER)
-                .connectTimeout(timeout)
-                .build();
+        this.http = http;
     }
 
     public static SenderClientBuilder builder() {
@@ -164,6 +169,12 @@ public final class SenderClient {
             throw new ReliablePushException("sender API call timed out", -1, null, null, e);
         } catch (ExecutionException e) {
             Throwable c = e.getCause() != null ? e.getCause() : e;
+            if (c instanceof RuntimeException re) {
+                throw re;
+            }
+            if (c instanceof Error err) {
+                throw err;
+            }
             throw new ReliablePushException("sender API call failed: " + c.getClass().getSimpleName(), -1, null, null, c);
         }
     }
