@@ -1,0 +1,112 @@
+# Local E2E / demo stack of reliable-push. LOCAL ONLY: never used in CI or production.
+# Driven by scripts/e2e.sh (project name reliable-push-e2e); manual use from the repo root:
+#   docker compose -p reliable-push-e2e -f harness/compose/docker-compose.yml run --rm secrets
+#   docker compose -p reliable-push-e2e -f harness/compose/docker-compose.yml up -d --build
+# Per-run secrets live in harness/build/e2e/{secrets,db}.env (git-ignored), written by the one-shot `secrets` service.
+# Published ports bind 127.0.0.1 only: backend API 8080, harness/console 8090.
+
+name: reliable-push-e2e
+
+x-backend: &backend
+  image: reliable-push-backend:e2e
+  pull_policy: never
+  read_only: true
+  # OpenShift-style arbitrary UID in group 0, like production
+  user: "1000870000:0"
+  tmpfs:
+    - /tmp
+  volumes:
+    # mounted after (on top of) the /tmp tmpfs: shared with the harness, which tails backend-*.json
+    - rp-logs:/tmp/rp-logs
+  env_file:
+    - path: ../build/e2e/secrets.env
+      required: false
+  depends_on:
+    postgres:
+      condition: service_healthy
+  restart: "no"
+
+services:
+  secrets:
+    image: eclipse-temurin:21.0.13_9-jdk-alpine-3.24
+    profiles: ["tools"]
+    # the generated files belong to the invoking user (scripts/e2e.sh exports E2E_UID / E2E_GID)
+    user: "${E2E_UID:-1000}:${E2E_GID:-1000}"
+    working_dir: /work
+    volumes:
+      - ./GenSecrets.java:/work/GenSecrets.java:ro
+      - ./backend.env.template:/work/backend.env.template:ro
+      - ../build/e2e:/out
+    command: ["java", "/work/GenSecrets.java", "/out", "/work/backend.env.template"]
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: reliablepush
+      POSTGRES_USER: reliablepush
+    env_file:
+      - path: ../build/e2e/db.env
+        required: false
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U reliablepush -d reliablepush"]
+      interval: 1s
+      timeout: 3s
+      retries: 60
+
+  api:
+    <<: *backend
+    build:
+      context: ../../backend
+    environment:
+      SPRING_PROFILES_ACTIVE: api,json,e2e
+      RP_LOG_FILE: /tmp/rp-logs/backend-api.json
+    ports:
+      - "127.0.0.1:8080:8080"
+
+  worker-a:
+    <<: *backend
+    environment:
+      SPRING_PROFILES_ACTIVE: worker,json,e2e
+      RP_LOG_FILE: /tmp/rp-logs/backend-worker-a.json
+      # poll-interval is a literal duration (not scaled by the fast clock): keep retry timing meaningful
+      RELIABLEPUSH_WORKER_POLLINTERVAL: 500ms
+
+  worker-b:
+    <<: *backend
+    environment:
+      SPRING_PROFILES_ACTIVE: worker,json,e2e
+      RP_LOG_FILE: /tmp/rp-logs/backend-worker-b.json
+      RELIABLEPUSH_WORKER_POLLINTERVAL: 500ms
+
+  harness:
+    image: reliable-push-harness:e2e
+    pull_policy: never
+    build:
+      context: ../..
+      dockerfile: harness/Dockerfile
+    read_only: true
+    tmpfs:
+      - /tmp
+    volumes:
+      - rp-logs:/tmp/rp-logs:ro
+    env_file:
+      - path: ../build/e2e/secrets.env
+        required: false
+    environment:
+      HARNESS_BACKENDURL: http://api:8080
+      HARNESS_BACKENDLOGDIR: /tmp/rp-logs
+    ports:
+      - "127.0.0.1:8090:8090"
+    depends_on:
+      - api
+
+volumes:
+  # tmpfs-backed and world-writable (sticky): the backends write as UID 1000870000, the harness reads as UID 1001
+  rp-logs:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: "mode=1777"
