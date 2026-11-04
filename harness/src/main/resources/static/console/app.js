@@ -12,14 +12,33 @@ const SCREENS = [
 ];
 
 // SSE events fan out through a bus; views subscribe on mount and unsubscribe on unmount.
+// EventSource gives up (CLOSED) on a non-200 answer such as the 503 of the 21st tab: reconnect ourselves with
+// exponential backoff + jitter, and ask the views to resync after every (re)connect (events may have been missed).
 const bus = new EventTarget();
+const live = el('span', { class: 'muted', role: 'status', text: 'Live updates: connecting…' });
+let attempt = 0;
+function setLive(ok) {
+  live.textContent = ok ? 'Live updates: connected' : 'Live updates disconnected — retrying';
+  live.className = ok ? 'ok' : 'error';
+}
 function connectStream() {
   const es = new EventSource('/console/api/stream');
+  es.onopen = () => {
+    attempt = 0;
+    setLive(true);
+    bus.dispatchEvent(new CustomEvent('resync'));
+  };
   es.onmessage = (m) => {
     try { bus.dispatchEvent(new CustomEvent('event', { detail: JSON.parse(m.data) })); } catch (e) { /* ignore */ }
   };
-  es.onerror = () => bus.dispatchEvent(new CustomEvent('stream-state', { detail: es.readyState }));
-  es.onopen = () => bus.dispatchEvent(new CustomEvent('stream-state', { detail: 1 }));
+  es.onerror = () => {
+    setLive(false);
+    if (es.readyState === EventSource.CLOSED) {
+      es.close();
+      const delay = Math.min(30000, 1000 * 2 ** attempt++) * (0.5 + Math.random() / 2);
+      setTimeout(connectStream, delay);
+    }
+  };
 }
 
 async function main() {
@@ -27,6 +46,7 @@ async function main() {
   const main = document.getElementById('main');
   let apps = [];
   try { apps = await api('/apps'); } catch (e) { main.append(el('p', { class: 'error', role: 'alert', text: e.message })); return; }
+  document.querySelector('header').append(live);
   const ctx = { apps, bus };
   let current = null;
   const buttons = new Map();

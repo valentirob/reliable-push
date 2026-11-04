@@ -26,6 +26,8 @@ export function mount(root, ctx) {
   }
   const onEvent = (ev) => { if (ev.detail && ev.detail.type === 'webhook') load(); };
   ctx.bus.addEventListener('event', onEvent);
+  const onResync = () => load();
+  ctx.bus.addEventListener('resync', onResync);
   const timer = setInterval(load, 3000);
   const form = el('form', { class: 'card', onsubmit: async (ev) => {
     ev.preventDefault();
@@ -37,5 +39,5 @@ export function mount(root, ctx) {
   root.append(form, err, status, el('div', { class: 'card table-wrap' }, el('table', {},
     el('thead', {}, el('tr', {}, ['Received', 'Tracking id', 'Attempt', 'Idempotency-Key', 'HMAC', 'Reason', 'Answered'].map((t) => el('th', { text: t })))), body)));
   load();
-  return { unmount() { clearInterval(timer); ctx.bus.removeEventListener('event', onEvent); } };
+  return { unmount() { clearInterval(timer); ctx.bus.removeEventListener('event', onEvent); ctx.bus.removeEventListener('resync', onResync); } };
 }

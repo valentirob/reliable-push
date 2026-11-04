@@ -1,6 +1,7 @@
 package io.reliablepush.harness.console;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
 
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
@@ -117,6 +118,10 @@ class ConsoleApiIT {
     @Autowired
     DeviceSimulator simulator;
 
+    @Autowired
+    @org.springframework.beans.factory.annotation.Qualifier("requestMappingHandlerMapping")
+    org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping mappings;
+
     final HttpClient http = HttpClient.newHttpClient();
     final JsonMapper json = JsonMapper.builder().build();
 
@@ -182,10 +187,27 @@ class ConsoleApiIT {
             }
         }
         assertThat(found).isTrue();
-        assertThat(post("/console/api/devices/" + id + "/refresh", "").statusCode()).isEqualTo(200);
+        JsonNode before = deviceById(id);
+        int tokensBefore = simulator.issuedTokensForLogHygieneScan().size();
+        Thread.sleep(5); // the fake backend stamps expiry with its own clock
+        HttpResponse<String> refreshed = post("/console/api/devices/" + id + "/refresh", "");
+        assertThat(refreshed.statusCode()).isEqualTo(200);
+        assertThat(simulator.issuedTokensForLogHygieneScan()).hasSize(tokensBefore + 1);
+        assertThat(Instant.parse(json.readTree(refreshed.body()).get("tokenExpiresAt").asString()))
+                .isAfter(Instant.parse(before.get("tokenExpiresAt").asString()));
         HttpResponse<String> off = post("/console/api/devices/" + id + "/online", "{\"online\":false}");
         assertThat(json.readTree(off.body()).get("online").asBoolean()).isFalse();
+        assertThat(post("/console/api/devices/" + id + "/refresh", "").statusCode()).isEqualTo(409);
         assertThat(post("/console/api/devices/" + UUID.randomUUID() + "/refresh", "").statusCode()).isEqualTo(404);
+    }
+
+    JsonNode deviceById(String id) throws Exception {
+        for (JsonNode d : json.readTree(get("/console/api/devices").body())) {
+            if (id.equals(d.get("deviceId").asString())) {
+                return d;
+            }
+        }
+        throw new AssertionError("device not listed");
     }
 
     @Test
@@ -289,7 +311,8 @@ class ConsoleApiIT {
     void noTokenOrSecretInAnyResponse() throws Exception {
         String dev = createDevice("crawl-user");
         String tid = push("crawl-user", "{\"" + dev + "\":\"deliver:100ms\"}");
-        Thread.sleep(400);
+        await().atMost(java.time.Duration.ofSeconds(5)).until(
+                () -> get("/console/api/notifications/" + tid).body().contains("event_sent"));
         List<String> forbidden = new ArrayList<>(simulator.issuedTokensForLogHygieneScan());
         properties.apps().values().forEach(a -> {
             forbidden.add(a.senderApiKey());
@@ -298,12 +321,24 @@ class ConsoleApiIT {
         });
         assertThat(forbidden).isNotEmpty();
 
-        for (String path : List.of("/console/api/apps", "/console/api/devices", "/console/api/devices?appId=shop",
-                "/console/api/notifications?appId=shop", "/console/api/notifications/" + tid,
-                "/console/api/payload-preview?trackingId=" + tid + "&title=a&body=b",
-                "/console/api/inbox?appId=shop", "/console/api/inbox/in-flight?appId=shop",
-                "/console/api/logs", "/console/api/scenarios", "/console/api/scenarios/report/summary.json",
-                "/console/api/scenarios/report/junit.xml", "/", "/app.js", "/api.js", "/console.css")) {
+        // every GET mapping of the application (except the SSE stream, read separately below)
+        List<String> paths = new ArrayList<>();
+        for (var e : mappings.getHandlerMethods().entrySet()) {
+            var info = e.getKey();
+            if (info.getMethodsCondition().getMethods().contains(org.springframework.web.bind.annotation.RequestMethod.GET)
+                    && info.getPathPatternsCondition() != null) {
+                info.getPathPatternsCondition().getPatternValues().forEach(pattern -> paths.add(concrete(pattern, tid)));
+            }
+        }
+        paths.addAll(List.of("/console/api/devices?userId=crawl-user", "/", "/console.css", "/app.js", "/api.js"));
+        for (String name : List.of("devices", "send", "tracking", "inbox", "scenarios", "logs")) {
+            paths.add("/views/" + name + ".js");
+        }
+        assertThat(paths).contains("/console/api/apps", "/console/api/devices", "/console/api/logs");
+        for (String path : paths) {
+            if (path.equals("/console/api/stream")) {
+                continue;
+            }
             HttpResponse<String> r = get(path);
             assertThat(r.statusCode()).as(path).isEqualTo(200);
             for (String secret : forbidden) {
@@ -311,6 +346,40 @@ class ConsoleApiIT {
             }
             assertThat(r.body()).as(path).doesNotContain("deviceToken");
         }
+
+        // the SSE stream: read about a second of it while a push generates events
+        StringBuilder sse = new StringBuilder();
+        var req = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/console/api/stream"))
+                .header("Accept", "text/event-stream").build();
+        var resp = http.send(req, HttpResponse.BodyHandlers.ofInputStream());
+        Thread reader = Thread.ofVirtual().start(() -> {
+            try (var in = resp.body()) {
+                byte[] buf = new byte[4096];
+                int n;
+                while ((n = in.read(buf)) > 0) {
+                    sse.append(new String(buf, 0, n, StandardCharsets.UTF_8));
+                }
+            } catch (IOException ignored) {
+                // closed below
+            }
+        });
+        push("crawl-user", "{\"" + dev + "\":\"deliver:100ms\"}");
+        await().atMost(java.time.Duration.ofSeconds(5)).until(() -> sse.toString().contains("\"timeline\""));
+        Thread.sleep(1000);
+        resp.body().close();
+        reader.join(2000);
+        String bytes = sse.toString();
+        for (String secret : forbidden) {
+            assertThat(bytes).as("stream").doesNotContain(secret);
+        }
+    }
+
+    static String concrete(String pattern, String tid) {
+        String p = pattern.replace("{id}", tid);
+        return p.contains("?") ? p : p
+                + (p.equals("/console/api/notifications") || p.equals("/console/api/inbox")
+                        || p.equals("/console/api/inbox/in-flight") ? "?appId=shop" : "")
+                + (p.equals("/console/api/payload-preview") ? "?trackingId=" + tid : "");
     }
 
     @Test

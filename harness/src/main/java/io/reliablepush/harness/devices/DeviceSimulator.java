@@ -226,6 +226,26 @@ public class DeviceSimulator implements PushReceiver, AutoCloseable {
         refreshIfNearExpiry(state(deviceId));
     }
 
+    /**
+     * Refreshes the token now, whatever its remaining validity (the console's "Refresh token"); a 401 re-registers
+     * the device. An offline device is not touched.
+     *
+     * @return the HTTP status of the refresh call (200 = new token), 0 when the device is offline or on timeout
+     */
+    public int forceRefresh(UUID deviceId) {
+        DeviceState s = state(deviceId);
+        if (!s.online || s.removed) {
+            return 0;
+        }
+        synchronized (s.authLock) {
+            int status = refreshNow(s);
+            if (status == 401 && reRegister(s)) {
+                return 200;
+            }
+            return status;
+        }
+    }
+
     public void setOnline(UUID deviceId, boolean online) {
         DeviceState s = state(deviceId);
         s.online = online;

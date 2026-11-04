@@ -74,6 +74,14 @@ public class ConsoleApiController {
         }
     }
 
+    private static final class ConflictException extends RuntimeException {
+        private static final long serialVersionUID = 1L;
+
+        ConflictException(String message) {
+            super(message);
+        }
+    }
+
     private final HarnessProperties properties;
     private final DeviceSimulator simulator;
     private final FakeSender sender;
@@ -131,8 +139,13 @@ public class ConsoleApiController {
 
     @PostMapping("/devices/{id}/refresh")
     public Map<String, Object> refresh(@PathVariable String id) {
-        UUID deviceId = device(id).deviceId();
-        simulator.refreshIfNearExpiry(deviceId);
+        SimulatedDevice d = device(id);
+        if (!d.online()) {
+            throw new ConflictException("device is offline");
+        }
+        if (simulator.forceRefresh(d.deviceId()) != 200) {
+            throw new IllegalStateException("refresh failed");
+        }
         return deviceJson(device(id));
     }
 
@@ -270,6 +283,11 @@ public class ConsoleApiController {
     @ExceptionHandler(IllegalStateException.class)
     ResponseEntity<Object> backendUnavailable(IllegalStateException e) {
         return backendProblem(-1);
+    }
+
+    @ExceptionHandler(ConflictException.class)
+    ResponseEntity<Object> conflict(ConflictException e) {
+        return problem(HttpStatus.CONFLICT, "Conflict", e.getMessage(), null);
     }
 
     @ExceptionHandler(NotFoundException.class)

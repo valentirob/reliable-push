@@ -6,8 +6,6 @@ export function mount(root, ctx) {
   const body = el('tbody');
   const detail = el('div', { class: 'card' }, el('p', { class: 'muted', text: 'Select a notification.' }));
   const rows = new Map(); // trackingId -> {n, tr, cells}
-  const live = new Map(); // trackingId -> [{entry, seq}] arrival-ordered entries from the stream
-  let seq = 0;
   let selected = null;
   const cfg = () => ctx.apps.find((a) => a.appId === app.value) || { windowMinutes: 20, timeScaleSeconds: 60 };
 
@@ -83,11 +81,9 @@ export function mount(root, ctx) {
   const onEvent = (ev) => {
     const m = ev.detail;
     if (!m || !m.trackingId) return;
-    if (m.type === 'timeline') {
-      const arr = live.get(m.trackingId) || [];
-      arr.push({ entry: m.entry, seq: seq++ });
-      live.set(m.trackingId, arr);
-    }
+    schedule();
+  };
+  const schedule = () => {
     // The stream is not globally ordered across threads: re-read the server-side (time-ordered) view, debounced.
     clearTimeout(refetch);
     refetch = setTimeout(async () => {
@@ -96,6 +92,7 @@ export function mount(root, ctx) {
     }, 250);
   };
   ctx.bus.addEventListener('event', onEvent);
+  ctx.bus.addEventListener('resync', schedule);
   const timer = setInterval(() => {
     const now = Date.now();
     rows.forEach((r) => { tickCell(r.cells.due, now); tickCell(r.cells.end, now); });
@@ -106,5 +103,5 @@ export function mount(root, ctx) {
       el('thead', {}, el('tr', {}, ['Tracking id', 'User', 'State', 'Policy', 'Due in', 'Window ends in', ''].map((t) => el('th', { text: t })))), body)),
     detail);
   load();
-  return { unmount() { clearInterval(timer); clearTimeout(refetch); ctx.bus.removeEventListener('event', onEvent); } };
+  return { unmount() { clearInterval(timer); clearTimeout(refetch); ctx.bus.removeEventListener('event', onEvent); ctx.bus.removeEventListener('resync', schedule); } };
 }
