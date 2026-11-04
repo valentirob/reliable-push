@@ -66,14 +66,37 @@ public class FallbackReceiverController {
         int attempt = body.get("attempt") instanceof Number n ? n.intValue() : 0;
         String reason = body.get("reason") instanceof String s ? s : null;
 
-        int status = valid ? answer(appId) : HttpStatus.UNAUTHORIZED.value();
-        inbox.record(new ReceivedWebhook(appId, trackingId, idempotencyKey, attempt, reason, valid, now, status, body));
+        UUID callId = UUID.randomUUID();
+        inbox.begin(new ReceivedWebhook(appId, trackingId, idempotencyKey, attempt, reason, valid, now, 0, body,
+                callId, null));
+        int status = HttpStatus.SERVICE_UNAVAILABLE.value();
+        boolean interrupted = false;
+        try {
+            if (!valid) {
+                status = HttpStatus.UNAUTHORIZED.value();
+            } else {
+                try {
+                    status = answer(appId);
+                } catch (InterruptedException e) {
+                    interrupted = true;
+                }
+            }
+        } catch (RuntimeException e) {
+            // status stays 503
+        } finally {
+            // Clear the flag so recording and listeners do not run interrupted; restore it afterwards.
+            interrupted |= Thread.interrupted();
+            inbox.complete(callId, status, clock.instant());
+            if (interrupted) {
+                Thread.currentThread().interrupt();
+            }
+        }
         LOG.info("fallback webhook received appId={} trackingId={} attempt={} signatureValid={} respondedStatus={}",
                 appId, trackingId, attempt, valid, status);
         return ResponseEntity.status(status).build();
     }
 
-    private int answer(String appId) {
+    private int answer(String appId) throws InterruptedException {
         WebhookInbox.Mode mode = inbox.mode(appId);
         return switch (mode.mode()) {
             case OK -> 200;
@@ -81,13 +104,8 @@ public class FallbackReceiverController {
             case FAIL_400 -> 400;
             case HANG -> {
                 Duration hang = mode.hang().compareTo(MAX_HANG) > 0 ? MAX_HANG : mode.hang();
-                try {
-                    Thread.sleep(hang);
-                    yield 200;
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    yield 503;
-                }
+                Thread.sleep(hang);
+                yield 200;
             }
         };
     }

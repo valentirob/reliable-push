@@ -1,7 +1,8 @@
 package io.reliablepush.harness.receiver;
 
 import java.time.Duration;
-import java.util.ArrayDeque;
+import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -25,9 +26,10 @@ public class WebhookInbox {
     }
 
     private final Object lock = new Object();
-    private final ArrayDeque<ReceivedWebhook> entries = new ArrayDeque<>();
+    private final LinkedHashMap<UUID, ReceivedWebhook> entries = new LinkedHashMap<>();
     private final Map<String, Mode> modes = new ConcurrentHashMap<>();
     private final List<Consumer<ReceivedWebhook>> listeners = new CopyOnWriteArrayList<>();
+    private final List<Consumer<ReceivedWebhook>> startListeners = new CopyOnWriteArrayList<>();
 
     public void setMode(String appId, ReceiverMode mode, Duration hang) {
         modes.put(appId, new Mode(mode, hang == null ? Duration.ZERO : hang));
@@ -39,13 +41,26 @@ public class WebhookInbox {
 
     public List<ReceivedWebhook> received(String appId) {
         synchronized (lock) {
-            return entries.stream().filter(e -> e.appId().equals(appId)).toList();
+            return entries.values().stream().filter(e -> e.appId().equals(appId)).toList();
         }
     }
 
     public List<ReceivedWebhook> forTracking(UUID id) {
         synchronized (lock) {
-            return entries.stream().filter(e -> id.equals(e.trackingId())).toList();
+            return entries.values().stream().filter(e -> id.equals(e.trackingId())).toList();
+        }
+    }
+
+    /** Number of calls of this app that arrived but have not been answered yet. */
+    public int inFlight(String appId) {
+        synchronized (lock) {
+            return (int) entries.values().stream().filter(e -> e.isPending() && e.appId().equals(appId)).count();
+        }
+    }
+
+    public List<ReceivedWebhook> inFlight() {
+        synchronized (lock) {
+            return entries.values().stream().filter(ReceivedWebhook::isPending).toList();
         }
     }
 
@@ -61,15 +76,45 @@ public class WebhookInbox {
         listeners.add(listener);
     }
 
-    /** Records the call, then notifies listeners synchronously; a failing listener is logged and ignored. */
-    void record(ReceivedWebhook webhook) {
+    /** Listener for calls that have arrived and are still pending (status 0). */
+    public void onStarted(Consumer<ReceivedWebhook> listener) {
+        startListeners.add(listener);
+    }
+
+    /** Appends a pending call (status 0) at arrival, then notifies the onStarted listeners. */
+    void begin(ReceivedWebhook pending) {
         synchronized (lock) {
-            entries.addLast(webhook);
+            entries.put(pending.callId(), pending);
             while (entries.size() > CAPACITY) {
-                entries.removeFirst();
+                var eldest = entries.entrySet().iterator();
+                eldest.next();
+                eldest.remove();
             }
         }
-        for (Consumer<ReceivedWebhook> listener : listeners) {
+        notify(startListeners, pending);
+    }
+
+    /**
+     * Sets the final status of a pending call and notifies the onReceived listeners. No-op (no event) when the entry
+     * was trimmed or cleared in the meantime.
+     */
+    void complete(UUID callId, int status, Instant respondedAt) {
+        ReceivedWebhook done;
+        synchronized (lock) {
+            ReceivedWebhook pending = entries.get(callId);
+            if (pending == null) {
+                return;
+            }
+            done = new ReceivedWebhook(pending.appId(), pending.trackingId(), pending.idempotencyKey(),
+                    pending.attempt(), pending.reason(), pending.signatureValid(), pending.receivedAt(), status,
+                    pending.body(), callId, respondedAt);
+            entries.put(callId, done);
+        }
+        notify(listeners, done);
+    }
+
+    private static void notify(List<Consumer<ReceivedWebhook>> targets, ReceivedWebhook webhook) {
+        for (Consumer<ReceivedWebhook> listener : targets) {
             try {
                 listener.accept(webhook);
             } catch (RuntimeException e) {

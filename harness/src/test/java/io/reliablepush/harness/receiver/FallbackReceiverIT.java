@@ -125,6 +125,54 @@ class FallbackReceiverIT {
     }
 
     @Test
+    void hangModeIsVisibleAsInFlightAndClearDuringHangLeavesNoStaleEntry() throws Exception {
+        inbox.setMode("shop", ReceiverMode.HANG, Duration.ofSeconds(1));
+        java.util.concurrent.CompletableFuture<HttpResponse<String>> call =
+                java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+                    try {
+                        return signedPost(UUID.randomUUID(), 1);
+                    } catch (Exception e) {
+                        throw new IllegalStateException(e);
+                    }
+                });
+        long deadline = System.nanoTime() + Duration.ofSeconds(5).toNanos();
+        while (inbox.inFlight("shop") == 0 && System.nanoTime() < deadline) {
+            Thread.sleep(10);
+        }
+        assertThat(inbox.inFlight("shop")).isEqualTo(1);
+        assertThat(inbox.received("shop").getFirst().isPending()).isTrue();
+
+        inbox.clear();
+        assertThat(call.get(5, java.util.concurrent.TimeUnit.SECONDS).statusCode()).isEqualTo(200);
+
+        assertThat(inbox.inFlight("shop")).isZero();
+        assertThat(inbox.received("shop")).isEmpty();
+    }
+
+    @Test
+    void hangModeInFlightThenCompleted() throws Exception {
+        inbox.setMode("shop", ReceiverMode.HANG, Duration.ofSeconds(1));
+        java.util.concurrent.CompletableFuture<HttpResponse<String>> call =
+                java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+                    try {
+                        return signedPost(UUID.randomUUID(), 1);
+                    } catch (Exception e) {
+                        throw new IllegalStateException(e);
+                    }
+                });
+        long deadline = System.nanoTime() + Duration.ofSeconds(5).toNanos();
+        while (inbox.inFlight("shop") == 0 && System.nanoTime() < deadline) {
+            Thread.sleep(10);
+        }
+        assertThat(inbox.inFlight("shop")).isEqualTo(1);
+
+        call.get(5, java.util.concurrent.TimeUnit.SECONDS);
+
+        assertThat(inbox.inFlight("shop")).isZero();
+        assertThat(inbox.received("shop").getFirst().respondedStatus()).isEqualTo(200);
+    }
+
+    @Test
     void invalidSignature401AndRecorded() throws Exception {
         UUID id = UUID.randomUUID();
         String body = body(id, 1);
