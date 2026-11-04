@@ -46,11 +46,11 @@
 **Interfaces:**
 - Produces: `final class Json` (package `io.reliablepush.client.internal`, not exported in docs) — `static String write(Object value)` for `null`, `String`, `Number`, `Boolean`, `Map<String,?>`, `List<?>` (nested); `static Object read(String json)` returning `null|String|Long|Double|Boolean|LinkedHashMap<String,Object>|ArrayList<Object>`; throws `IllegalArgumentException("invalid JSON at <offset>")` on malformed input; max depth 64.
 
-- [ ] **Step 1: Failing tests** — `writesNestedStructures()` (`Map.of("a", List.of(1, true, null), "b", "x\"\n\u0001")` → `{"a":[1,true,null],"b":"x\"\n\u0001"}` with `\u0001` escaped as `\u0001`; key order = insertion order for `LinkedHashMap`); `readsWhatItWrites()` (round-trip of a nested map incl. unicode `é` and surrogate pair 😀); `readsNumbers()` (`1` → `Long 1`, `1.5` → `Double`, `-0`, `1e3` → `Double 1000.0`); `rejectsMalformed()` (`{"a":}`, `[1,]`, `"\x"`, trailing garbage `{} x`, depth 65) each → `IllegalArgumentException` with "invalid JSON"; `rejectsUnsupportedTypes()` (`write(new Object())` → IAE).
-- [ ] **Step 2: Run** `cd client-java && ./mvnw -B test` → FAIL (no class).
-- [ ] **Step 3: Implement** (recursive-descent reader, `StringBuilder` writer; no reflection). pom: `groupId io.reliablepush`, `artifactId reliable-push-client`, version `0.1.0-SNAPSHOT`, `maven.compiler.release 17`, test deps JUnit 5 + AssertJ only, surefire + failsafe, JaCoCo line gate 0.80; **no** `<dependencies>` in compile/runtime scope (enforce with maven-enforcer `banDependencies`… or a test asserting `mvn dependency:list -DincludeScope=runtime` is empty — use maven-enforcer-plugin rule `bannedDependencies` excluding `*:*` for scopes compile/runtime).
-- [ ] **Step 4: Run** `./mvnw -B verify` → PASS.
-- [ ] **Step 5: Commit** `feat(client): zero-dependency json codec`
+- [x] **Step 1: Failing tests** — `writesNestedStructures()` (`Map.of("a", List.of(1, true, null), "b", "x\"\n\u0001")` → `{"a":[1,true,null],"b":"x\"\n\u0001"}` with `\u0001` escaped as `\u0001`; key order = insertion order for `LinkedHashMap`); `readsWhatItWrites()` (round-trip of a nested map incl. unicode `é` and surrogate pair 😀); `readsNumbers()` (`1` → `Long 1`, `1.5` → `Double`, `-0`, `1e3` → `Double 1000.0`); `rejectsMalformed()` (`{"a":}`, `[1,]`, `"\x"`, trailing garbage `{} x`, depth 65) each → `IllegalArgumentException` with "invalid JSON"; `rejectsUnsupportedTypes()` (`write(new Object())` → IAE).
+- [x] **Step 2: Run** `cd client-java && ./mvnw -B test` → FAIL (no class).
+- [x] **Step 3: Implement** (recursive-descent reader, `StringBuilder` writer; no reflection). pom: `groupId io.reliablepush`, `artifactId reliable-push-client`, version `0.1.0-SNAPSHOT`, `maven.compiler.release 17`, test deps JUnit 5 + AssertJ only, surefire + failsafe, JaCoCo line gate 0.80; **no** `<dependencies>` in compile/runtime scope (enforce with maven-enforcer `banDependencies`… or a test asserting `mvn dependency:list -DincludeScope=runtime` is empty — use maven-enforcer-plugin rule `bannedDependencies` excluding `*:*` for scopes compile/runtime).
+- [x] **Step 4: Run** `./mvnw -B verify` → PASS.
+- [x] **Step 5: Commit** `feat(client): zero-dependency json codec`
 
 ### Task 2: client-java — SenderClient
 
