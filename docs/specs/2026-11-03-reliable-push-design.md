@@ -374,8 +374,8 @@ into the backend image, never deployed with the Helm chart, so it adds no
 production attack surface.
 
 **Start:** `./scripts/demo.sh [--realtime]` (Windows `scripts\demo.ps1`) starts
-the harness compose stack with the `console` profile and opens
-`http://localhost:8090`. Default is the fast clock (1 "minute" = 1 s,
+the harness compose stack (Spring profile `demo` through `demo.override.yml`) and opens
+`http://127.0.0.1:8090/`. Default is the fast clock (1 "minute" = 1 s,
 §10.1); `--realtime` uses real minutes for live demos with real timing. Ports
 bind to `127.0.0.1` only. A permanent banner reads "Test harness — simulated
 data, not for production".

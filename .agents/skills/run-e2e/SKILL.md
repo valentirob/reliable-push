@@ -10,13 +10,14 @@ Spec: `docs/specs/2026-11-03-reliable-push-design.md` §10.1.
 
 ## Prerequisites
 - Docker with the compose v2 plugin running (Docker Desktop, Colima or Podman); `curl`; ports 8080 and 8090 free
-  on 127.0.0.1. No JDK or Maven needed on the host: the images build inside Docker.
+  on 127.0.0.1. The images build inside Docker, but `console-smoke` (and so the full 17-entry run)
+  runs through the host `./mvnw`: it needs JDK 21 and network access (Maven artifacts, Playwright's Chromium).
 - On a Mac with Colima: `export DOCKER_HOST=unix://$HOME/.colima/default/docker.sock`.
 - Mobile scenarios (cycles 2–3): Android emulator / Xcode iOS simulator booted.
 - Not in CI: `.github/workflows/harness-ci.yml` builds `client-java` and `harness` only.
 
 ## Run
-1. Full suite: `./scripts/e2e.sh` (Windows, PowerShell 7: `pwsh scripts/e2e.ps1 -Scenario <name> -Keep`, untested on
+1. Full suite: `./scripts/e2e.sh` (Windows, PowerShell 7: `pwsh scripts/e2e.ps1`, optional `-Scenario <name> -Keep`; untested on
    Windows). About 5 minutes including the image build (the crash scenarios alone take about 1.5 minutes).
    One scenario: `./scripts/e2e.sh --scenario <name>`. The 17 entries: `delivered-before-timeout`,
    `read-policy-delivered-only`, `read-policy-read`, `not-delivered-single-fallback`, `late-delivery-after-fallback`,
@@ -31,8 +32,8 @@ Spec: `docs/specs/2026-11-03-reliable-push-design.md` §10.1.
    (`[{scenario, status, durationMs, failure: {expected, actual, hint} | null, logs}]`); JUnit XML in
    `harness/build/e2e/junit/e2e.xml`.
    Logs are collected and the stack is torn down even when scenarios fail (unless `--keep`).
-3. Find failures: `grep -B2 -A6 '"FAILED"' harness/build/e2e/summary.json`. Then read `failure.expected`, `failure.actual`, `failure.hint` and the scenario's `logs`, then the matching
-   container logs in `harness/build/e2e/logs/` (`<service>.log` from `docker compose logs`, plus the backend JSON log
+3. Find failures: `grep -B2 -A6 '"FAILED"' harness/build/e2e/summary.json`. Then read `failure.expected`,
+   `failure.actual`, `failure.hint` and the scenario's `logs`, then the matching container logs in `harness/build/e2e/logs/` (`<service>.log` from `docker compose logs`, plus the backend JSON log
    files `backend-api.json`, `backend-worker-a.json`, `backend-worker-b.json`; search by `rp.tracking_id` / `trace.id`).
    Raw harness answers are in `harness/build/e2e/responses/`.
 

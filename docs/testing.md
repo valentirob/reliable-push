@@ -69,7 +69,8 @@ runs the stack.
 
 `./scripts/e2e.sh [--scenario <name>] [--keep]` (Windows, PowerShell 7: `pwsh scripts/e2e.ps1 -Scenario <name> -Keep`; the
 PowerShell scripts have not been run on Windows). Needs Docker with the compose plugin, `curl`, and ports 8080 and 8090 free
-on 127.0.0.1; no JDK on the host. With Colima: `export DOCKER_HOST=unix://$HOME/.colima/default/docker.sock`.
+on 127.0.0.1. The images build inside Docker, but `console-smoke` (so the full 17-entry run) calls the host `./mvnw`: it needs
+JDK 21 and network access (Maven artifacts, Playwright's Chromium). With Colima: `export DOCKER_HOST=unix://$HOME/.colima/default/docker.sock`.
 
 - **Stack:** `harness/compose/docker-compose.yml`: PostgreSQL, one API, two workers (`worker-a`, `worker-b`) and the
   harness. A one-shot container generates new secrets for every run into `harness/build/e2e/secrets.env` (git-ignored).
