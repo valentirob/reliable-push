@@ -79,4 +79,4 @@ running the Maven commands. Details: `docs/testing.md`.
 | Backend one integration test | `cd backend && ./mvnw -B verify -Dit.test=NotificationApiIT -Dtest=NoSuchTest -Dsurefire.failIfNoSpecifiedTests=false -Djacoco.skip=true` |
 | Backend image build only | `docker build -t reliable-push-backend:dev backend` |
 | Demo / manual-test web console (local only) | `./scripts/demo.sh` → http://localhost:8090 *(arrives with plan 1B)* |
-| E2E (local only, manual or agent) | `./scripts/e2e.sh` — details in `.agents/skills/run-e2e/SKILL.md` *(arrives with plan 1B)* |
+| E2E (local only, manual or agent) | `./scripts/e2e.sh [--scenario <name>] [--keep]` (Windows: `pwsh scripts/e2e.ps1`) — details in `.agents/skills/run-e2e/SKILL.md` |

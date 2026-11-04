@@ -15,7 +15,7 @@ Spec: `docs/specs/2026-11-03-reliable-push-design.md` §10.1.
 - Mobile scenarios (cycles 2–3): Android emulator / Xcode iOS simulator booted.
 
 ## Run
-1. Full suite: `./scripts/e2e.sh` (Windows, PowerShell 7: `pwsh scripts/e2e.ps1`). About 5 minutes after the first
+1. Full suite: `./scripts/e2e.sh` (Windows, PowerShell 7: `pwsh scripts/e2e.ps1`). About 3.5 minutes after the first
    image build (the crash scenarios alone take about 1.5 minutes).
    One scenario: `./scripts/e2e.sh --scenario <name>` (names: `curl -s http://127.0.0.1:8090/console/api/scenarios`
    on a kept stack, or the scenario classes in `harness/src/main/java/io/reliablepush/harness/scenarios/catalog/`).
