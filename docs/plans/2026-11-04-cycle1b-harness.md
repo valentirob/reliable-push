@@ -169,9 +169,9 @@
 **Interfaces:**
 - Consumes: `HarnessProperties.backendLogDir()` (shared volume; Task 3 writes one file per backend container, named `backend-*.json`).
 - Produces: `BackendLogTail` — polls every `backend-*.json` file in the directory every 500 ms from each file's last offset (new files picked up), parses JSON lines (malformed lines skipped and counted), keeps the last 20,000 entries as `Map<String,Object>`; `List<Map<String,Object>> query(LogQuery q)` with `record LogQuery(String traceId, String trackingId, String eventAction, int limit /*≤ 500*/)`; `List<String> findSecrets(Collection<String> secrets)` → secrets (masked to first 4 chars) found in any raw line; handles file rotation/truncation (offset > size → restart at 0) and a missing file (empty result, no exception).
-- [ ] **Step 1: Failing tests** — `readsAppendedLines()`, `mergesSeveralFilesInTheDirectory()`, `skipsMalformedLines()`, `filtersByTrackingIdAndAction()`, `survivesTruncation()`, `missingFileIsEmpty()`, `findsSecretsMasked()`.
-- [ ] **Step 2: Run** → FAIL. **Step 3: Implement.** **Step 4: Run** → PASS.
-- [ ] **Step 5: Commit** `feat(harness): backend log tail`
+- [x] **Step 1: Failing tests** — `readsAppendedLines()`, `mergesSeveralFilesInTheDirectory()`, `skipsMalformedLines()`, `filtersByTrackingIdAndAction()`, `survivesTruncation()`, `missingFileIsEmpty()`, `findsSecretsMasked()`.
+- [x] **Step 2: Run** → FAIL. **Step 3: Implement.** **Step 4: Run** → PASS.
+- [x] **Step 5: Commit** `feat(harness): backend log tail`
 
 ### Task 10: Scenario runner, scenarios and reports
 
