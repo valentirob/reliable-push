@@ -105,6 +105,17 @@ class FallbackReceiverIT {
     }
 
     @Test
+    void failNextAnswers500ThenFollowsTheMode() throws Exception {
+        inbox.failNext("shop", 2);
+        UUID id = UUID.randomUUID();
+
+        assertThat(signedPost(id, 1).statusCode()).isEqualTo(500);
+        assertThat(signedPost(id, 2).statusCode()).isEqualTo(500);
+        assertThat(signedPost(id, 3).statusCode()).isEqualTo(200);
+        assertThat(inbox.forTracking(id)).extracting(ReceivedWebhook::respondedStatus).containsExactly(500, 500, 200);
+    }
+
+    @Test
     void fail400Mode() throws Exception {
         inbox.setMode("shop", ReceiverMode.FAIL_400, Duration.ZERO);
 

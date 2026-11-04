@@ -97,6 +97,9 @@ public class FallbackReceiverController {
     }
 
     private int answer(String appId) throws InterruptedException {
+        if (inbox.takeForcedFailure(appId)) {
+            return HttpStatus.INTERNAL_SERVER_ERROR.value();
+        }
         WebhookInbox.Mode mode = inbox.mode(appId);
         return switch (mode.mode()) {
             case OK -> 200;

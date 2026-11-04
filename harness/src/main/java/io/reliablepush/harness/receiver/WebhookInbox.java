@@ -28,11 +28,40 @@ public class WebhookInbox {
     private final Object lock = new Object();
     private final LinkedHashMap<UUID, ReceivedWebhook> entries = new LinkedHashMap<>();
     private final Map<String, Mode> modes = new ConcurrentHashMap<>();
+    /** Per app: how many of the next correctly signed calls answer 500 before the mode applies again. */
+    private final Map<String, Integer> forcedFailures = new ConcurrentHashMap<>();
     private final List<Consumer<ReceivedWebhook>> listeners = new CopyOnWriteArrayList<>();
     private final List<Consumer<ReceivedWebhook>> startListeners = new CopyOnWriteArrayList<>();
 
+    /** Sets the answer mode of an app and cancels any pending {@link #failNext} countdown of that app. */
     public void setMode(String appId, ReceiverMode mode, Duration hang) {
+        forcedFailures.remove(appId);
         modes.put(appId, new Mode(mode, hang == null ? Duration.ZERO : hang));
+    }
+
+    /**
+     * The next {@code calls} correctly signed calls of this app answer 500 (a retryable failure); afterwards the
+     * app's mode applies again. Replaces an earlier countdown; {@code 0} cancels it.
+     */
+    public void failNext(String appId, int calls) {
+        if (calls < 0) {
+            throw new IllegalArgumentException("calls must not be negative");
+        }
+        if (calls == 0) {
+            forcedFailures.remove(appId);
+        } else {
+            forcedFailures.put(appId, calls);
+        }
+    }
+
+    /** Consumes one forced failure of the app; true when this call must answer 500. */
+    boolean takeForcedFailure(String appId) {
+        boolean[] taken = {false};
+        forcedFailures.computeIfPresent(appId, (k, left) -> {
+            taken[0] = true;
+            return left > 1 ? left - 1 : null;
+        });
+        return taken[0];
     }
 
     public Mode mode(String appId) {
@@ -64,12 +93,13 @@ public class WebhookInbox {
         }
     }
 
-    /** Drops all entries and resets every app to {@link ReceiverMode#OK}. */
+    /** Drops all entries and resets every app to {@link ReceiverMode#OK} (no forced failures). */
     public void clear() {
         synchronized (lock) {
             entries.clear();
         }
         modes.clear();
+        forcedFailures.clear();
     }
 
     public void onReceived(Consumer<ReceivedWebhook> listener) {

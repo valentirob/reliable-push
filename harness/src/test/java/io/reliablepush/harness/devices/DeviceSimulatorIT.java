@@ -341,6 +341,28 @@ class DeviceSimulatorIT {
         simulator.receivePush(UUID.randomUUID(), "shop", "u1", Map.of(d.deviceId(), DeviceBehaviour.parse("deliver:0s")));
         await().atMost(Duration.ofSeconds(3)).until(() -> reported.size() == 1);
         assertThat(reported.get(0).outcome()).isEqualTo("RATE_LIMITED");
+        assertThat(reported.get(0).retryAfterSeconds()).isEqualTo(7);
+    }
+
+    @Test
+    void acceptedEventHasNoRetryAfter() {
+        SimulatedDevice d = simulator.register("shop", "u1", Platform.IOS, null);
+        simulator.receivePush(UUID.randomUUID(), "shop", "u1", Map.of(d.deviceId(), DeviceBehaviour.parse("deliver:0s")));
+        await().atMost(Duration.ofSeconds(3)).until(() -> reported.size() == 1);
+        assertThat(reported.get(0).retryAfterSeconds()).isNull();
+    }
+
+    @Test
+    void hygieneScanSeesEveryIssuedTokenIncludingReplacedOnes() {
+        validity = Duration.ofSeconds(10);
+        SimulatedDevice d = simulator.register("shop", "u1", Platform.IOS, null);
+        String first = lastIssuedToken;
+        clock.now.set(T0.plusSeconds(9));
+        simulator.refreshIfNearExpiry(d.deviceId());
+        String second = lastIssuedToken;
+
+        assertThat(second).isNotEqualTo(first);
+        assertThat(simulator.issuedTokensForLogHygieneScan()).contains(first, second);
     }
 
     @Test

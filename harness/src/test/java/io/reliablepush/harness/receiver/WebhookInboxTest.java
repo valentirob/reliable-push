@@ -88,6 +88,32 @@ class WebhookInboxTest {
     }
 
     @Test
+    void failNextCountsDownPerAppAndIsResetBySetModeAndClear() {
+        WebhookInbox inbox = new WebhookInbox();
+        inbox.failNext("shop", 2);
+
+        assertThat(inbox.takeForcedFailure("news")).isFalse();
+        assertThat(inbox.takeForcedFailure("shop")).isTrue();
+        assertThat(inbox.takeForcedFailure("shop")).isTrue();
+        assertThat(inbox.takeForcedFailure("shop")).isFalse();
+
+        inbox.failNext("shop", 5);
+        inbox.setMode("shop", ReceiverMode.OK, Duration.ZERO);
+        assertThat(inbox.takeForcedFailure("shop")).isFalse();
+
+        inbox.failNext("shop", 5);
+        inbox.clear();
+        assertThat(inbox.takeForcedFailure("shop")).isFalse();
+    }
+
+    @Test
+    void failNextRejectsNegativeCount() {
+        WebhookInbox inbox = new WebhookInbox();
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> inbox.failNext("shop", -1))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
     void forTrackingAndClearResetsModes() {
         WebhookInbox inbox = new WebhookInbox();
         UUID id = UUID.randomUUID();

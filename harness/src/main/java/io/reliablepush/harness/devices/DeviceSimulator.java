@@ -37,8 +37,20 @@ public class DeviceSimulator implements PushReceiver, AutoCloseable {
     static final DeviceBehaviour DEFAULT_BEHAVIOUR = new DeviceBehaviour.DeliverAfter(Duration.ofSeconds(1));
     static final Duration HTTP_TIMEOUT = Duration.ofSeconds(5);
 
-    /** What a device reported. {@code outcome}: backend per-item result, or RATE_LIMITED / UNAUTHORIZED / UNAVAILABLE. */
-    public record DeviceEventRecord(UUID trackingId, UUID deviceId, String type, Instant sentAt, String outcome) {}
+    /**
+     * What a device reported. {@code outcome}: backend per-item result, or RATE_LIMITED / UNAUTHORIZED / UNAVAILABLE.
+     * {@code retryAfterSeconds}: the backend's {@code Retry-After} when it answered 429/503 with one, else null.
+     */
+    public record DeviceEventRecord(UUID trackingId, UUID deviceId, String type, Instant sentAt, String outcome,
+                                    Integer retryAfterSeconds) {
+
+        public DeviceEventRecord(UUID trackingId, UUID deviceId, String type, Instant sentAt, String outcome) {
+            this(trackingId, deviceId, type, sentAt, outcome, null);
+        }
+    }
+
+    /** Bound of the token history kept for the log-hygiene scan. */
+    static final int TOKEN_HISTORY = 10_000;
 
     private record Pending(UUID trackingId, String type, Instant occurredAt) {}
 
@@ -91,6 +103,8 @@ public class DeviceSimulator implements PushReceiver, AutoCloseable {
     private final Clock clock;
     private final DeviceApiClient api;
     private final Map<UUID, DeviceState> devices = new ConcurrentHashMap<>();
+    /** Every token issued to any device (last {@value #TOKEN_HISTORY}); only for {@link #issuedTokensForLogHygieneScan}. */
+    private final ArrayDeque<String> issuedTokens = new ArrayDeque<>();
     private final List<Consumer<DeviceEventRecord>> listeners = new CopyOnWriteArrayList<>();
     /** Only fires timers; all blocking HTTP runs on {@link #io}. */
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(
@@ -122,6 +136,7 @@ public class DeviceSimulator implements PushReceiver, AutoCloseable {
         DeviceApiClient.Registered r = result.value();
         DeviceState state = new DeviceState(r.deviceId(), appId, userId, platform, mode);
         state.setToken(r.token(), clock.instant(), r.expiresAt());
+        remember(r.token());
         devices.put(state.id, state);
         return state.view();
     }
@@ -150,6 +165,16 @@ public class DeviceSimulator implements PushReceiver, AutoCloseable {
         var r = api.revoke(s.token);
         if (!r.ok() && r.status() != 401) {
             throw new IllegalStateException("device revocation failed: HTTP status " + r.status());
+        }
+    }
+
+    /**
+     * INTERNAL — for the log-hygiene scan only ({@code scenarios} package): every device token issued during this
+     * harness's lifetime (bounded), including replaced ones. Never return it through any endpoint and never log it.
+     */
+    public List<String> issuedTokensForLogHygieneScan() {
+        synchronized (issuedTokens) {
+            return List.copyOf(issuedTokens);
         }
     }
 
@@ -287,20 +312,28 @@ public class DeviceSimulator implements PushReceiver, AutoCloseable {
             return;
         }
         String outcome;
+        Integer retryAfter = null;
         try {
             var result = withAuth(s, token -> api.postEvents(token, List.of(
                     new DeviceApiClient.EventItem(p.trackingId(), p.type(), p.occurredAt()))));
             outcome = switch (result.status()) {
                 case 200 -> result.value().outcomes().isEmpty() ? "UNKNOWN" : result.value().outcomes().get(0);
-                case 429 -> "RATE_LIMITED";
+                case 429 -> {
+                    retryAfter = result.retryAfterSeconds();
+                    yield "RATE_LIMITED";
+                }
                 case 401 -> "UNAUTHORIZED";
-                case 503, 0 -> "UNAVAILABLE";
+                case 503 -> {
+                    retryAfter = result.retryAfterSeconds();
+                    yield "UNAVAILABLE";
+                }
+                case 0 -> "UNAVAILABLE";
                 default -> "ERROR_" + result.status();
             };
         } catch (RuntimeException e) {
             outcome = "UNAVAILABLE";
         }
-        DeviceEventRecord record = new DeviceEventRecord(p.trackingId(), s.id, p.type(), sentAt, outcome);
+        DeviceEventRecord record = new DeviceEventRecord(p.trackingId(), s.id, p.type(), sentAt, outcome, retryAfter);
         for (Consumer<DeviceEventRecord> l : listeners) {
             try {
                 l.accept(record);
@@ -335,6 +368,15 @@ public class DeviceSimulator implements PushReceiver, AutoCloseable {
         return result;
     }
 
+    private void remember(String token) {
+        synchronized (issuedTokens) {
+            issuedTokens.addLast(token);
+            while (issuedTokens.size() > TOKEN_HISTORY) {
+                issuedTokens.removeFirst();
+            }
+        }
+    }
+
     private void refreshIfNearExpiry(DeviceState s) {
         if (!s.online || s.removed) {
             return;
@@ -357,6 +399,7 @@ public class DeviceSimulator implements PushReceiver, AutoCloseable {
             var r = api.refresh(s.token);
             if (r.ok()) {
                 s.setToken(r.value().token(), clock.instant(), r.value().expiresAt());
+                remember(r.value().token());
             }
             return r.status();
         }
@@ -376,6 +419,7 @@ public class DeviceSimulator implements PushReceiver, AutoCloseable {
                 return false;
             }
             s.setToken(r.value().token(), clock.instant(), r.value().expiresAt());
+            remember(r.value().token());
             return true;
         }
     }
