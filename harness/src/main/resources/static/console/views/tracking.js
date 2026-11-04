@@ -39,14 +39,20 @@ export function mount(root, ctx) {
     tickCell(r.cells.end, Date.now());
   }
 
+  // only the answer to the latest request renders (an app switch or a newer refetch may overtake an earlier one)
+  let loadSeq = 0;
+  let detailSeq = 0;
   async function load() {
-    err.show(null);
+    const seq = ++loadSeq;
+    const appId = app.value;
     try {
-      const list = await api('/notifications' + query({ appId: app.value }));
+      const list = await api('/notifications' + query({ appId }));
+      if (seq !== loadSeq) return;
+      err.show(null);
       rows.clear();
       body.replaceChildren();
       [...list].reverse().forEach(renderRow);
-    } catch (e) { err.show(e); }
+    } catch (e) { if (seq === loadSeq) err.show(e); }
   }
 
   async function select(id) {
@@ -56,8 +62,11 @@ export function mount(root, ctx) {
   }
   async function renderDetail() {
     if (!selected) return;
+    const seq = ++detailSeq;
+    const id = selected;
     try {
-      const d = await api('/notifications/' + selected);
+      const d = await api('/notifications/' + id);
+      if (seq !== detailSeq || id !== selected) return;
       const items = d.timeline.map((e, i) => ({ at: e.at, kind: e.kind, details: e.details, seq: i }));
       const hooks = d.webhooks.map((w) => w.pending
         ? el('li', {}, fmtTime(w.receivedAt) + ' ', el('span', { class: 'badge inflight', text: 'in flight' }), ' webhook attempt ' + w.attempt)
@@ -65,13 +74,13 @@ export function mount(root, ctx) {
       items.sort((a, b) => new Date(a.at) - new Date(b.at) || a.seq - b.seq);
       const cancelBtn = el('button', { type: 'button', text: 'Cancel notification', onclick: async () => {
         err.show(null);
-        try { await api('/notifications/' + selected + '/cancel', { method: 'POST' }); } catch (e) { err.show(e); }
+        try { await api('/notifications/' + id + '/cancel', { method: 'POST', body: {} }); } catch (e) { err.show(e); }
       } });
       detail.replaceChildren(
-        el('h3', { text: 'Notification ' + selected }),
+        el('h3', { text: 'Notification ' + id }),
         d.notification ? el('p', {}, badge(d.notification.state), ' user ', el('strong', { text: d.notification.userId }), ' ', cancelBtn) : null,
         el('ul', { class: 'timeline' }, items.map((e) => el('li', {}, fmtTime(e.at) + ' ', el('strong', { text: e.kind }), ' ', el('span', { class: 'muted', text: summarize(e.details) }))), hooks));
-    } catch (e) { err.show(e); }
+    } catch (e) { if (seq === detailSeq) err.show(e); }
   }
   function summarize(details) {
     return Object.entries(details || {}).map(([k, v]) => k + '=' + (v && typeof v === 'object' ? JSON.stringify(v) : String(v))).join(' ');
@@ -103,5 +112,5 @@ export function mount(root, ctx) {
       el('thead', {}, el('tr', {}, ['Tracking id', 'User', 'State', 'Policy', 'Due in', 'Window ends in', ''].map((t) => el('th', { text: t })))), body)),
     detail);
   load();
-  return { unmount() { clearInterval(timer); clearTimeout(refetch); ctx.bus.removeEventListener('event', onEvent); ctx.bus.removeEventListener('resync', schedule); } };
+  return { unmount() { loadSeq++; detailSeq++; clearInterval(timer); clearTimeout(refetch); ctx.bus.removeEventListener('event', onEvent); ctx.bus.removeEventListener('resync', schedule); } };
 }

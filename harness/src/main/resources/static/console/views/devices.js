@@ -16,19 +16,24 @@ export function mount(root, ctx) {
     try { await fn(); } catch (e) { err.show(e); }
     await load();
   }
+  // only the answer to the latest list request renders (an app switch may overtake an earlier load)
+  let loadSeq = 0;
   async function load() {
+    const seq = ++loadSeq;
+    const appId = app.value;
     try {
-      const list = await api('/devices' + query({ appId: app.value }));
+      const list = await api('/devices' + query({ appId }));
+      if (seq !== loadSeq) return;
       body.replaceChildren(...list.map((d) => el('tr', {},
         el('td', { text: d.userId }), el('td', { text: d.platform + (d.androidMode ? ' ' + d.androidMode : '') }),
         el('td', {}, el('code', { text: d.deviceId })),
         el('td', { text: d.tokenExpiresAt ? new Date(d.tokenExpiresAt).toLocaleString() : '' }),
         el('td', { text: d.online ? 'online' : 'offline' }),
         el('td', {},
-          el('button', { type: 'button', text: 'Refresh token', onclick: () => act(() => api('/devices/' + d.deviceId + '/refresh', { method: 'POST' })) }), ' ',
+          el('button', { type: 'button', text: 'Refresh token', onclick: () => act(() => api('/devices/' + d.deviceId + '/refresh', { method: 'POST', body: {} })) }), ' ',
           el('button', { type: 'button', text: d.online ? 'Go offline' : 'Go online', onclick: () => act(() => api('/devices/' + d.deviceId + '/online', { method: 'POST', body: { online: !d.online } })) })))));
       if (!list.length) body.replaceChildren(el('tr', {}, el('td', { colspan: '6', class: 'muted', text: 'No simulated devices yet.' })));
-    } catch (e) { err.show(e); }
+    } catch (e) { if (seq === loadSeq) err.show(e); }
   }
   const form = el('form', { class: 'card', onsubmit: (ev) => {
     ev.preventDefault();
@@ -41,4 +46,5 @@ export function mount(root, ctx) {
     el('thead', {}, el('tr', {}, ['User', 'Platform', 'Device id', 'Token expires', 'Status', 'Actions'].map((t) => el('th', { text: t })))), body)),
   el('p', { class: 'muted', text: 'Last loaded ' + fmtTime(new Date().toISOString()) }));
   load();
+  return { unmount() { loadSeq++; } };
 }
