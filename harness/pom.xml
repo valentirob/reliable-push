@@ -153,6 +153,8 @@
                             <excludes>
                                 <!-- bootstrap main() is only exercised by launching the JVM -->
                                 <exclude>io/reliablepush/harness/HarnessApplication.class</exclude>
+                                <!-- scenario catalogue drives the real backend: exercised by scripts/e2e.sh (local only) -->
+                                <exclude>io/reliablepush/harness/scenarios/catalog/**</exclude>
                             </excludes>
                             <rules>
                                 <rule>
