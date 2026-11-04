@@ -143,7 +143,7 @@ function Invoke-External([string] $Name) {
     if ($null -eq $delay) { Die "external scenario $Name has no crash delay in scripts/e2e.ps1 (expected *-inside-window or *-outside-window)" }
     Log "${Name}: stopping worker-b (no second worker may claim the row)"
     Compose stop worker-b *> $null
-    $r = Invoke-Http POST "$HarnessUrl/console/api/scenarios/$Name/prepare" (Join-Path $Out "responses/$Name-prepare.json") $null 120
+    $r = Invoke-Http POST "$HarnessUrl/console/api/scenarios/$Name/prepare" (Join-Path $Out "responses/$Name-prepare.json") '{}' 120
     $tid = $null
     if ($r.Code -eq 200) { $tid = ($r.Body | ConvertFrom-Json).trackingId }
     if (-not $tid) {

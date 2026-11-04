@@ -24,7 +24,8 @@ import org.springframework.web.bind.annotation.RestController;
 /**
  * Scenario REST used by the console and {@code scripts/e2e.sh}: list, run, prepare/verify of external-control
  * scenarios, the last run's reports, and the receiver's in-flight calls (so the script knows when to kill workers).
- * Concurrent runs answer 409 problem+json. No endpoint returns secrets or device tokens.
+ * Concurrent runs answer 409 problem+json. No endpoint returns secrets or device tokens. Every POST carries a JSON
+ * body ({@code {}} when there is nothing to say; see {@code ConsoleRequestGuard}): a missing body answers 400.
  */
 @RestController
 @RequestMapping("/console/api")
@@ -58,15 +59,15 @@ public class ScenarioController {
     }
 
     @PostMapping("/scenarios/run")
-    public Map<String, Object> run(@RequestBody(required = false) RunRequest request) {
-        List<ScenarioResult> results = request == null || request.names() == null || request.names().isEmpty()
+    public Map<String, Object> run(@RequestBody RunRequest request) {
+        List<ScenarioResult> results = request.names() == null || request.names().isEmpty()
                 ? runner.runAll()
                 : runner.run(request.names());
         return Map.of("results", results.stream().map(ScenarioReport::toJson).toList());
     }
 
     @PostMapping("/scenarios/{name}/prepare")
-    public Map<String, Object> prepare(@PathVariable String name) {
+    public Map<String, Object> prepare(@PathVariable String name, @RequestBody Map<String, Object> empty) {
         ScenarioRunner.Prepared p = runner.prepare(name);
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("scenario", name);
@@ -77,9 +78,9 @@ public class ScenarioController {
 
     @PostMapping("/scenarios/{name}/verify")
     public Map<String, Object> verify(@PathVariable String name,
-                                      @RequestBody(required = false) VerifyRequest request) {
+                                      @RequestBody VerifyRequest request) {
         UUID id = null;
-        if (request != null && request.trackingId() != null) {
+        if (request.trackingId() != null) {
             try {
                 id = UUID.fromString(request.trackingId());
             } catch (IllegalArgumentException e) {
@@ -125,6 +126,11 @@ public class ScenarioController {
     @ExceptionHandler(ScenarioRunner.UnknownScenarioException.class)
     ResponseEntity<Object> unknown(ScenarioRunner.UnknownScenarioException e) {
         return problem(HttpStatus.NOT_FOUND, "Unknown scenario", e.getMessage());
+    }
+
+    @ExceptionHandler(org.springframework.http.converter.HttpMessageNotReadableException.class)
+    ResponseEntity<Object> unreadable(Exception e) {
+        return problem(HttpStatus.BAD_REQUEST, "Bad request", "a JSON body is required ({} when there is nothing to say)");
     }
 
     @ExceptionHandler(IllegalArgumentException.class)

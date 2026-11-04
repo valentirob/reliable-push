@@ -142,8 +142,9 @@ public class ConsoleApiController {
         return ResponseEntity.status(HttpStatus.CREATED).body(deviceJson(d));
     }
 
+    /** Body: {@code {}} (required: every console POST carries a JSON body, see {@link ConsoleRequestGuard}). */
     @PostMapping("/devices/{id}/refresh")
-    public Map<String, Object> refresh(@PathVariable String id) {
+    public Map<String, Object> refresh(@PathVariable String id, @RequestBody Map<String, Object> empty) {
         SimulatedDevice d = device(id);
         if (!d.online()) {
             throw new ConflictException("device is offline");
@@ -208,8 +209,9 @@ public class ConsoleApiController {
         return m;
     }
 
+    /** Body: {@code {}} (required: every console POST carries a JSON body, see {@link ConsoleRequestGuard}). */
     @PostMapping("/notifications/{id}/cancel")
-    public Map<String, Object> cancel(@PathVariable String id) {
+    public Map<String, Object> cancel(@PathVariable String id, @RequestBody Map<String, Object> empty) {
         UUID tid = uuid(id, "tracking id");
         String appId = timeline.appId(tid).orElseThrow(() -> new NotFoundException("unknown notification"));
         sender.senderClient(appId).cancel(tid);

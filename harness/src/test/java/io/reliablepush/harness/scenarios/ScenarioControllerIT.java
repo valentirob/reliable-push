@@ -131,7 +131,7 @@ class ScenarioControllerIT {
         assertThat(map(second.body())).containsEntry("status", 409)
                 .hasEntrySatisfying("detail", d -> assertThat((String) d).contains("already in progress"));
         HttpResponse<String> prepareMeanwhile = http.send(
-                post("/console/api/scenarios/worker-crash-inside-window/prepare", ""),
+                post("/console/api/scenarios/worker-crash-inside-window/prepare", "{}"),
                 HttpResponse.BodyHandlers.ofString());
         assertThat(prepareMeanwhile.statusCode()).isEqualTo(409);
 
@@ -167,11 +167,11 @@ class ScenarioControllerIT {
         assertThat(unknown.statusCode()).isEqualTo(404);
         assertThat(map(unknown.body()).get("detail")).asString().contains("nope");
 
-        HttpResponse<String> unknownPrepare = http.send(post("/console/api/scenarios/nope/prepare", ""),
+        HttpResponse<String> unknownPrepare = http.send(post("/console/api/scenarios/nope/prepare", "{}"),
                 HttpResponse.BodyHandlers.ofString());
         assertThat(unknownPrepare.statusCode()).isEqualTo(404);
 
-        HttpResponse<String> notExternal = http.send(post("/console/api/scenarios/test-blocking/prepare", ""),
+        HttpResponse<String> notExternal = http.send(post("/console/api/scenarios/test-blocking/prepare", "{}"),
                 HttpResponse.BodyHandlers.ofString());
         assertThat(notExternal.statusCode()).isEqualTo(400);
 

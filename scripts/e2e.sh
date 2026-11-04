@@ -181,7 +181,7 @@ run_external() {
     rp_compose stop worker-b >/dev/null 2>&1
 
     out="$RP_OUT/responses/$name-prepare.json"
-    code="$(rp_http POST "$RP_HARNESS_URL/console/api/scenarios/$name/prepare" "$out" "" 120)"
+    code="$(rp_http POST "$RP_HARNESS_URL/console/api/scenarios/$name/prepare" "$out" "{}" 120)"
     tid="$(rp_json_strings trackingId <"$out" 2>/dev/null | head -n 1 || true)"
     if [ "$code" != 200 ] || [ -z "$tid" ]; then
         rp_warn "$name: prepare answered $code without a trackingId (its result is in the summary)"

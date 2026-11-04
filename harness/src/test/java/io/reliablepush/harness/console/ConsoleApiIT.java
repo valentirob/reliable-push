@@ -200,15 +200,15 @@ class ConsoleApiIT {
         JsonNode before = deviceById(id);
         int tokensBefore = simulator.issuedTokensForLogHygieneScan().size();
         Thread.sleep(5); // the fake backend stamps expiry with its own clock
-        HttpResponse<String> refreshed = post("/console/api/devices/" + id + "/refresh", "");
+        HttpResponse<String> refreshed = post("/console/api/devices/" + id + "/refresh", "{}");
         assertThat(refreshed.statusCode()).isEqualTo(200);
         assertThat(simulator.issuedTokensForLogHygieneScan()).hasSize(tokensBefore + 1);
         assertThat(Instant.parse(json.readTree(refreshed.body()).get("tokenExpiresAt").asString()))
                 .isAfter(Instant.parse(before.get("tokenExpiresAt").asString()));
         HttpResponse<String> off = post("/console/api/devices/" + id + "/online", "{\"online\":false}");
         assertThat(json.readTree(off.body()).get("online").asBoolean()).isFalse();
-        assertThat(post("/console/api/devices/" + id + "/refresh", "").statusCode()).isEqualTo(409);
-        assertThat(post("/console/api/devices/" + UUID.randomUUID() + "/refresh", "").statusCode()).isEqualTo(404);
+        assertThat(post("/console/api/devices/" + id + "/refresh", "{}").statusCode()).isEqualTo(409);
+        assertThat(post("/console/api/devices/" + UUID.randomUUID() + "/refresh", "{}").statusCode()).isEqualTo(404);
     }
 
     JsonNode deviceById(String id) throws Exception {
@@ -295,10 +295,10 @@ class ConsoleApiIT {
     void cancelCallsBackendAndConflictIs502() throws Exception {
         String tid = push("cancel-user", "{}");
 
-        assertThat(post("/console/api/notifications/" + tid + "/cancel", "").statusCode()).isEqualTo(200);
+        assertThat(post("/console/api/notifications/" + tid + "/cancel", "{}").statusCode()).isEqualTo(200);
         cancelStatus = 409;
-        assertThat(post("/console/api/notifications/" + tid + "/cancel", "").statusCode()).isEqualTo(502);
-        assertThat(post("/console/api/notifications/" + UUID.randomUUID() + "/cancel", "").statusCode())
+        assertThat(post("/console/api/notifications/" + tid + "/cancel", "{}").statusCode()).isEqualTo(502);
+        assertThat(post("/console/api/notifications/" + UUID.randomUUID() + "/cancel", "{}").statusCode())
                 .isEqualTo(404);
     }
 
@@ -419,6 +419,71 @@ class ConsoleApiIT {
                 + (p.equals("/console/api/notifications") || p.equals("/console/api/inbox")
                         || p.equals("/console/api/inbox/in-flight") ? "?appId=shop" : "")
                 + (p.equals("/console/api/payload-preview") ? "?trackingId=" + tid : "");
+    }
+
+    HttpResponse<String> postWith(String path, String body, String... headers) throws Exception {
+        HttpRequest.Builder b = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + path))
+                .POST(HttpRequest.BodyPublishers.ofString(body));
+        if (headers.length > 0) {
+            b.headers(headers);
+        }
+        return http.send(b.build(), HttpResponse.BodyHandlers.ofString());
+    }
+
+    @Test
+    void crossSitePostsAreRejected() throws Exception {
+        String mode = "/console/api/inbox/mode";
+        String ok = "{\"appId\":\"shop\",\"mode\":\"OK\",\"hangMs\":0}";
+        String json = "application/json";
+
+        HttpResponse<String> foreignOrigin = postWith(mode, ok, "Content-Type", json, "Origin", "http://evil.example");
+        assertThat(foreignOrigin.statusCode()).isEqualTo(403);
+        assertThat(foreignOrigin.headers().firstValue("Content-Type").orElse("")).contains("application/problem+json");
+        assertThat(postWith(mode, ok, "Content-Type", json, "Origin", "http://localhost:" + port).statusCode())
+                .as("another origin of the same host").isEqualTo(403);
+        assertThat(postWith(mode, ok, "Content-Type", json, "Origin", "null").statusCode()).isEqualTo(403);
+        assertThat(postWith(mode, ok, "Content-Type", json, "Sec-Fetch-Site", "cross-site").statusCode()).isEqualTo(403);
+        assertThat(postWith(mode, ok, "Content-Type", json, "Sec-Fetch-Site", "same-site").statusCode()).isEqualTo(403);
+        assertThat(postWith(mode, ok, "Content-Type", json, "Sec-Fetch-Site", "none").statusCode()).isEqualTo(403);
+        assertThat(postWith("/console/api/scenarios/run", "{}", "Content-Type", json, "Origin", "http://evil.example")
+                .statusCode()).isEqualTo(403);
+    }
+
+    @Test
+    void postsNeedAJsonBody() throws Exception {
+        String mode = "/console/api/inbox/mode";
+        String ok = "{\"appId\":\"shop\",\"mode\":\"OK\",\"hangMs\":0}";
+
+        HttpResponse<String> plain = postWith(mode, ok, "Content-Type", "text/plain");
+        assertThat(plain.statusCode()).isEqualTo(415);
+        assertThat(plain.headers().firstValue("Content-Type").orElse("")).contains("application/problem+json");
+        assertThat(postWith(mode, ok).statusCode()).as("no Content-Type").isEqualTo(415);
+        assertThat(postWith(mode, ok, "Content-Type", "application/x-www-form-urlencoded").statusCode()).isEqualTo(415);
+        assertThat(postWith("/console/api/scenarios/run", "{}", "Content-Type", "text/plain").statusCode())
+                .isEqualTo(415);
+        String tid = push("guard-user", "{}");
+        assertThat(postWith("/console/api/notifications/" + tid + "/cancel", "", "Content-Type", "application/json")
+                .statusCode()).as("body-less POST without an explicit {}").isEqualTo(400);
+        assertThat(postWith("/console/api/scenarios/run", "", "Content-Type", "application/json").statusCode())
+                .as("scenario run without an explicit {}").isEqualTo(400);
+    }
+
+    @Test
+    void sameOriginAndScriptPostsAreAllowed() throws Exception {
+        String mode = "/console/api/inbox/mode";
+        String ok = "{\"appId\":\"shop\",\"mode\":\"OK\",\"hangMs\":0}";
+        String self = "http://127.0.0.1:" + port;
+
+        assertThat(postWith(mode, ok, "Content-Type", "application/json", "Origin", self, "Sec-Fetch-Site",
+                "same-origin").statusCode()).as("the console page").isEqualTo(200);
+        assertThat(postWith(mode, ok, "Content-Type", "application/json; charset=UTF-8").statusCode())
+                .as("curl / scripts: no Origin, no Sec-Fetch-Site").isEqualTo(200);
+        assertThat(postWith(mode, ok, "Content-Type", "application/json", "Sec-Fetch-Site", "same-origin")
+                .statusCode()).isEqualTo(200);
+        assertThat(get("/console/api/apps").statusCode()).isEqualTo(200);
+        // the fallback receiver is not a console endpoint: the backend calls it without these headers
+        assertThat(postWith("/hooks/shop", "{}", "Content-Type", "text/plain", "Origin", "http://evil.example")
+                .statusCode()).isNotIn(403, 415);
     }
 
     @Test
