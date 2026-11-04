@@ -22,5 +22,7 @@ management:
 harness:
   backend-url: ${HARNESS_BACKEND_URL:http://localhost:8080}
   backend-log-dir: ${HARNESS_BACKEND_LOG_DIR:/tmp/rp-logs}
-  # apps.<id>.{sender-api-key, grant-secret, hmac-secret, grant-issuer} are supplied per environment
-  # (HARNESS_APPS_<ID>_SENDER_API_KEY, ...); at least one app is required.
+  # Environment variables (use these exact dash-less names; Task 11 GenSecrets and compose follow them):
+  #   HARNESS_BACKENDURL, HARNESS_BACKENDLOGDIR (HARNESS_BACKEND_URL / HARNESS_BACKEND_LOG_DIR also work via the
+  #   placeholders above), and per app <ID>: HARNESS_APPS_<ID>_SENDERAPIKEY, _GRANTSECRET, _HMACSECRET, _GRANTISSUER.
+  # At least one app is required. Pinned by HarnessPropertiesEnvBindingTest.
