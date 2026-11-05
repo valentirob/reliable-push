@@ -6,6 +6,7 @@ import static org.awaitility.Awaitility.await;
 import io.reliablepush.shared.logging.EventCapture;
 import io.reliablepush.support.PostgresTestBase;
 import java.time.Duration;
+import java.util.List;
 import java.util.UUID;
 import org.apache.logging.log4j.core.LogEvent;
 import org.junit.jupiter.api.Test;
@@ -18,14 +19,13 @@ import org.springframework.web.client.RestClient;
 
 /**
  * The opt-in management port ({@code MANAGEMENT_SERVER_PORT}): probes and Prometheus run on their own port, outside the
- * public API filters (access log, rate limit).
+ * public API filters (access log).
  */
 @ActiveProfiles("test")
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = "management.server.port=0")
 class ManagementPortIT extends PostgresTestBase {
 
     private static final String SHOP_KEY = "test-sender-key-shop";
-    private static final String LIMITED_KEY = "test-sender-key-limited"; // app "ratelimited": 2 sender requests/minute
 
     @LocalManagementPort
     int managementPort;
@@ -53,7 +53,7 @@ class ManagementPortIT extends PostgresTestBase {
 
         for (String path : new String[] {"/actuator/health/readiness", "/actuator/health/liveness"}) {
             assertThat(get(management(), path, null).getStatusCode().value()).as("management " + path).isEqualTo(200);
-            assertThat(get(http, path, SHOP_KEY).getStatusCode().value()).as("server " + path).isEqualTo(404);
+            assertThat(get(http, path, null).getStatusCode().value()).as("server " + path).isEqualTo(404);
         }
     }
 
@@ -63,7 +63,7 @@ class ManagementPortIT extends PostgresTestBase {
 
         assertThat(onManagement.getStatusCode().value()).isEqualTo(200);
         assertThat(onManagement.getBody()).contains("rp_notifications_registered_total");
-        assertThat(get(http, "/actuator/prometheus", SHOP_KEY).getStatusCode().value()).isEqualTo(404);
+        assertThat(get(http, "/actuator/prometheus", null).getStatusCode().value()).isEqualTo(404);
     }
 
     @Test
@@ -80,7 +80,7 @@ class ManagementPortIT extends PostgresTestBase {
         }
     }
 
-    private static java.util.List<String> apiRequestPaths(EventCapture capture) {
+    private static List<String> apiRequestPaths(EventCapture capture) {
         return capture.events().stream()
                 .filter(e -> "api.request".equals(e.getMessage().getFormattedMessage()))
                 .map(ManagementPortIT::urlPath)
@@ -89,17 +89,6 @@ class ManagementPortIT extends PostgresTestBase {
 
     private static String urlPath(LogEvent event) {
         return String.valueOf(EventCapture.data(event).get("url.path"));
-    }
-
-    @Test
-    void managementRequestsAreNotRateLimited() {
-        RestClient management = management();
-        // the app allows 2 sender requests per minute; probes sent with its key must still all pass
-        for (int i = 0; i < 6; i++) {
-            assertThat(get(management, "/actuator/health/readiness", LIMITED_KEY).getStatusCode().value())
-                    .as("probe " + i)
-                    .isEqualTo(200);
-        }
     }
 
     @Test

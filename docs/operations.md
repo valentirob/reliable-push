@@ -129,7 +129,7 @@ the application sets 5000 instead of Hikari's 30000, see "Database pool" below).
   `health` and `prometheus` are exposed under `/actuator`. By default they share the application port: do not route
   `/actuator/**` through a public ingress. In Kubernetes set `MANAGEMENT_SERVER_PORT=8081` (the Helm chart does):
   `/actuator/**` is then served on 8081 only (the application port answers 404), probes and Prometheus scrapes target
-  8081, and probe calls no longer produce `api.request` log lines nor count against rate limits.
+  8081, and probe calls no longer produce `api.request` log lines. `/actuator/**` is unauthenticated and never reaches the rate limiter on either port.
 - Prometheus: `GET /actuator/prometheus` (standard JVM and HTTP server metrics plus the application metrics below).
 
 | Metric | Type | Meaning |
