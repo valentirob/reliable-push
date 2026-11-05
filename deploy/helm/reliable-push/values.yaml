@@ -65,6 +65,9 @@ api:
   resources:
     requests: { cpu: 800m, memory: 384Mi }
     limits: { cpu: "2", memory: 1Gi }
+  service:
+    # Annotations of the API Service (<fullname>-api; the one Ingress and Route route to, in both modes).
+    annotations: {}
 
 worker:
   replicas: 2
@@ -138,6 +141,18 @@ metrics:
   podMonitoring:       # GKE Managed Service for Prometheus
     enabled: false
     interval: 30s
+
+gke:
+  # GKE Ingress health check (cloud.google.com/v1 BackendConfig "<fullname>-api"): HTTP GET /actuator/health/readiness
+  # on the management port 8081. Without it GKE probes GET / on 8080 (404) and marks the backends unhealthy. When
+  # enabled the API Service gets the cloud.google.com/backend-config annotation (it replaces one set in
+  # api.service.annotations). Needs the BackendConfig CRD (GKE only).
+  backendConfig:
+    enabled: false
+    # Optional timings: checkIntervalSec, timeoutSec, healthyThreshold, unhealthyThreshold (GKE defaults otherwise).
+    healthCheck: {}
+    # Other BackendConfig spec fields (not healthCheck), e.g. a Cloud Armor policy: { securityPolicy: { name: rp-armor } }
+    extraSpec: {}
 
 # `helm test` pod: GETs /actuator/health/readiness through <fullname>-management. Runs with podSecurityContext and
 # securityContext; test.runAsUser is used only when podSecurityContext sets no runAsUser (busybox runs as root otherwise,

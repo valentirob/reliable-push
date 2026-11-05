@@ -138,11 +138,12 @@ helm install rp deploy/helm/reliable-push -n reliable-push -f deploy/helm/reliab
   `networking.gke.io/managed-certificates` and `kubernetes.io/ingress.global-static-ip-name`. On VPC-native clusters GKE
   uses container-native load balancing (NEGs) for the ClusterIP Service.
 - **Load balancer health check:** the readiness probe is on port 8081, not on the serving port, so GKE cannot derive the
-  health check from it and falls back to `GET /` on port 8080, which answers `404`. Point the health check at the
-  management port with a `BackendConfig` (`cloud.google.com/v1`, `healthCheck: {type: HTTP, port: 8081,
-  requestPath: /actuator/health/readiness}`) and the Service annotation
-  `cloud.google.com/backend-config: '{"default": "<name>"}'` on `rp-reliable-push-api` (the chart has no value for
-  Service annotations yet: `kubectl annotate`). Google's health-check probes come from `35.191.0.0/16` and
+  health check from it and would fall back to `GET /` on port 8080, which answers `404`. The overlay sets
+  `gke.backendConfig.enabled: true`: the chart renders a `BackendConfig` (`cloud.google.com/v1`) `rp-reliable-push-api`
+  with `healthCheck: {type: HTTP, port: 8081, requestPath: /actuator/health/readiness}` and annotates the API Service
+  with `cloud.google.com/backend-config: '{"default": "rp-reliable-push-api"}'`. Timings go in
+  `gke.backendConfig.healthCheck`, other `BackendConfig` fields in `gke.backendConfig.extraSpec`, other Service
+  annotations in `api.service.annotations`. Google's health-check probes come from `35.191.0.0/16` and
   `130.211.0.0/22` and must reach port 8081 as well: add a firewall rule if the cluster's rules allow only the serving
   port. Verify it on your cluster before sending traffic.
 - **Managed Prometheus:** a `PodMonitoring` (`monitoring.googleapis.com/v1`) scrapes `/actuator/prometheus` on the
@@ -239,7 +240,7 @@ The application's rate limits are per instance and only apply to authenticated c
 credentials on `POST /v1/devices`, invalid API keys) must be limited in front of it, per client IP:
 
 - **GKE:** a Cloud Armor security policy with a rate-based rule (`rate_based_ban` or `throttle`, keyed on `IP`),
-  attached through a `BackendConfig` (`securityPolicy.name`) on `rp-reliable-push-api`.
+  attached through the chart's `BackendConfig`: `gke.backendConfig.extraSpec: {securityPolicy: {name: <policy>}}`.
 - **OpenShift:** HAProxy router annotations on the Route (`route.annotations`), for example
   `haproxy.router.openshift.io/rate-limit-connections: "true"` and
   `haproxy.router.openshift.io/rate-limit-connections.rate-http: "100"` (HTTP requests per source IP within the router's

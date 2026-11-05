@@ -1,0 +1,93 @@
+suite: gke backendconfig
+templates:
+  - backendconfig.yaml
+  - deployment.yaml
+  - configmap.yaml
+release:
+  name: rp
+set:
+  image.repository: registry.example.com/reliable-push
+  database.url: jdbc:postgresql://db:5432/rp
+  database.username: rp
+  secrets.existingSecret: rp-secrets
+  config.apps.shop.default-timeout-minutes: 10
+tests:
+  - it: not rendered by default
+    template: backendconfig.yaml
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: health check on the management port's readiness endpoint
+    template: backendconfig.yaml
+    set:
+      gke.backendConfig.enabled: true
+    asserts:
+      - hasDocuments:
+          count: 1
+      - isKind:
+          of: BackendConfig
+      - isAPIVersion:
+          of: cloud.google.com/v1
+      - equal:
+          path: metadata.name
+          value: rp-reliable-push-api
+      - equal:
+          path: spec.healthCheck.type
+          value: HTTP
+      - equal:
+          path: spec.healthCheck.requestPath
+          value: /actuator/health/readiness
+      - equal:
+          path: spec.healthCheck.port
+          value: 8081
+
+  # The chart has no value for the management port (fixed at 8081, global constraint): BackendConfig, containerPort and
+  # MANAGEMENT_SERVER_PORT all come from the rp.managementPort helper, so they cannot drift apart.
+  - it: the pod's management port is the one the health check probes
+    template: deployment.yaml
+    set:
+      gke.backendConfig.enabled: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].ports
+          content: { name: management, containerPort: 8081, protocol: TCP }
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: { name: MANAGEMENT_SERVER_PORT, value: "8081" }
+
+  - it: split mode uses the same name (the API service's BackendConfig)
+    template: backendconfig.yaml
+    set:
+      mode: split
+      gke.backendConfig.enabled: true
+    asserts:
+      - equal:
+          path: metadata.name
+          value: rp-reliable-push-api
+
+  - it: custom health check timings are passed through
+    template: backendconfig.yaml
+    set:
+      gke.backendConfig.enabled: true
+      gke.backendConfig.healthCheck: { checkIntervalSec: 5, timeoutSec: 3, healthyThreshold: 1, unhealthyThreshold: 3 }
+    asserts:
+      - equal:
+          path: spec.healthCheck.checkIntervalSec
+          value: 5
+      - equal:
+          path: spec.healthCheck.unhealthyThreshold
+          value: 3
+
+  - it: extraSpec adds other BackendConfig fields, e.g. a Cloud Armor policy
+    template: backendconfig.yaml
+    set:
+      gke.backendConfig.enabled: true
+      gke.backendConfig.extraSpec: { securityPolicy: { name: rp-armor } }
+    asserts:
+      - equal:
+          path: spec.securityPolicy.name
+          value: rp-armor
+      - equal:
+          path: spec.healthCheck.port
+          value: 8081

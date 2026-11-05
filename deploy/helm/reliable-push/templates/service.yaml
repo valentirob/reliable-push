@@ -4,6 +4,10 @@ metadata:
   name: {{ include "rp.fullname" . }}-api
   labels:
     {{- include "rp.labels" . | nindent 4 }}
+  {{- with include "rp.apiServiceAnnotations" . }}
+  annotations:
+    {{- . | nindent 4 }}
+  {{- end }}
 spec:
   type: ClusterIP
   selector:
@@ -28,6 +32,6 @@ spec:
     {{- include "rp.selectorLabels" . | nindent 4 }}
   ports:
     - name: management
-      port: 8081
+      port: {{ include "rp.managementPort" . }}
       targetPort: management
       protocol: TCP

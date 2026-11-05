@@ -138,8 +138,9 @@ image or deployed with a Helm chart.
 - **`deploy/helm/scripts/validate.sh`** (Docker only; CI runs it in `.github/workflows/helm-ci.yml`): `helm lint --strict`
   in both modes, the helm-unittest suites in `deploy/helm/reliable-push/tests/`, and `helm template | kubeconform -strict`
   for four renders (default, split, GKE overlay, OpenShift overlay) against the Kubernetes 1.30 schemas, the vendored Route
-  schema (`deploy/helm/schemas/`) and the CRD catalog at a pinned commit (fetched over the network). Tool images are pinned
-  by digest in `deploy/helm/tools.env`; nothing is installed on the host.
+  schema (`deploy/helm/schemas/`) and the CRD catalog at a pinned commit (ServiceMonitor, PodMonitoring, BackendConfig;
+  fetched over the network). Tool images are pinned by digest in `deploy/helm/tools.env`; nothing is installed on the
+  host.
 - **`./scripts/helm-smoke.sh [--keep]`** (local only, never in CI; needs kind, kubectl, curl, JDK 21): creates the kind
   cluster `rp-smoke` (node image from `tools.env`), builds and loads the backend image, installs PostgreSQL, a slow dummy
   fallback receiver and the chart in split mode (1 API, 2 workers, UID 1000870000 / GID 0 like OpenShift), then checks the

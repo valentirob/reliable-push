@@ -53,8 +53,8 @@
 >   Secret loaded with `envFrom`; every `*-ref` under `config` must be `env:NAME`) and at least one `config.apps` entry;
 >   `config` rendered into a ConfigMap whose `checksum/config` rolls the pods; Ingress (`/v1` only) or Route, HPA for the
 >   API, PodDisruptionBudgets, ServiceMonitor / PodMonitoring; overlays `values-gke.yaml` (UID 1001, GID 0, Ingress `gce`,
->   PodMonitoring, Cloud SQL Auth Proxy example) and `values-openshift.yaml` (Route, ServiceMonitor, no UID/GID/fsGroup);
->   tool images pinned in `deploy/helm/tools.env`. Checks: `deploy/helm/scripts/validate.sh` (CI) and the local kind
+>   BackendConfig health check on 8081, PodMonitoring, Cloud SQL Auth Proxy example) and `values-openshift.yaml` (Route,
+>   ServiceMonitor, no UID/GID/fsGroup); tool images pinned in `deploy/helm/tools.env`. Checks: `deploy/helm/scripts/validate.sh` (CI) and the local kind
 >   smoke install `./scripts/helm-smoke.sh`. Guide: [`docs/deployment.md`](../deployment.md).
 > - §10, §12: `loadtest/` (Gatling Java DSL, test scope; JDK-only main code) run locally by `./scripts/load.sh` on the
 >   harness compose stack; CI only compiles it and runs its unit tests.

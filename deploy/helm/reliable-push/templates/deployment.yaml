@@ -67,7 +67,7 @@ spec:
               protocol: TCP
             {{- end }}
             - name: management
-              containerPort: 8081
+              containerPort: {{ include "rp.managementPort" $ }}
               protocol: TCP
           envFrom:
             - secretRef:
@@ -78,7 +78,7 @@ spec:
             - name: SPRING_CONFIG_ADDITIONAL_LOCATION
               value: optional:file:/config/
             - name: MANAGEMENT_SERVER_PORT
-              value: "8081"
+              value: {{ include "rp.managementPort" $ | quote }}
             - name: JAVA_TOOL_OPTIONS
               value: {{ $.Values.javaToolOptions | quote }}
             - name: SPRING_DATASOURCE_URL

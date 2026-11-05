@@ -15,6 +15,12 @@ metrics:
   podMonitoring:
     enabled: true
 
+# Ingress health check on the management port (/actuator/health/readiness on 8081) instead of GKE's default GET / on
+# 8080. The Google health-check ranges must reach port 8081 of the nodes/pods (see docs/deployment.md).
+gke:
+  backendConfig:
+    enabled: true
+
 podSecurityContext:
   runAsUser: 1001
   runAsGroup: 0

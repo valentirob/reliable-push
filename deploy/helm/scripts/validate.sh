@@ -25,7 +25,7 @@ echo "== helm unittest ($HELM_UNITTEST_IMAGE)"
 docker run --rm -v "$chart:/apps:ro" "$HELM_UNITTEST_IMAGE" /apps
 
 # Renders the chart with the given values files and validates every object with kubeconform: the Kubernetes schemas
-# for 1.30.0, the vendored Route schema and the pinned CRD catalog (ServiceMonitor, PodMonitoring).
+# for 1.30.0, the vendored Route schema and the pinned CRD catalog (ServiceMonitor, PodMonitoring, BackendConfig).
 render_and_validate() {
   label="$1"
   shift

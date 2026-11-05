@@ -30,7 +30,11 @@
         "replicas": { "type": "integer", "minimum": 1 },
         "hikariMaximumPoolSize": { "type": "integer", "minimum": 1 },
         "podDisruptionBudget": { "type": "object", "properties": { "minAvailable": { "type": ["integer", "string"] } } },
-        "resources": { "type": "object" }
+        "resources": { "type": "object" },
+        "service": {
+          "type": "object",
+          "properties": { "annotations": { "type": "object", "additionalProperties": { "type": "string" } } }
+        }
       }
     },
     "worker": {
@@ -103,6 +107,28 @@
         "podMonitoring": {
           "type": "object",
           "properties": { "enabled": { "type": "boolean" }, "interval": { "type": "string" } }
+        }
+      }
+    },
+    "gke": {
+      "type": "object",
+      "properties": {
+        "backendConfig": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "healthCheck": {
+              "type": "object",
+              "properties": {
+                "checkIntervalSec": { "type": "integer", "minimum": 1 },
+                "timeoutSec": { "type": "integer", "minimum": 1 },
+                "healthyThreshold": { "type": "integer", "minimum": 1 },
+                "unhealthyThreshold": { "type": "integer", "minimum": 1 }
+              },
+              "additionalProperties": false
+            },
+            "extraSpec": { "type": "object", "not": { "required": ["healthCheck"] } }
+          }
         }
       }
     },

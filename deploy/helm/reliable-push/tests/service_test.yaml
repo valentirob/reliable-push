@@ -77,3 +77,52 @@ tests:
     asserts:
       - hasDocuments:
           count: 0
+
+  - it: api.service.annotations go on the combined API service only
+    template: service.yaml
+    set:
+      api.service.annotations: { example.com/team: push }
+    asserts:
+      - equal:
+          path: metadata.annotations["example.com/team"]
+          value: push
+        documentIndex: 0
+      - notExists:
+          path: metadata.annotations
+        documentIndex: 1
+
+  - it: api.service.annotations go on the split API service
+    template: service.yaml
+    set:
+      mode: split
+      api.service.annotations: { example.com/team: push }
+    asserts:
+      - equal:
+          path: metadata.annotations["example.com/team"]
+          value: push
+        documentIndex: 0
+      - equal:
+          path: metadata.name
+          value: rp-reliable-push-api
+        documentIndex: 0
+
+  - it: no annotations on the API service by default
+    template: service.yaml
+    documentIndex: 0
+    asserts:
+      - notExists:
+          path: metadata.annotations
+
+  - it: gke.backendConfig.enabled points the API service at the chart's BackendConfig
+    template: service.yaml
+    documentIndex: 0
+    set:
+      gke.backendConfig.enabled: true
+      api.service.annotations: { example.com/team: push }
+    asserts:
+      - equal:
+          path: metadata.annotations["cloud.google.com/backend-config"]
+          value: '{"default": "rp-reliable-push-api"}'
+      - equal:
+          path: metadata.annotations["example.com/team"]
+          value: push

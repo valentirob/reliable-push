@@ -34,6 +34,20 @@ app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end -}}
 
+{{/* The management port (probes, Prometheus, GKE health check); fixed, never routed by Ingress/Route. */}}
+{{- define "rp.managementPort" -}}8081{{- end -}}
+
+{{/* Annotations of the API Service: api.service.annotations, plus the BackendConfig reference when the chart renders one. */}}
+{{- define "rp.apiServiceAnnotations" -}}
+{{- $ann := deepCopy (default (dict) .Values.api.service.annotations) -}}
+{{- if .Values.gke.backendConfig.enabled -}}
+{{- $_ := set $ann "cloud.google.com/backend-config" (printf "{\"default\": \"%s-api\"}" (include "rp.fullname" .)) -}}
+{{- end -}}
+{{- if $ann -}}
+{{- toYaml $ann -}}
+{{- end -}}
+{{- end -}}
+
 {{/* Component that serves the API Service: "combined" or "api". */}}
 {{- define "rp.apiComponent" -}}
 {{- if eq .Values.mode "split" -}}api{{- else -}}combined{{- end -}}
