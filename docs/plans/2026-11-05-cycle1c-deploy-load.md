@@ -52,11 +52,11 @@
 **Interfaces:**
 - Produces: with `MANAGEMENT_SERVER_PORT=8081`, `/actuator/health/{liveness,readiness}` and `/actuator/prometheus` are served on 8081 only; 8080 answers 404 for `/actuator/**`. Without it, behaviour is unchanged (same port).
 
-- [ ] **Step 1: Failing tests** (`@SpringBootTest(webEnvironment = RANDOM_PORT, properties = "management.server.port=0")`, `@LocalManagementPort`): `readinessOnManagementPortOnly()` (200 on management port, 404 on server port); `prometheusOnManagementPort()` (body contains `rp_notifications_registered_total`); `managementRequestsDoNotEmitApiRequestEvent()` (no `event.action=api.request` line for a probe, captured with the existing log-capture test support); `managementRequestsAreNotRateLimited()` (more probe calls than the sender limit, all 200); `apiStillServedOnServerPort()` (`POST /v1/notifications` → 201).
-- [ ] **Step 2: Run** the IT (one-IT command from `AGENTS.md`) → FAIL where the behaviour is missing (tests that already pass stay as regression guards; note which in the report).
-- [ ] **Step 3: Implement** the smallest change that makes them pass (expected: configuration only; servlet filters live in the main context and do not apply to the management child context — confirm, do not assume).
-- [ ] **Step 4: Run** `cd backend && ./mvnw -B verify` → PASS. Update `docs/operations.md` "Health and metrics": in Kubernetes set `MANAGEMENT_SERVER_PORT=8081` (the chart does), probes and scrapes target it, probe calls no longer produce `api.request` lines.
-- [ ] **Step 5: Commit** `feat(backend): opt-in management port for probes and metrics`
+- [x] **Step 1: Failing tests** (`@SpringBootTest(webEnvironment = RANDOM_PORT, properties = "management.server.port=0")`, `@LocalManagementPort`): `readinessOnManagementPortOnly()` (200 on management port, 404 on server port); `prometheusOnManagementPort()` (body contains `rp_notifications_registered_total`); `managementRequestsDoNotEmitApiRequestEvent()` (no `event.action=api.request` line for a probe, captured with the existing log-capture test support); `managementRequestsAreNotRateLimited()` (more probe calls than the sender limit, all 200); `apiStillServedOnServerPort()` (`POST /v1/notifications` → 201).
+- [x] **Step 2: Run** the IT (one-IT command from `AGENTS.md`) → FAIL where the behaviour is missing (tests that already pass stay as regression guards; note which in the report).
+- [x] **Step 3: Implement** the smallest change that makes them pass (expected: configuration only; servlet filters live in the main context and do not apply to the management child context — confirm, do not assume).
+- [x] **Step 4: Run** `cd backend && ./mvnw -B verify` → PASS. Update `docs/operations.md` "Health and metrics": in Kubernetes set `MANAGEMENT_SERVER_PORT=8081` (the chart does), probes and scrapes target it, probe calls no longer produce `api.request` lines.
+- [x] **Step 5: Commit** `feat(backend): opt-in management port for probes and metrics`
 
 ### Task 2: Backend — graceful worker stop
 

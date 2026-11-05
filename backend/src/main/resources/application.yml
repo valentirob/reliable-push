@@ -37,6 +37,8 @@ info:
     version: "@project.version@"
 
 management:
+  # Opt-in: set MANAGEMENT_SERVER_PORT (e.g. 8081) to serve /actuator/** on a separate port, outside the API filters
+  # (access log, rate limit); the server port then answers 404 for /actuator/**. Unset: actuator shares the server port.
   endpoints:
     web:
       exposure:
