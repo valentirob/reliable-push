@@ -81,4 +81,17 @@ class LoadConfigTest {
         String s = LoadConfig.fromEnv(secrets()).toString();
         assertThat(s).doesNotContain("VALUE").contains("http://api:8080").contains("shop");
     }
+
+    @Test
+    void burstSizeMustBeAMultipleOfBurstRate() {
+        Map<String, String> env = secrets();
+        env.put("LOAD_BURST_SIZE", "30000");
+        env.put("LOAD_BURST_PER_SECOND", "1400");
+        assertThatThrownBy(() -> LoadConfig.fromEnv(env))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("LOAD_BURST_SIZE")
+                .hasMessageContaining("LOAD_BURST_PER_SECOND");
+        env.put("LOAD_BURST_PER_SECOND", "1500");
+        assertThat(LoadConfig.fromEnv(env).burstSize()).isEqualTo(30000);
+    }
 }

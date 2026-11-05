@@ -19,6 +19,15 @@ public record LoadConfig(
         int burstPerSecond) {
 
     public static LoadConfig fromEnv(Map<String, String> env) {
+        LoadConfig c = parse(env);
+        if (c.burstSize() % c.burstPerSecond() != 0) {
+            throw new IllegalStateException(
+                    "LOAD_BURST_SIZE must be a multiple of LOAD_BURST_PER_SECOND (the burst injects exactly that many requests)");
+        }
+        return c;
+    }
+
+    private static LoadConfig parse(Map<String, String> env) {
         return new LoadConfig(
                 URI.create(text(env, "LOAD_API_URL", "http://api:8080")),
                 required(env, "HARNESS_APPS_SHOP_SENDERAPIKEY"),

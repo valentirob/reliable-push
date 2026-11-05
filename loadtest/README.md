@@ -28,3 +28,7 @@ java -cp loadtest/target/classes io.reliablepush.loadtest.BurstDrainProbe \
 ```
 
 Exit code 0 means `PASSED`; `FAILED` on timeout or any `failed`/`expired` increase.
+
+Logging: `src/test/resources/logback-test.xml` sets root to WARN and `io.gatling.http.engine.response` to OFF. Do not
+raise it: at DEBUG Gatling prints failed requests with their headers (`X-Api-Key`, device tokens). Gatling's console
+summary is unaffected. `LOAD_BURST_SIZE` must be a multiple of `LOAD_BURST_PER_SECOND`.
