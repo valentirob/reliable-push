@@ -12,12 +12,6 @@ enum SDKLog {
     /// Test hook: receives every formatted message that passes the level filter.
     typealias Sink = @Sendable (Level, String) -> Void
 
-    private static let deniedKeys: Set<String> = [
-        "token", "idtoken", "id_token", "devicetoken", "device_token", "authorization",
-        "userid", "user_id", "user", "title", "body",
-    ]
-    private static let publicKeys: Set<String> = ["trackingid", "deviceid"]
-
     private struct State: Sendable {
         #if DEBUG
         var debug = true
@@ -55,15 +49,17 @@ enum SDKLog {
         var all = pub
         var priv = ""
         for (key, value) in fields {
-            let name = key.lowercased()
-            if deniedKeys.contains(name) { continue }
             let pair = key + "=" + value
-            all += " " + pair
-            if publicKeys.contains(name) {
+            switch key.lowercased() {
+            case "token", "idtoken", "id_token", "devicetoken", "device_token", "authorization",
+                 "userid", "user_id", "user", "title", "body":
+                continue
+            case "trackingid", "deviceid":
                 pub += " " + pair
-            } else {
+            default:
                 priv += priv.isEmpty ? pair : " " + pair
             }
+            all += " " + pair
         }
         snapshot.sink?(level, all)
         let type: OSLogType = level == .warn ? .error : level == .info ? .info : .debug

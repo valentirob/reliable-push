@@ -2,21 +2,20 @@ import Foundation
 import UserNotifications
 
 /// The part of the notification settings that decides whether a notification will be shown.
-struct GateSettings: Sendable, Equatable {
-    enum Authorization: Sendable { case authorized, provisional, ephemeral, denied, notDetermined }
-
-    var authorization: Authorization
+struct GateSettings: Sendable {
+    /// `authorizationStatus` is `.authorized`, `.provisional` or `.ephemeral` (see `allows(_:)`).
+    var authorized: Bool
     var alert: Bool
     var notificationCenter: Bool
     var lockScreen: Bool
 
-    /// Shown = authorized, provisional or ephemeral, and at least one of alert / Notification Center / lock screen
-    /// enabled (spec: DELIVERED only when the notification will be shown).
-    var isShown: Bool {
-        switch authorization {
-        case .authorized, .provisional, .ephemeral: return alert || notificationCenter || lockScreen
-        case .denied, .notDetermined: return false
-        }
+    /// Shown = authorized, and at least one of alert / Notification Center / lock screen enabled (spec: DELIVERED
+    /// only when the notification will be shown).
+    var isShown: Bool { authorized && (alert || notificationCenter || lockScreen) }
+
+    /// Authorized, provisional and ephemeral let a notification be shown; denied, not determined and unknown do not.
+    static func allows(_ status: UNAuthorizationStatus) -> Bool {
+        status == .authorized || status == .provisional || status == .ephemeral
     }
 }
 
@@ -29,16 +28,7 @@ protocol NotificationSettingsSource: Sendable {
 struct SystemNotificationSettings: NotificationSettingsSource {
     func current() async -> GateSettings {
         let s = await UNUserNotificationCenter.current().notificationSettings()
-        let auth: GateSettings.Authorization
-        switch s.authorizationStatus {
-        case .authorized: auth = .authorized
-        case .provisional: auth = .provisional
-        case .ephemeral: auth = .ephemeral
-        case .notDetermined: auth = .notDetermined
-        case .denied: auth = .denied
-        @unknown default: auth = .denied
-        }
-        return GateSettings(authorization: auth, alert: s.alertSetting == .enabled,
+        return GateSettings(authorized: GateSettings.allows(s.authorizationStatus), alert: s.alertSetting == .enabled,
                             notificationCenter: s.notificationCenterSetting == .enabled,
                             lockScreen: s.lockScreenSetting == .enabled)
     }

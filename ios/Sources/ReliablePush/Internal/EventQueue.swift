@@ -26,22 +26,25 @@ final class EventQueue: Sendable {
         fileLock = FileLock(url: directory.appendingPathComponent("events.lock"))
     }
 
-    private struct Entry: Codable {
-        let trackingId: String
-        let type: EventType
-        let occurredAt: Date
-        var misses: Int?
+    /// One stored event: the event's JSON plus `misses` (absent means 0).
+    private struct Entry {
+        let event: QueuedEvent
+        var misses = 0
 
-        init(_ e: QueuedEvent) {
-            trackingId = e.trackingId; type = e.type; occurredAt = e.occurredAt; misses = nil
+        init(_ e: QueuedEvent) { event = e }
+
+        /// Decodes one array element on its own (nil drops just this element).
+        init?(json: Any) {
+            guard let json = json as? JSONObject, let e = QueuedEvent(json: json) else { return nil }
+            event = e
+            misses = json["misses"] as? Int ?? 0
         }
-        var event: QueuedEvent { QueuedEvent(trackingId: trackingId, type: type, occurredAt: occurredAt) }
-    }
 
-    /// Decodes one array element without failing the whole array.
-    private struct Lossy: Decodable {
-        let entry: Entry?
-        init(from decoder: any Decoder) throws { entry = try? Entry(from: decoder) }
+        var json: JSONObject {
+            var j = event.json
+            if misses > 0 { j["misses"] = misses }
+            return j
+        }
     }
 
     func add(_ e: QueuedEvent) {
@@ -86,9 +89,9 @@ final class EventQueue: Sendable {
             items = items.compactMap { entry in
                 guard keys.contains(entry.event.key) else { return entry }
                 var e = entry
-                e.misses = (e.misses ?? 0) + 1
+                e.misses += 1
                 changed = true
-                if e.misses! >= Self.maxMisses {
+                if e.misses >= Self.maxMisses {
                     gone.insert(e.event.key)
                     return nil
                 }
@@ -124,26 +127,23 @@ final class EventQueue: Sendable {
             SDKLog.warn("tracking.event_dropped", ["reason": "queue_read_failed"])
             return nil
         }
-        do {
-            let all = try ISO8601Coding.makeDecoder().decode([Lossy].self, from: data)
-            let entries = all.compactMap(\.entry)
-            if entries.count != all.count {
-                SDKLog.warn("tracking.event_dropped", ["count": "\(all.count - entries.count)", "reason": "queue_corrupt"])
-                _ = write(entries)
-            }
-            return entries
-        } catch {
-            let n = ((try? JSONSerialization.jsonObject(with: data)) as? [Any])?.count ?? 0
-            SDKLog.warn("tracking.event_dropped", ["count": "\(n)", "reason": "queue_corrupt"])
+        guard let all = (try? JSONSerialization.jsonObject(with: data)) as? [Any] else {
+            SDKLog.warn("tracking.event_dropped", ["count": "0", "reason": "queue_corrupt"])
             _ = write([])
             return []
         }
+        let entries = all.compactMap(Entry.init(json:))
+        if entries.count != all.count {
+            SDKLog.warn("tracking.event_dropped", ["count": "\(all.count - entries.count)", "reason": "queue_corrupt"])
+            _ = write(entries)
+        }
+        return entries
     }
 
     private func write(_ items: [Entry]) -> Bool {
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            let data = try ISO8601Coding.makeEncoder().encode(items)
+            let data = try JSONSerialization.data(withJSONObject: items.map(\.json))
             try data.write(to: fileURL, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
             return true
         } catch {

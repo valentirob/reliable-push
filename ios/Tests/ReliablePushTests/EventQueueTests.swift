@@ -35,7 +35,8 @@ final class EventQueueTests: XCTestCase {
     func testCapDropsOldestWithWarn() throws {
         // Seed a full file directly (500 single adds would be slow), then overflow through the API.
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        try ISO8601Coding.makeEncoder().encode((0..<500).map { event("t\($0)") }).write(to: dir.appendingPathComponent("events.json"))
+        try JSONSerialization.data(withJSONObject: (0..<500).map { event("t\($0)").json })
+            .write(to: dir.appendingPathComponent("events.json"))
         let q = EventQueue(directory: dir)
         XCTAssertEqual(q.count, 500)
         for i in 500..<503 { q.add(event("t\(i)")) }

@@ -10,7 +10,7 @@ final class FakeSettings: NotificationSettingsSource, @unchecked Sendable {
 }
 
 extension GateSettings {
-    static let shown = GateSettings(authorization: .authorized, alert: true, notificationCenter: true, lockScreen: true)
+    static let shown = GateSettings(authorized: true, alert: true, notificationCenter: true, lockScreen: true)
 }
 
 /// Expiring-activity seam: runs each block with `false` on a background queue (like ProcessInfo), and `expire()`

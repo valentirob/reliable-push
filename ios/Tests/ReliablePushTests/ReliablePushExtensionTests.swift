@@ -124,8 +124,8 @@ final class ReliablePushExtensionTests: XCTestCase {
     }
 
     func testDeniedSettingsMeanNoDelivered() {
-        for status in [GateSettings.Authorization.denied, .notDetermined] {
-            fx.settings.set(GateSettings(authorization: status, alert: true, notificationCenter: true, lockScreen: true))
+        for status in [UNAuthorizationStatus.denied, .notDetermined] {
+            fx.settings.set(GateSettings(authorized: GateSettings.allows(status), alert: true, notificationCenter: true, lockScreen: true))
             let h = recorder()
             XCTAssertTrue(makeExtension().didReceive(request(["rp_tid": UUID().uuidString]), withContentHandler: h.handler))
             wait(for: [h.called], timeout: 5)
@@ -137,7 +137,8 @@ final class ReliablePushExtensionTests: XCTestCase {
     }
 
     func testAllPresentationsOffMeanNoDelivered() {
-        fx.settings.set(GateSettings(authorization: .authorized, alert: false, notificationCenter: false, lockScreen: false))
+        fx.settings.set(GateSettings(authorized: GateSettings.allows(.authorized), alert: false, notificationCenter: false,
+                                     lockScreen: false))
         let h = recorder()
         XCTAssertTrue(makeExtension().didReceive(request(["rp_tid": UUID().uuidString]), withContentHandler: h.handler))
         wait(for: [h.called], timeout: 5)
@@ -150,10 +151,11 @@ final class ReliablePushExtensionTests: XCTestCase {
     func testProvisionalCountsAsShown() {
         StubURLProtocol.reset { SDKFixture.acceptAll($0) }
         var expected: [String] = []
-        for status in [GateSettings.Authorization.provisional, .ephemeral] {
+        for status in [UNAuthorizationStatus.provisional, .ephemeral] {
             let tid = UUID().uuidString
             expected.append("\(tid)|DELIVERED")
-            fx.settings.set(GateSettings(authorization: status, alert: false, notificationCenter: true, lockScreen: false))
+            fx.settings.set(GateSettings(authorized: GateSettings.allows(status), alert: false, notificationCenter: true,
+                                         lockScreen: false))
             let h = recorder()
             XCTAssertTrue(makeExtension().didReceive(request(["rp_tid": tid]), withContentHandler: h.handler))
             wait(for: [h.called], timeout: 5)

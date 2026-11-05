@@ -1,5 +1,10 @@
 import Foundation
 
+/// `Task.sleep` for `seconds` (negative counts as 0); throws when cancelled.
+func sleep(_ seconds: TimeInterval) async throws {
+    try await Task.sleep(nanoseconds: UInt64(max(seconds, 0) * 1_000_000_000))
+}
+
 /// Runs work that must finish before the app is suspended (`ProcessInfo.performExpiringActivity`). The tests inject
 /// a fake. Contract (as ProcessInfo): `block(false)` runs the work synchronously and the activity lasts until it
 /// returns; `block(true)` (possibly concurrently, possibly without a prior `false`) means "stop now".
@@ -231,24 +236,21 @@ final class SDK: Sendable {
     /// Cancels the most recent app-side flush, if still running (it unwinds and releases `flush.lock`).
     func cancelFlush() { lastFlush.withLock { $0 }?.cancel() }
 
-    /// One flush bounded by `timeout`: the deadline is raced against the sender, whose in-flight request is then
-    /// cancelled. Returns once the sender has unwound, so `flush.lock` is released. Cancelling the calling task has
-    /// the same effect at once.
+    /// One flush bounded by `timeout`, by cancellation: a sleeping task cancels the flush at the deadline, which also
+    /// cancels its in-flight request. Returns once the sender has unwound, so `flush.lock` is released. Cancelling the
+    /// calling task has the same effect at once.
     func boundedFlush(timeout: TimeInterval) async -> FlushResult {
         if Task.isCancelled { return .retryLater }
         let sender = EventSender(api: api, tokens: tokens, state: env.state, queue: queue, flushLock: flushLock, now: env.now)
         let deadline = env.now().addingTimeInterval(timeout)
-        let nanos = UInt64(max(timeout, 0) * 1_000_000_000)
-        return await withTaskGroup(of: FlushResult?.self) { group in
-            group.addTask { await sender.flush(deadline: deadline) }
-            group.addTask {
-                try? await Task.sleep(nanoseconds: nanos)
-                return nil
-            }
-            let first = await group.next() ?? nil
-            group.cancelAll()
-            return first ?? .retryLater
+        let flush = Task { await sender.flush(deadline: deadline) }
+        let timer = Task {
+            try? await sleep(timeout)
+            flush.cancel()
         }
+        let result = await withTaskCancellationHandler { await flush.value } onCancel: { flush.cancel() }
+        timer.cancel()
+        return result
     }
 
     /// App-side flush (R12): runs inside an expiring activity and is bounded by `timeout`. When the activity expires

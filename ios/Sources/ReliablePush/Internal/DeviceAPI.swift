@@ -30,17 +30,17 @@ final class DeviceAPI: Sendable {
     // MARK: Endpoints
 
     func register(idToken: String, deviceId: String?) async -> APIResult<Registration> {
-        let body = RegisterBody(appId: appId, idToken: idToken, platform: "IOS", deviceId: deviceId)
-        return decode(await send("POST", "/v1/devices", token: nil, body: body, expected: 201), as: Registration.self) { $0 }
+        var body: JSONObject = ["appId": appId, "idToken": idToken, "platform": "IOS"]
+        if let deviceId { body["deviceId"] = deviceId }
+        return decode(await send("POST", "/v1/devices", token: nil, body: body, expected: 201), Registration.init(json:))
     }
 
     func refresh(token: String) async -> APIResult<IssuedToken> {
-        decode(await send("POST", "/v1/devices/token:refresh", token: token, body: nil as EventsBody?, expected: 200),
-               as: IssuedToken.self) { $0 }
+        decode(await send("POST", "/v1/devices/token:refresh", token: token, body: nil, expected: 200), IssuedToken.init(json:))
     }
 
     func revoke(token: String) async -> APIResult<Void> {
-        switch await send("DELETE", "/v1/devices/me", token: token, body: nil as EventsBody?, expected: 204) {
+        switch await send("DELETE", "/v1/devices/me", token: token, body: nil, expected: 204) {
         case .ok: return .ok(())
         case let .http(status, retryAfter): return .http(status: status, retryAfterSeconds: retryAfter)
         case .networkError: return .networkError
@@ -48,21 +48,17 @@ final class DeviceAPI: Sendable {
     }
 
     func sendEvents(token: String, events: [QueuedEvent]) async -> APIResult<[EventOutcome]> {
-        // `items` is optional on our side: a 200 that omits it acknowledges nothing.
-        decode(await send("POST", "/v1/events", token: token, body: EventsBody(events: events), expected: 200),
-               as: EventsResponse.self) { $0.items ?? [] }
+        // `items` is optional on our side: a 200 that omits it (or sends null) acknowledges nothing. Any malformed item
+        // makes the whole answer unusable, as before.
+        decode(await send("POST", "/v1/events", token: token, body: ["events": events.map(\.json)], expected: 200)) { json in
+            guard let raw = json["items"], !(raw is NSNull) else { return [] }
+            guard let list = raw as? [Any] else { return nil }
+            let items = list.compactMap(EventOutcome.init(json:))
+            return items.count == list.count ? items : nil
+        }
     }
 
     // MARK: Plumbing
-
-    private struct RegisterBody: Encodable {
-        let appId: String
-        let idToken: String
-        let platform: String
-        let deviceId: String?
-    }
-    private struct EventsBody: Encodable { let events: [QueuedEvent] }
-    private struct EventsResponse: Decodable { let items: [EventOutcome]? }
 
     private struct Raw: Sendable {
         let status: Int
@@ -71,7 +67,7 @@ final class DeviceAPI: Sendable {
     }
 
     /// Performs the call; `.ok` carries the raw body when the status is `expected`.
-    private func send<B: Encodable>(_ method: String, _ path: String, token: String?, body: B?, expected: Int) async -> APIResult<Data> {
+    private func send(_ method: String, _ path: String, token: String?, body: JSONObject?, expected: Int) async -> APIResult<Data> {
         // Built from the string: appendingPathComponent could re-encode the ':' of `token:refresh`.
         guard let url = URL(string: baseURL.absoluteString + path) else { return .networkError }
         var request = URLRequest(url: url)
@@ -81,7 +77,7 @@ final class DeviceAPI: Sendable {
         request.setValue("application/json, application/problem+json", forHTTPHeaderField: "Accept")
         if let token { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
         if let body {
-            guard let data = try? ISO8601Coding.makeEncoder().encode(body) else { return .networkError }
+            guard let data = JSON.data(body) else { return .networkError }
             request.httpBody = data
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         }
@@ -90,14 +86,12 @@ final class DeviceAPI: Sendable {
         return .ok(raw.body)
     }
 
-    private func decode<R: Decodable, T: Sendable>(_ result: APIResult<Data>, as type: R.Type, map: (R) -> T) -> APIResult<T> {
+    /// An empty body counts as `{}`; a body that is not a JSON object, or that `map` rejects, is a `.networkError`.
+    private func decode<T: Sendable>(_ result: APIResult<Data>, _ map: (JSONObject) -> T?) -> APIResult<T> {
         switch result {
         case let .ok(data):
-            do {
-                return .ok(map(try ISO8601Coding.makeDecoder().decode(R.self, from: data.isEmpty ? Data("{}".utf8) : data)))
-            } catch {
-                return .networkError
-            }
+            guard let json = data.isEmpty ? [:] : JSON.object(data), let value = map(json) else { return .networkError }
+            return .ok(value)
         case let .http(status, retryAfter): return .http(status: status, retryAfterSeconds: retryAfter)
         case .networkError: return .networkError
         }

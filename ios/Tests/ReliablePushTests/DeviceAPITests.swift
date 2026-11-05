@@ -93,7 +93,7 @@ final class DeviceAPITests: XCTestCase {
             QueuedEvent(trackingId: "t2", type: .read, occurredAt: Date(timeIntervalSince1970: 1_793_872_801)),
         ]
         guard case let .ok(outcomes) = await makeAPI().sendEvents(token: "tok", events: events) else { return XCTFail() }
-        XCTAssertEqual(outcomes, [EventOutcome(trackingId: "t1", outcome: "ACCEPTED"), EventOutcome(trackingId: "t2", outcome: "DUPLICATE")])
+        XCTAssertEqual(outcomes.map { "\($0.trackingId)|\($0.outcome)" }, ["t1|ACCEPTED", "t2|DUPLICATE"])
 
         let req = try XCTUnwrap(StubURLProtocol.requests.first)
         XCTAssertEqual(req.url.absoluteString, "https://rp.example/v1/events")

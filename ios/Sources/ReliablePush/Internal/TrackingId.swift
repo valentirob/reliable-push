@@ -4,7 +4,7 @@ import Foundation
 enum TrackingId {
     static let key = "rp_tid"
 
-    enum Parsed: Equatable {
+    enum Parsed {
         /// No `rp_tid`: the notification is not the SDK's.
         case notOurs
         /// `rp_tid` present but not a UUID string (already logged as WARN).

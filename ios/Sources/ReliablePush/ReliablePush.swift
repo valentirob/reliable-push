@@ -33,9 +33,7 @@ public enum ReliablePush {
     ///   `.invalidAppId` for a blank app id, `.appGroupUnavailable` when the App Group cannot be opened.
     public static func configure(baseURL: String, appId: String, appGroup: String,
                                  options: ReliablePushOptions = .init()) throws(ReliablePushError) {
-        try configure(baseURL: baseURL, appId: appId) { () throws(ReliablePushError) in
-            try SDKEnvironment.appGroup(appGroup, options: options)
-        }
+        try configure(baseURL: baseURL, appId: appId, appGroup: appGroup, options: options, environment: nil)
     }
 
     /// Registers this installation for the signed-in user, exchanging the app's ID token for a device token stored in
@@ -104,16 +102,15 @@ public enum ReliablePush {
 
     // MARK: Internal (also the test entry points)
 
-    static func configure(baseURL: String, appId: String, environment: SDKEnvironment) throws(ReliablePushError) {
-        try configure(baseURL: baseURL, appId: appId) { environment }
-    }
-
-    /// Validates the arguments first (so a bad URL never touches the App Group), then resolves the environment.
-    private static func configure(baseURL: String, appId: String,
-                                  environment: () throws(ReliablePushError) -> SDKEnvironment) throws(ReliablePushError) {
+    /// Validates the arguments first (so a bad URL never touches the App Group), then uses `environment` (tests) or
+    /// resolves the App Group's.
+    static func configure(baseURL: String, appId: String, appGroup: String = "", options: ReliablePushOptions = .init(),
+                          environment: SDKEnvironment?) throws(ReliablePushError) {
         let url = try BaseURL.validate(baseURL)
         if appId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { throw .invalidAppId }
-        SDK.configure(baseURL: url, appId: appId, env: try environment())
+        let env: SDKEnvironment
+        if let environment { env = environment } else { env = try SDKEnvironment.appGroup(appGroup, options: options) }
+        SDK.configure(baseURL: url, appId: appId, env: env)
     }
 
     static func trackOpen(userInfo: [AnyHashable: Any], actionIdentifier: String) -> Bool {

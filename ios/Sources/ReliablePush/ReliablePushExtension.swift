@@ -133,7 +133,8 @@ public final class ReliablePushExtension: @unchecked Sendable {
         }) { task.cancel() }
         // Safety net only (the bounded flush normally returns first): hands the notification back even if the
         // flush has not unwound by then.
-        DispatchQueue.global().asyncAfter(deadline: .now() + remaining + Self.safetyMargin) { [self] in
+        Task { [self] in
+            try? await sleep(remaining + Self.safetyMargin)
             task.cancel()
             finish(expired: false)
         }
