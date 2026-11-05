@@ -17,7 +17,7 @@ import java.io.IOException
  * consistent; mutual exclusion uses one process-wide lock rather than a per-instance one for the same reason.
  * A corrupt file counts as empty. A write failure is logged and the event is lost (no crash on a push path).
  */
-internal class EventQueue(dir: File, private val debugLogging: Boolean = false) {
+internal class EventQueue(dir: File) {
     private val file = AtomicFile(File(dir, FILE_NAME))
     private val dir = dir
 
@@ -31,9 +31,9 @@ internal class EventQueue(dir: File, private val debugLogging: Boolean = false) 
             dropped++
         }
         if (write(items)) {
-            RpLog.info("event=tracking.event_queued tid=${event.trackingId} type=${event.type}", debugLogging)
+            SdkLog.info("tracking.event_queued", "tid" to event.trackingId, "type" to event.type)
         }
-        if (dropped > 0) RpLog.warn("event=tracking.event_dropped count=$dropped reason=queue_full")
+        if (dropped > 0) SdkLog.warn("tracking.event_dropped", "count" to dropped, "reason" to "queue_full")
     }
 
     /** The oldest [max] events whose key is not in [exclude]. */
@@ -84,7 +84,7 @@ internal class EventQueue(dir: File, private val debugLogging: Boolean = false) 
         } catch (e: FileNotFoundException) {
             return ArrayList() // no file yet
         } catch (e: IOException) {
-            RpLog.warn("event=tracking.event_dropped reason=queue_read_failed")
+            SdkLog.warn("tracking.event_dropped", "reason" to "queue_read_failed")
             return null
         }
         return try {
@@ -101,7 +101,7 @@ internal class EventQueue(dir: File, private val debugLogging: Boolean = false) 
                 }
             }
         } catch (e: JSONException) {
-            RpLog.warn("event=tracking.event_dropped reason=queue_corrupt")
+            SdkLog.warn("tracking.event_dropped", "reason" to "queue_corrupt")
             ArrayList()
         }
     }
@@ -118,7 +118,7 @@ internal class EventQueue(dir: File, private val debugLogging: Boolean = false) 
         val out = try {
             file.startWrite()
         } catch (e: IOException) {
-            RpLog.warn("event=tracking.event_dropped reason=queue_write_failed")
+            SdkLog.warn("tracking.event_dropped", "reason" to "queue_write_failed")
             return false
         }
         return try {
@@ -127,7 +127,7 @@ internal class EventQueue(dir: File, private val debugLogging: Boolean = false) 
             true
         } catch (e: IOException) {
             file.failWrite(out)
-            RpLog.warn("event=tracking.event_dropped reason=queue_write_failed")
+            SdkLog.warn("tracking.event_dropped", "reason" to "queue_write_failed")
             false
         }
     }

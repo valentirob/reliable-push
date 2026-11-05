@@ -3,7 +3,6 @@ package io.reliablepush.android.internal
 import android.content.Context
 import android.content.SharedPreferences
 import android.util.Base64
-import android.util.Log
 
 internal data class StoredRegistration(val deviceId: String, val token: DeviceToken)
 
@@ -55,6 +54,9 @@ internal class TokenStore(context: Context, private val cipher: TokenCipher) {
         }
     }
 
+    /** The stored device id when a token is stored too; no decryption (so an unreadable token still shows its id). */
+    fun deviceId(): String? = if (prefs.contains(KEY_TOKEN)) prefs.getString(KEY_DEVICE_ID, null) else null
+
     fun clear() {
         prefs.edit().remove(KEY_DEVICE_ID).remove(KEY_TOKEN).remove(KEY_EXPIRES_AT).commit()
     }
@@ -72,7 +74,7 @@ internal class TokenStore(context: Context, private val cipher: TokenCipher) {
     private fun unreadable(): StoredRegistration? {
         clear()
         try { cipher.reset() } catch (e: Exception) { /* best effort */ }
-        Log.w("ReliablePush", "event=token.unreadable") // Task 4 moves this to SdkLog
+        SdkLog.warn("token.unreadable")
         return null
     }
 

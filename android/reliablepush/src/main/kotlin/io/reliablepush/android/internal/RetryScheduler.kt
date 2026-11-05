@@ -23,10 +23,10 @@ internal class RetryScheduler(private val context: Context, private val jobId: I
                 .setPersisted(false)
                 .build()
             if (scheduler?.schedule(job) == JobScheduler.RESULT_FAILURE) {
-                RpLog.warn("event=retry.schedule_failed")
+                SdkLog.warn("retry.schedule_failed")
             }
         } catch (e: RuntimeException) { // e.g. the OS refuses (too many jobs); never crash a push path
-            RpLog.warn("event=retry.schedule_failed")
+            SdkLog.warn("retry.schedule_failed")
         }
     }
 

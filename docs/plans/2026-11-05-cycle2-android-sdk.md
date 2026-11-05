@@ -251,7 +251,7 @@ The SDK posts the visible notification first, persists the event, schedules the 
   - `public object ReliablePushMessaging { fun onMessageReceived(context: Context, message: RemoteMessage): Boolean }`: delegates to `handle(context, message.data, message.notification?.title, message.notification?.body)`. Hosts call it from their `FirebaseMessagingService.onMessageReceived`; if it returns `false` the message is the host's.
   - Notification: channel created on first post. Notification id = `rp_tid.hashCode()`, tag `rp`. Content intent is `PendingIntent.getActivity` (immutable) on the launch activity, with extra `rp_tid`, `autoCancel`. Title falls back to `data.title`, then `fallbackTitle`, then the app label; body falls back to `data.body`, then `fallbackBody`, then `""`.
 
-- [ ] **Step 1: Failing tests** (Robolectric, `TestBackend` from Task 1):
+- [x] **Step 1: Failing tests** (Robolectric, `TestBackend` from Task 1):
   - `handleIgnoresMessageWithoutRpTid()` (returns false, nothing posted, nothing queued)
   - `handleIgnoresMalformedRpTid()` (WARN)
   - `handlePostsNotificationThenQueuesDelivered()` (`ShadowNotificationManager` shows 1 notification with title/body; the backend receives `DELIVERED` for the id)
@@ -265,8 +265,8 @@ The SDK posts the visible notification first, persists the event, schedules the 
   - `configureRejectsCleartextRemoteUrl()`
   - `releaseBuildLogsOnlyWarnAndAbove()` (`SdkLog` with debuggable false → no INFO line)
   - `messagingAdapterUsesNotificationFieldsAsFallback()`
-- [ ] **Step 2: Run** → FAIL. **Step 3: Implement** with a single-thread executor owned by `Sdk` and a main-thread `Handler` for callbacks. **Step 4: Run** `./gradlew build` → PASS.
-- [ ] **Step 5: Commit** `feat(android): public api, notification and fcm v1 entry point`
+- [x] **Step 2: Run** → FAIL. **Step 3: Implement** with a single-thread executor owned by `Sdk` and a main-thread `Handler` for callbacks. **Step 4: Run** `./gradlew build` → PASS.
+- [x] **Step 5: Commit** `feat(android): public api, notification and fcm v1 entry point`
 
 ### Task 5: Harness — grants and real devices
 

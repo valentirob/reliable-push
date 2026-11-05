@@ -2,10 +2,6 @@ package io.reliablepush.android.internal
 
 import android.app.job.JobParameters
 import android.app.job.JobService
-import android.content.Context
-import android.content.pm.ApplicationInfo
-import io.reliablepush.android.ReliablePush
-import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -39,7 +35,7 @@ internal fun runJob(flush: () -> FlushResult, isStopped: () -> Boolean, finish: 
     val result = try {
         flush()
     } catch (t: Throwable) { // never crash the host app from a job, and always finish
-        RpLog.warn("event=retry.failed")
+        SdkLog.warn("retry.failed")
         FlushResult.RetryLater(null)
     }
     if (isStopped()) return
@@ -47,24 +43,26 @@ internal fun runJob(flush: () -> FlushResult, isStopped: () -> Boolean, finish: 
 }
 
 /**
- * Thin glue: runs the flush for the one-off retry job on a background thread. Without config or registration it ends
- * without reschedule. [onStopJob] (runtime limit, constraints lost) flips the stop flag of that very start, so the
- * sender stops after the current batch, and returns true to have the job rescheduled.
+ * Thin glue: runs the flush for the one-off retry job on the SDK thread (so it never overlaps a flush started by
+ * `handle`, `trackOpen` or `register`), composed by [Sdk.fromStoredConfig] with the job id of [JobParameters]. Without
+ * config or registration it ends without reschedule. [onStopJob] (runtime limit, constraints lost) flips the stop flag
+ * of that very start, so the sender stops after the current batch, and returns true to have the job rescheduled.
  */
 internal class RetryJobService : JobService() {
     // One flag per started job; a worker only ever looks at the flag it was started with.
     private val flags = ConcurrentHashMap<Int, AtomicBoolean>()
 
     override fun onStartJob(params: JobParameters): Boolean {
+        SdkLog.init(this)
         val stopped = AtomicBoolean(false)
         flags[params.jobId] = stopped
-        Thread({
+        Sdk.execute {
             try {
-                runJob({ flush(stopped) }, stopped::get) { finish(params, it) }
+                runJob({ flush(params.jobId, stopped) }, stopped::get) { finish(params, it) }
             } finally {
                 flags.remove(params.jobId, stopped)
             }
-        }, "rp-retry").start()
+        }
         return true
     }
 
@@ -84,17 +82,8 @@ internal class RetryJobService : JobService() {
         }
     }
 
-    private fun flush(stopped: AtomicBoolean): FlushResult {
-        val store = TokenStore(this, KeystoreTokenCipher())
-        val (baseUrl, appId) = store.loadConfig() ?: return FlushResult.NotRegistered
-        val api = DeviceApi(baseUrl, appId, "reliable-push-android/${ReliablePush.VERSION}")
-        val debug = applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
-        val queue = EventQueue(defaultQueueDir(this), debug)
-        return EventSender(api, store, queue, System::currentTimeMillis, debug) { stopped.get() }.flush()
-    }
-
-    companion object {
-        /** `noBackupFilesDir/reliablepush`, where `events.json` lives. */
-        fun defaultQueueDir(context: Context) = File(context.noBackupFilesDir, "reliablepush")
+    private fun flush(jobId: Int, stopped: AtomicBoolean): FlushResult {
+        val sdk = Sdk.fromStoredConfig(this, jobId) ?: return FlushResult.NotRegistered
+        return sdk.sender { stopped.get() }.flush()
     }
 }

@@ -294,7 +294,7 @@ class EventSenderTest {
         fill(120)
         echoAll()
         var calls = 0
-        val s = EventSender(DeviceApi(backend.baseUrl, "news", "ua"), store, queue, { now }, false) { calls++ >= 1 }
+        val s = EventSender(DeviceApi(backend.baseUrl, "news", "ua"), store, queue, { now }) { calls++ >= 1 }
         assertEquals(FlushResult.RetryLater(null), s.flush())
         assertEquals(1, eventRequests().size)
         assertEquals(70, queue.size())

@@ -37,7 +37,6 @@ internal class EventSender(
     private val store: TokenStore,
     private val queue: EventQueue,
     private val clock: () -> Long,
-    private val debugLogging: Boolean = false,
     private val shouldStop: () -> Boolean = { false },
 ) {
     fun flush(): FlushResult {
@@ -63,7 +62,7 @@ internal class EventSender(
             var result = api.sendEvents(token, batch)
             if (result is ApiResult.Http && result.status == 401) {
                 if (!RefreshGate.tryAcquire()) {
-                    RpLog.warn("event=auth.failed status=401 refresh=exhausted")
+                    SdkLog.warn("auth.failed", "status" to 401, "refresh" to "exhausted")
                     return FlushResult.RetryLater(null)
                 }
                 when (val r = refresh(stored.deviceId, token)) {
@@ -72,7 +71,7 @@ internal class EventSender(
                 }
                 result = api.sendEvents(token, batch)
                 if (result is ApiResult.Http && result.status == 401) {
-                    RpLog.warn("event=auth.failed status=401 refresh=done")
+                    SdkLog.warn("auth.failed", "status" to 401, "refresh" to "done")
                     return FlushResult.RetryLater(null)
                 }
             }
@@ -84,9 +83,9 @@ internal class EventSender(
                     val s = result.status
                     if (s in 400..499 && s != 401 && s != 408 && s != 429) {
                         queue.remove(batch.map { EventQueue.keyOf(it.trackingId, it.type) })
-                        RpLog.warn("event=tracking.event_dropped count=${batch.size} status=$s")
+                        SdkLog.warn("tracking.event_dropped", "count" to batch.size, "status" to s)
                     } else {
-                        if (s == 429) RpLog.warn("event=rate_limit.exceeded retry_after=${result.retryAfterSeconds}")
+                        if (s == 429) SdkLog.warn("rate_limit.exceeded", "retry_after" to result.retryAfterSeconds)
                         return FlushResult.RetryLater(result.retryAfterSeconds)
                     }
                 }
@@ -108,17 +107,17 @@ internal class EventSender(
                 "ACCEPTED", "DUPLICATE", "LATE" -> { done.add(key); sent++ }
                 "NOT_FOUND", "FORBIDDEN" -> {
                     done.add(key)
-                    RpLog.warn("event=tracking.event_dropped count=1 outcome=$outcome tid=${e.trackingId}")
+                    SdkLog.warn("tracking.event_dropped", "count" to 1, "outcome" to outcome, "tid" to e.trackingId)
                 }
                 else -> missed.add(key)
             }
         }
         queue.remove(done)
-        if (sent > 0) RpLog.info("event=tracking.event_sent count=$sent", debugLogging)
+        if (sent > 0) SdkLog.info("tracking.event_sent", "count" to sent)
         if (missed.isNotEmpty()) {
             val gone = queue.noteUnacknowledged(missed)
             if (gone.isNotEmpty()) {
-                RpLog.warn("event=tracking.event_dropped count=${gone.size} reason=unacknowledged")
+                SdkLog.warn("tracking.event_dropped", "count" to gone.size, "reason" to "unacknowledged")
             }
         }
     }
@@ -132,7 +131,7 @@ internal class EventSender(
             is ApiResult.Ok -> {
                 val issued = r.value
                 if (store.save(Registration(deviceId, issued.deviceToken, issued.expiresAt))) {
-                    RpLog.info("event=token.refreshed", debugLogging)
+                    SdkLog.info("token.refreshed", "device_id" to deviceId)
                     Refreshed(issued.deviceToken)
                 } else {
                     RefreshFailed(FlushResult.NotRegistered)
@@ -141,7 +140,7 @@ internal class EventSender(
             is ApiResult.Http ->
                 if (r.status == 401) {
                     store.clear()
-                    RpLog.warn("event=auth.failed status=401 refresh=rejected")
+                    SdkLog.warn("auth.failed", "status" to 401, "refresh" to "rejected")
                     RefreshFailed(FlushResult.NotRegistered)
                 } else {
                     RefreshFailed(FlushResult.RetryLater(r.retryAfterSeconds))
