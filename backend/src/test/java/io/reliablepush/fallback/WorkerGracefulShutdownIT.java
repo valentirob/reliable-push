@@ -20,6 +20,8 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
@@ -42,7 +44,9 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
  * A worker that is shut down mid-dispatch (what SIGTERM does in Kubernetes): the call in flight finishes and its outcome
  * is written before the connection pool closes, nothing more is claimed, no ERROR is logged. The application runs in
  * a context this test closes itself, against its own PostgreSQL, so no other IT's rows or workers are involved. The
- * worker polls every 50 ms and uses the real clock; the receiver answers after a fixed 2 s delay.
+ * worker polls every 50 ms, claims one row at a time ({@code batch-size} 1, so {@code max-concurrency} 1) and uses the
+ * real clock; the receiver answers after a fixed 2 s delay. With one slot, a tick that dispatched a row waits for that
+ * slot and would then claim again: only the stop flag ends it, so {@link #noClaimAfterClose} fails without the flag.
  */
 class WorkerGracefulShutdownIT {
 
@@ -82,6 +86,7 @@ class WorkerGracefulShutdownIT {
                         "--RP_TEST_DEVICE_KEY_K1=" + keys.privateKeyPem(),
                         "--RP_TEST_DEVICE_PUB_K1=" + keys.publicKeyPem(),
                         "--reliable-push.worker.poll-interval=50ms",
+                        "--reliable-push.worker.batch-size=1",
                         "--reliable-push.apps." + APP + ".fallback.url=http://localhost:" + receiver.port() + "/hook");
         scheduler = context.getBean(FallbackScheduler.class);
         notifications = context.getBean(NotificationRepository.class);
@@ -114,6 +119,26 @@ class WorkerGracefulShutdownIT {
         notifications.insert(new Notification(id, APP, "user-" + id, null, FallbackPolicy.NOT_DELIVERED, 10,
                 "{\"sms\":\"x\"}", NotificationState.PENDING, now.minusSeconds(60), now.minusSeconds(1), null, null,
                 null));
+        return id;
+    }
+
+    /** Like {@link #insertDue()}, through a connection of its own: the application's pool may already be closing. */
+    private static UUID insertDueDirect() throws SQLException {
+        UUID id = UUID.randomUUID();
+        OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC).truncatedTo(ChronoUnit.MICROS);
+        try (Connection c = POSTGRES.createConnection("");
+                PreparedStatement ps = c.prepareStatement(
+                        "insert into notification (id, app_id, user_id, policy, timeout_minutes, fallback_payload, state,"
+                                + " created_at, due_at) values (?, ?, ?, 'NOT_DELIVERED', 10, cast(? as jsonb),"
+                                + " 'PENDING', ?, ?)")) {
+            ps.setObject(1, id);
+            ps.setString(2, APP);
+            ps.setString(3, "user-" + id);
+            ps.setString(4, "{\"sms\":\"x\"}");
+            ps.setObject(5, now.minusSeconds(60));
+            ps.setObject(6, now.minusSeconds(1));
+            ps.executeUpdate();
+        }
         return id;
     }
 
@@ -177,9 +202,11 @@ class WorkerGracefulShutdownIT {
 
         CompletableFuture<Void> closing = CompletableFuture.runAsync(context::close);
         awaitTrue("stop requested", scheduler::isStopRequested);
-        // falls due only now: the worker polls every 50 ms and the in-flight call lasts 2 s, so a worker that still
-        // claimed would have taken it long before close() returns
-        UUID late = insertDue();
+        // the flag is set while the tick still runs (its row is in flight), not after the tick ended
+        assertThat(stateAndClosed(inFlight)).startsWith("DISPATCHING");
+        // falls due only now, while the tick waits for its one slot: once the in-flight call (2 s) frees the slot, a
+        // worker without the stop flag would claim this row in the same tick
+        UUID late = insertDueDirect();
         closing.get(60, TimeUnit.SECONDS);
 
         assertThat(stateAndClosed(inFlight)).isEqualTo("FALLBACK_TRIGGERED/closed");

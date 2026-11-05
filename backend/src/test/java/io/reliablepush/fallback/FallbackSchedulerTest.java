@@ -89,6 +89,31 @@ class FallbackSchedulerTest {
     }
 
     @Test
+    void awaitIdleWaitsForEveryTickWhenTicksOverlap() throws Exception {
+        CountDownLatch inFlight = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        // the first claim (tick A) gets a row, every later claim (tick B, then A's next claim) finds nothing
+        when(notifications.claimDue(any(), any(), anyInt())).thenReturn(List.of(row())).thenReturn(List.of());
+        doAnswer(invocation -> {
+            inFlight.countDown();
+            release.await();
+            return null;
+        }).when(dispatcher).process(any());
+        FallbackScheduler scheduler = scheduler();
+
+        CompletableFuture<Integer> tickA = CompletableFuture.supplyAsync(scheduler::tick);
+        assertThat(inFlight.await(30, TimeUnit.SECONDS)).isTrue();
+        assertThat(scheduler.tick()).isZero(); // tick B starts and ends while A still runs
+
+        // A is still running: the scheduler is not idle although the last tick to end was B
+        assertThat(scheduler.awaitIdle(Duration.ofMillis(100))).isFalse();
+
+        release.countDown();
+        assertThat(tickA.get(30, TimeUnit.SECONDS)).isEqualTo(1);
+        assertThat(scheduler.awaitIdle(LONG)).isTrue();
+    }
+
+    @Test
     void awaitIdleReturnsAtOnceWithoutTick() {
         assertThat(scheduler().awaitIdle(Duration.ofMillis(1))).isTrue();
     }

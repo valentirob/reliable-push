@@ -46,7 +46,7 @@ public class FallbackScheduler {
     private final AtomicInteger rowsInFlight = new AtomicInteger();
     private final ReentrantLock lock = new ReentrantLock();
     private final Condition idle = lock.newCondition();
-    private boolean ticking; // guarded by lock
+    private int ticksRunning; // guarded by lock; a count, so awaitIdle stays correct even if ticks overlap
 
     FallbackScheduler(
             NotificationRepository notifications,
@@ -78,7 +78,7 @@ public class FallbackScheduler {
     public int tick() {
         lock.lock();
         try {
-            ticking = true;
+            ticksRunning++;
         } finally {
             lock.unlock();
         }
@@ -87,8 +87,9 @@ public class FallbackScheduler {
         } finally {
             lock.lock();
             try {
-                ticking = false;
-                idle.signalAll();
+                if (--ticksRunning == 0) {
+                    idle.signalAll();
+                }
             } finally {
                 lock.unlock();
             }
@@ -113,7 +114,7 @@ public class FallbackScheduler {
     }
 
     /**
-     * Waits until no tick is running.
+     * Waits until no tick is running (every running tick has returned, should ticks ever overlap).
      *
      * @return {@code true} if idle, {@code false} if a tick was still running after {@code timeout} (or the thread was
      *     interrupted)
@@ -122,7 +123,7 @@ public class FallbackScheduler {
         long nanos = timeout.toNanos();
         lock.lock();
         try {
-            while (ticking) {
+            while (ticksRunning > 0) {
                 if (nanos <= 0) {
                     return false;
                 }
