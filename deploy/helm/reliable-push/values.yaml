@@ -47,26 +47,40 @@ config:
   #       url: https://fallback.example.com/hook
   #       hmac-secret-ref: env:RP_SHOP_HOOK_SECRET
 
+# Sizing defaults come from the local load runs in docs/operations.md ("Measured capacity"); they are relative to that
+# machine, so confirm them on your cluster. Keep replicas x hikariMaximumPoolSize (API + worker) below PostgreSQL
+# max_connections (defaults: 2 x 10 + 2 x 20 = 60).
+
 # API pods (and the combined Deployment, which also uses worker.maxConcurrency).
 api:
   replicas: 2
+  # 5 already sustained the NFR-2 load (about 0.15 ms of connection time per request, database on the same host);
+  # 10 leaves room for a database across the network.
   hikariMaximumPoolSize: 10
   podDisruptionBudget:
     minAvailable: 1       # rendered only when replicas > 1
+  # requests: measured at the NFR-2 load (1,500 requests/s per replica): 0.62 CPU and 275 MiB RSS, + 30 %.
+  # limits: the replica size NFR-2 was verified at (2 CPUs / 1 GiB); the JVM sizes its heap from the memory limit.
+  # In combined mode the same pods also run the worker: add worker.resources.requests (about 1300m / 768Mi).
   resources:
-    requests: { cpu: 500m, memory: 768Mi }
+    requests: { cpu: 800m, memory: 384Mi }
     limits: { cpu: "2", memory: 1Gi }
 
 worker:
   replicas: 2
   strategy: RollingUpdate   # RollingUpdate | Recreate
-  maxConcurrency: 100
-  hikariMaximumPoolSize: 10
+  # Best measured single-worker setting (200 / 20). Webhook calls in flight per replica: the receiver must accept
+  # replicas x maxConcurrency concurrent calls. Pool about maxConcurrency / 10 (only outcome writes hold a connection).
+  maxConcurrency: 200
+  hikariMaximumPoolSize: 20
   podDisruptionBudget:
     minAvailable: 1
+  # requests: measured while keeping up with a 1,500 rows/s burst: 0.4 CPU, + 30 %; memory: RSS 270 MiB + 30 %.
+  # limits: draining a backlog uses the whole CPU limit (about 3,100-3,400 rows/s at 1 CPU with a fast receiver);
+  # 512Mi verified with -XX:MaxRAMPercentage=75 as in javaToolOptions (heap up to 384 MiB, non-heap about 115 MiB).
   resources:
-    requests: { cpu: 250m, memory: 512Mi }
-    limits: { cpu: "1", memory: 768Mi }
+    requests: { cpu: 500m, memory: 384Mi }
+    limits: { cpu: "1", memory: 512Mi }
 
 # The image's baked defaults are replaced by this value, so repeat them when you change it.
 javaToolOptions: "-XX:MaxRAMPercentage=75 -XX:+ExitOnOutOfMemoryError"

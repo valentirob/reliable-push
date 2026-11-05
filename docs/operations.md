@@ -224,7 +224,9 @@ is harmless. It logs `retention.purged` with the count. Devices are not purged b
   pool. A request that gets no connection within `spring.datasource.hikari.connection-timeout` (5 s here, Hikari's
   default is 30 s) is answered `503` with `Retry-After: 5` (logged as one WARN line, not ERROR), so clients back off
   instead of piling up. Size the pool as `maximum-pool-size ≈ peak requests per second × average connection time per
-  request` with headroom (10 connections at ~5 ms each serve about 2,000 requests/s), and keep
+  request` with headroom (10 connections at ~5 ms each serve about 2,000 requests/s; measured against a database on the
+  same host: about 0.15 ms per request, so 5 connections carried the NFR-2 load, see
+  [Measured capacity](#measured-capacity); each network round trip to a remote database adds to it), and keep
   `replicas × maximum-pool-size` (plus the worker replicas' pools) below PostgreSQL `max_connections`. Frequent 503s with a
   healthy database mean the pool is too small or the replicas too few.
 - **Database pool vs. worker batch:** every claimed row runs on its own virtual thread (up to `max-concurrency` at a
@@ -240,9 +242,12 @@ is harmless. It logs `retention.purged` with the count. Devices are not purged b
   `(lease/2) / (lease/2 + http-timeout + poll-interval)` (about 80 % with the defaults). Examples with the defaults
   (`max-concurrency` 100): a 200 ms receiver gives about 400 rows/s, so a 90,000-row campaign that falls due at once
   is dispatched in about 4 minutes; a 2 s receiver gives about 40 rows/s, about 38 minutes, which is longer than the
-  20-minute trigger window, so most of it would expire. Size for `backlog / (rows per second x replicas)` well inside
+  20-minute trigger window, so most of it would expire (the Helm chart sets `max-concurrency` 200, which doubles these
+  rates). Size for `backlog / (rows per second x replicas)` well inside
   `trigger-window-minutes`: raise `max-concurrency` (and the receiver's capacity), add worker replicas, or both.
-  `rp_due_backlog` shows how far behind the workers are.
+  The formula holds only below the worker's own ceiling: with a receiver that answers at once, one replica limited to
+  1 CPU dispatched about 3,100-3,400 rows/s, and a second replica did not help once PostgreSQL ran out of CPU
+  ([Measured capacity](#measured-capacity)). `rp_due_backlog` shows how far behind the workers are.
 - **Graceful stop:** on `SIGTERM` (Kubernetes rolling update, scale-down) a worker claims nothing more and finishes the
   webhook calls in flight, writing their outcomes before the connection pool closes, for at most
   `worker.shutdown-timeout`. A call that outlives it is logged once at WARN (`worker stop timed out; N rows may be
@@ -259,6 +264,65 @@ is harmless. It logs `retention.purged` with the count. Devices are not purged b
   after one lease) and expires them 20 minutes after `due_at`; add new apps to all replicas before sending traffic.
 - **Fast clock:** only for local tests: `testing.minute-duration` scales the notification timeout, trigger window, webhook
   backoff and lease alike.
+
+### Measured capacity
+
+Measured on 2026-11-05 with `./scripts/load.sh` (local only, never in CI) on one Apple Silicon Mac (`Mac17,2`, 10 cores,
+16 GiB) running Colima with 4 CPUs / 6 GiB: API container limited to 2 CPUs / 1 GiB, PostgreSQL 16 to 1 CPU, the Gatling
+generator to 1 CPU on the same compose network (it averaged 9-13 % CPU during ingest and 32-54 % during bursts, so it
+was never the limit), workers without a limit unless stated, database on the same host. All containers share 4 vCPUs.
+**The numbers are relative to this machine**: use them as ratios and orders of magnitude, then confirm on your cluster.
+
+**NFR-2 (API ingest): passed.** One API replica (2 CPUs / 1 GiB) took 1,000 `POST /v1/events`/s (one event each) plus
+500 `POST /v1/notifications`/s for 5 minutes after a 60 s ramp (open model, offered load fixed):
+
+| API pool | register p95 / p99 | events p95 / p99 | failed | API CPU avg / max | API memory (RSS) |
+|---|---|---|---|---|---|
+| 5 | 1 / 34 ms | 2 / 38 ms | 0 % | 0.64 / 0.80 CPU | 275 MiB |
+| 10 (default) | 1 / 30 ms | 2 / 38 ms | 0 % | 0.61 / 0.70 CPU | 264 MiB |
+| 20 | 1 / 28 ms | 2 / 36 ms | 0 % | 0.62 / 0.69 CPU | 275 MiB |
+
+- The replica used about a third of its CPU limit; PostgreSQL about 0.35 CPU. The heap stayed below 90 MiB (non-heap
+  about 125 MiB); with a 1 GiB limit the JVM picks the Serial collector, which kept p99 within 40 ms.
+- A request held pool connections for about 0.15 ms in total (1.7 checkouts of about 0.09 ms each): pool size made no
+  difference between 5 and 20. A database across the network multiplies this by its round trips.
+- **Warm-up:** right after start, an API replica answered a 1,500 notifications/s burst with p99 400-460 ms (JIT still
+  compiling); after one minute of traffic, 16-136 ms. Expect slower answers from new replicas under peak load.
+
+**Fallback burst (worker).** 30,000 `NOT_DELIVERED` notifications at 1,500/s that fall due one minute later. The harness
+receiver answers at once, so these are upper bounds for the worker and database side; with a real receiver its latency
+is usually the limit (formula above).
+
+- **Arrival-paced:** with every combination of `max-concurrency` 50 / 100 / 200 and worker pool 10 / 20, and with two
+  workers, one worker kept pace with the arrivals: 1,477-1,557 rows/s, all 30,000 triggered, none failed or expired,
+  sampled `rp_due_backlog` at most 1,358 rows (under 600 in most runs), about 0.4 CPU on the worker.
+- **Backlog due at once** (worker container paused during the burst until every row was due, then resumed):
+
+| Worker(s) | `max-concurrency` | pool | rows | rows/s overall (best 10 s) | drain |
+|---|---|---|---|---|---|
+| 1, no limit | 50 | 10 / 20 | 30,000 | 2,945 / 2,956 | 10.2 s |
+| 1, no limit | 100 | 10 / 20 | 30,000 | 4,211 / 4,202 | 7.1 s |
+| 1, no limit | 100 | 10 | 60,000 | 3,496 (4,055) | 17.2 s |
+| 1, no limit | 200 | 10 / 20 | 30,000 | 4,903 / 4,902 | 6.1 s |
+| 1, no limit | 200 | 20 | 60,000 | 4,907 (5,290) | 12.2 s |
+| 1, 1 CPU / 768 MiB | 100 | 10 | 60,000 | 3,104 (4,030) | 19.3 s |
+| 1, 1 CPU / 768 MiB | 200 | 20 | 60,000 | 3,435 (4,242) | 17.5 s |
+| 1, 1 CPU / 512 MiB | 200 | 20 | 60,000 | 3,252 (4,291) | 18.4 s |
+| 2, no limit | 200 | 20 | 60,000 | 4,102 (4,632) | 14.6 s |
+
+- No run failed or expired a row. The worker pool (10 vs 20) made no difference: only the outcome write holds a
+  connection. `max-concurrency` mattered until the worker ran out of CPU: without a limit one worker used up to 1.7 CPU;
+  at 1 CPU it ran at its limit and 200 gave about 10 % more than 100. The worker's RSS stayed at 250-270 MiB with a
+  768 MiB or 512 MiB limit.
+- PostgreSQL (1 CPU) ran at or near its limit in every drain, so a second worker did not add throughput: past a few
+  thousand rows/s, give the database more CPU before adding worker replicas.
+- With this receiver a row was in flight for about 17 ms (50), 24 ms (100) and 41 ms (200), i.e.
+  `max-concurrency / rows per second`, mostly CPU and database time; it adds to the receiver latency in the formula.
+
+The Helm chart defaults follow these runs (`deploy/helm/reliable-push/values.yaml`): API pool 10, requests
+800m / 384Mi (measured CPU and RSS at the NFR-2 load + 30 %), limits 2 CPUs / 1Gi (the NFR-2 size); worker
+`max-concurrency` 200, pool 20, requests 500m / 384Mi, limits 1 CPU / 512Mi. In `combined` mode the pods run both roles
+with `api.resources`: add the worker's requests.
 
 ## Container image
 

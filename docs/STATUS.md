@@ -2,6 +2,20 @@
 
 Newest entry first. Updated at the end of every work session (see `.agents/skills/session-handoff/SKILL.md`).
 
+## 2026-11-05 (3) — Claude Code — `feature/cycle1c-deploy-load` (plan 1C, Task 8)
+
+- **Done:** local load runs (`./scripts/load.sh`) and capacity sizing. **NFR-2 passed:** one API replica (2 CPUs / 1 GiB)
+  took 1,000 events/s + 500 notifications/s for 5 minutes with 0 % failed, p95 1-2 ms, p99 28-38 ms (pool 5, 10 and 20).
+  The default burst (30,000 rows at 1,500/s) drained at the arrival rate (about 1,550 rows/s, criterion ≥ 400); a backlog
+  due at once drained at 2,900-4,900 rows/s per worker (3,100-3,400 at 1 CPU), capped by PostgreSQL's 1 CPU. The first
+  baseline failed on the generator, not the backend (Gatling container out of ephemeral ports); fixed in the load
+  override (one feedback round, no backend change). Results and chart defaults: `docs/operations.md` "Measured capacity".
+- **State:** chart defaults revised (API requests 800m / 384Mi; worker max-concurrency 200, pool 20, requests 500m /
+  384Mi, limits 1 CPU / 512Mi); `deploy/helm/scripts/validate.sh` passes. Machine: Mac17,2, Colima 4 CPUs / 6 GiB.
+- **Next:** Task 9 of plan 1C (CI for chart and loadtest, final verification).
+- **Open:** a burst-only run on a freshly started stack fails its p99 ≤ 250 ms assertion (cold JIT, p99 400-460 ms);
+  `load.sh --simulation all` warms the API first.
+
 ## 2026-11-05 (2) — Claude Code — `develop`
 
 - **Done:** `feature/cycle1b-harness` merged into `develop` (`--no-ff`, `fad89f9`) and pushed; branch deleted. Plans 1A and 1B are both on `develop`.
