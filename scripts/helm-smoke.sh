@@ -65,6 +65,8 @@ helm() {
 }
 
 cleanup_done=0
+OWNED=0 # 1 only for a cluster this run created (or a marker-validated --keep reuse): the only one it may delete
+OLD_PODS=""
 PF_PID=""
 SAMPLER_PID=""
 cleanup() {
@@ -73,7 +75,7 @@ cleanup() {
     cleanup_done=1
     [ -n "$PF_PID" ] && kill "$PF_PID" 2>/dev/null
     [ -n "$SAMPLER_PID" ] && kill "$SAMPLER_PID" 2>/dev/null
-    if [ -f "$KUBECONFIG_FILE" ] && kind get clusters --quiet 2>/dev/null | grep -qx "$CLUSTER"; then
+    if [ "$OWNED" = 1 ] && [ -f "$KUBECONFIG_FILE" ] && kind get clusters --quiet 2>/dev/null | grep -qx "$CLUSTER"; then
         collect_logs || true
         if [ "$KEEP" = 1 ]; then
             say "cluster $CLUSTER kept (--keep); delete it with: kind delete cluster --name $CLUSTER --kubeconfig $KUBECONFIG_FILE"
@@ -94,6 +96,7 @@ collect_logs() {
     mkdir -p "$OUT/logs"
     for pod in $(k get pods -l app.kubernetes.io/instance="$RELEASE" -o name 2>/dev/null); do
         n="${pod#pod/}"
+        case " $OLD_PODS " in *" $n "*) continue ;; esac # streamed (complete, shutdown tail included) during the rollout
         k logs "$n" --all-containers >"$OUT/logs/$n.log" 2>&1 || true
     done
     k logs deploy/fallback-dummy >"$OUT/logs/fallback-dummy.log" 2>&1 || true
@@ -115,6 +118,7 @@ chmod 700 "$OUT"
 if kind get clusters --quiet 2>/dev/null | grep -qx "$CLUSTER"; then
     if [ -f "$KEPT_MARKER" ] && [ -f "$KUBECONFIG_FILE" ]; then
         say "reusing the kept cluster $CLUSTER"
+        OWNED=1
         kubectl --kubeconfig "$KUBECONFIG_FILE" delete namespace "$NS" --ignore-not-found --wait=true --timeout=120s >/dev/null
     else
         fail "kind cluster $CLUSTER already exists and was not kept by this script; delete it (kind delete cluster --name $CLUSTER) and rerun"
@@ -123,7 +127,8 @@ else
     rm -rf "$OUT/logs" "$OUT/helm-status.txt"
     say "creating kind cluster $CLUSTER ($KIND_NODE_IMAGE)"
     kind create cluster --name "$CLUSTER" --image "$KIND_NODE_IMAGE" --kubeconfig "$KUBECONFIG_FILE" --wait 180s >"$OUT/kind-create.log" 2>&1 \
-        || { cat "$OUT/kind-create.log" >&2; fail "kind create cluster failed"; }
+        || { cat "$OUT/kind-create.log" >&2; OWNED=1; fail "kind create cluster failed"; } # a half-created cluster is ours
+    OWNED=1
 fi
 chmod 600 "$KUBECONFIG_FILE"
 [ "$KEEP" = 1 ] && : >"$KEPT_MARKER"
@@ -249,9 +254,13 @@ say "dispatching started ($s)"
 
 mkdir -p "$OUT/logs"
 : >"$OUT/rollout-samples.txt"
+: >"$OUT/rollout-terminating.txt"
 (
     while :; do
-        term="$(k get pods -l app.kubernetes.io/component=worker -o jsonpath='{range .items[*]}{.metadata.deletionTimestamp}{"\n"}{end}' 2>/dev/null | grep -c .)"
+        # "<pod> <deletionTimestamp> <graceSeconds>" of the terminating workers (deletionTimestamp = delete request + grace)
+        tl="$(k get pods -l app.kubernetes.io/component=worker -o jsonpath='{range .items[*]}{.metadata.name} {.metadata.deletionTimestamp} {.metadata.deletionGracePeriodSeconds}{"\n"}{end}' 2>/dev/null | grep 'Z ')"
+        [ -n "$tl" ] && printf '%s\n' "$tl" >>"$OUT/rollout-terminating.txt"
+        term="$(printf '%s' "$tl" | grep -c .)"
         printf '%s terminating_worker_pods=%s %s\n' "$(date +%H:%M:%S)" "$term" "$(states 2>/dev/null)" >>"$OUT/rollout-samples.txt"
         sleep 1
     done
@@ -259,7 +268,7 @@ mkdir -p "$OUT/logs"
 SAMPLER_PID=$!
 
 # remember the old worker pods and stream their logs: the pods (and their logs) disappear after the rollout
-OLD_PODS="$(k get pods -l app.kubernetes.io/component=worker -o name | sed 's#^pod/##')"
+OLD_PODS="$(k get pods -l app.kubernetes.io/component=worker -o name | sed 's#^pod/##' | tr '\n' ' ')"
 LOG_PIDS=""
 for p in $OLD_PODS; do
     k logs -f "$p" >"$OUT/logs/$p.log" 2>&1 &
@@ -269,19 +278,45 @@ done
 say "kubectl rollout restart deploy/$FULL-worker"
 k rollout restart "deploy/$FULL-worker" >/dev/null || fail "rollout restart failed"
 k rollout status "deploy/$FULL-worker" --timeout=300s >/dev/null || fail "worker rollout after restart not complete within 300 s"
+# the old pods may still be Terminating (grace 60 s) when the rollout is "complete": wait until they are gone, so the
+# streamed logs contain the whole shutdown tail, then stop the streams
+for p in $OLD_PODS; do
+    k wait --for=delete "pod/$p" --timeout=90s >/dev/null 2>&1 || fail "old worker pod $p still exists 90 s after the rollout"
+done
+sleep 2
 kill "$SAMPLER_PID" 2>/dev/null
 SAMPLER_PID=""
-# let the log streams end (their pods are gone), then stop them
-sleep 3
 # shellcheck disable=SC2086
 kill $LOG_PIDS 2>/dev/null
 
-# the rollout must really have hit calls in flight: a worker pod was terminating while rows were DISPATCHING
-if grep -E 'terminating_worker_pods=[1-9].*DISPATCHING=[1-9]' "$OUT/rollout-samples.txt" >/dev/null; then
-    pass "a worker pod terminated while webhook calls were in flight ($(grep -cE 'terminating_worker_pods=[1-9].*DISPATCHING=[1-9]' "$OUT/rollout-samples.txt") samples)"
+# The rollout must really have hit calls in flight IN THE POD BEING STOPPED. SIGTERM moment of an old pod =
+# deletionTimestamp - deletionGracePeriodSeconds (second resolution). Evidence from that pod's own saved log: a row it
+# claimed (fallback.claimed) before SIGTERM and whose outcome it logged (fallback.dispatched) at or after SIGTERM.
+inflight_total=0
+for p in $OLD_PODS; do
+    line="$(grep "^$p " "$OUT/rollout-terminating.txt" | head -1)"
+    if [ -z "$line" ]; then # an idle worker can exit between two samples; the assertion below is over all old pods
+        say "old worker $p: no deletionTimestamp sampled (terminated within one sampling interval)"
+        continue
+    fi
+    dts="$(echo "$line" | cut -d' ' -f2)"
+    grace="$(echo "$line" | cut -d' ' -f3)"
+    epoch="$(date -j -u -f '%Y-%m-%dT%H:%M:%SZ' "$dts" +%s)" || fail "cannot parse deletionTimestamp '$dts'"
+    sigterm="$(date -u -r $((epoch - grace)) +%Y-%m-%dT%H:%M:%S.000Z)"
+    n="$(awk -v s="$sigterm" '
+        { if (match($0, /"@timestamp":"[^"]*"/)) ts = substr($0, RSTART + 14, RLENGTH - 15); else next
+          if (match($0, /"rp.tracking_id":"[^"]*"/)) id = substr($0, RSTART + 17, RLENGTH - 18); else next
+          if ($0 ~ /"event.action":"fallback.claimed"/) c[id] = ts
+          else if ($0 ~ /"event.action":"fallback.dispatched"/ && (id in c) && c[id] < s && ts >= s) n++ }
+        END { print n + 0 }' "$OUT/logs/$p.log")"
+    say "old worker $p: SIGTERM at $sigterm, $n rows in flight (claimed before, dispatched after SIGTERM, same pod)"
+    inflight_total=$((inflight_total + n))
+done
+if [ "$inflight_total" -ge 1 ]; then
+    pass "SIGTERM hit worker pods with webhook calls in flight: $inflight_total rows claimed before and completed after SIGTERM by the same pod"
 else
     cat "$OUT/rollout-samples.txt" >&2
-    fail "no sample with a terminating worker pod and DISPATCHING rows: the restart did not hit calls in flight (check is vacuous)"
+    fail "no old worker pod had a call in flight at SIGTERM: the restart did not hit calls in flight (check is vacuous)"
 fi
 
 say "waiting for all $NOTIFICATIONS to be FALLBACK_TRIGGERED"
