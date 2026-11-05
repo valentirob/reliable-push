@@ -37,6 +37,9 @@ DerivedData/
 .AppleDouble
 .LSOverride
 
+# Harness E2E outputs and per-run secrets (secrets.env, db.env)
+harness/build/
+
 # Secrets / local env
 .env
 .env.*

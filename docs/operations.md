@@ -12,7 +12,7 @@ with a message naming the key instead of failing the first request.
 | `worker` | Enables the fallback scheduler (`FallbackScheduler`), the webhook client, `RetentionJob` and `DueBacklogJob` (`rp_due_backlog`) |
 | `json` | ECS JSON log lines on stdout (default whenever `local` is not active) |
 | `local` | Human-readable log pattern for development (`%d{ISO8601} %-5level [%t] %c{1.} [trace=...] - %m`) |
-| `e2e`, `demo` | Allow the fast clock (`reliable-push.testing.minute-duration`), used by the local harness only |
+| `e2e`, `demo` | Allow the fast clock (`reliable-push.testing.minute-duration`), used by the local harness only. Also append the same ECS JSON log lines to the file `RP_LOG_FILE` (default `/tmp/rp-logs/backend.json`, append, no rotation; stdout unchanged), which the harness tails from a shared volume |
 
 With no profile set the default is `api,worker` (`spring.profiles.default`). That default applies **only when no profile is
 active**: as soon as you set `SPRING_PROFILES_ACTIVE`, list the roles explicitly, for example `api,worker,local` (just

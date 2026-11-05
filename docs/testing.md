@@ -32,8 +32,10 @@ Reports: `target/surefire-reports/` (unit), `target/failsafe-reports/` (integrat
 | Contract | `OpenApiContractTest` and `OpenApiAssert` (swagger-request-validator, test scope) | surefire + the ITs | Real responses are validated against `backend/src/main/resources/openapi.yaml`, so the contract and the implementation cannot drift |
 | Container image | `ContainerImageIT`, tagged `image` | failsafe, only with `-Pimage` | Starts as an arbitrary non-root UID, stays below the 250 MB budget (sum of uncompressed layers), read-only root filesystem with a writable `/tmp`, JSON-only stdout |
 | Logging assertions | inside the ITs and `EcsTemplateTest` | both | Catalogue events are emitted, fields are unique, and no secrets, tokens, user ids or message content reach the log |
-| End-to-end | `harness/`, `./scripts/e2e.sh` | local only, never in CI | **Arrives with plan 1B.** Full scenarios across backend, PostgreSQL, fake OIDC, fallback receiver and device simulator, with the fast clock |
-| Console smoke | Playwright for Java against the harness web console | local only | **Arrives with plan 1B** |
+| Client | `client-java/`, JUnit 5 against a local HTTP server | surefire | The Java sender client: requests, problem details, timeouts, redirects, `Retry-After`; an enforcer rule keeps it free of runtime dependencies |
+| Harness | `harness/`, JUnit 5, `*Test` and `*IT` (Spring on a random port, no Docker needed) | surefire / failsafe | The harness itself: device simulator, signed grants, fallback receiver, fake sender, tracking poller, scenario runner, console REST and SSE |
+| End-to-end | `harness/`, `./scripts/e2e.sh` | local only, never in CI | 16 scenarios across the real backend (one API, two workers), PostgreSQL, the fallback receiver and the device simulator, with the fast clock |
+| Console smoke | Playwright for Java against the harness web console | local only | The 17th entry of the E2E run: a headless browser registers a device, sends a push and sees `DELIVERED` and the fallback in the inbox |
 | Load | Gatling | local / on demand | Arrives with plan 1C |
 | Mobile | Robolectric, XCTest, emulator/simulator tests | per SDK | Planned in cycles 2 and 3 |
 
@@ -50,8 +52,58 @@ Reports: `target/surefire-reports/` (unit), `target/failsafe-reports/` (integrat
 - **Time in tests:** the worker ITs use a controllable `MutableClock` and the fast clock (1 product minute = 1 s) instead of waiting for real minutes.
 - **Clean output:** tests are expected to finish without stray stack traces or WARN lines from the code under test.
 
-## End-to-end tests and the web console (arrives with plan 1B)
+## Client and harness builds
 
-The local harness (`harness/`, `./scripts/e2e.sh`, `./scripts/demo.sh`) is planned for plan 1B; until then neither command
-exists. Once it lands, this page will describe the scenarios, the machine-readable results and the agent feedback loop
-described in spec 10.1 and in `.agents/skills/run-e2e/SKILL.md`.
+Run from the repository root (one Maven wrapper for `client-java` and `harness`; the backend keeps `backend/mvnw`):
+
+| Goal | Command |
+|---|---|
+| Client build and tests (what CI runs) | `./mvnw -B -pl client-java verify` |
+| Harness build and tests, including `client-java` (what CI runs) | `./mvnw -B -pl harness -am verify` |
+| Console smoke test against a running stack (needs Playwright's Chromium, about 150 MB, downloaded on first use) | `./mvnw -B -pl harness -am verify -Pconsole-smoke` |
+
+The default build never downloads Playwright. GitHub Actions runs the first two (`.github/workflows/harness-ci.yml`); it never
+runs the stack.
+
+## End-to-end tests (local only)
+
+`./scripts/e2e.sh [--scenario <name>] [--keep]` (Windows, PowerShell 7: `pwsh scripts/e2e.ps1 [-Scenario <name>] [-Keep]`; the
+PowerShell scripts have not been run on Windows). Needs Docker with the compose plugin, `curl`, and ports 8080 and 8090 free
+on 127.0.0.1. The images build inside Docker, but `console-smoke` (so the full 17-entry run) calls the host `./mvnw`: it needs
+JDK 21 and network access (Maven artifacts, Playwright's Chromium). With Colima: `export DOCKER_HOST=unix://$HOME/.colima/default/docker.sock`.
+
+- **Stack:** `harness/compose/docker-compose.yml`: PostgreSQL, one API, two workers (`worker-a`, `worker-b`) and the
+  harness. A one-shot container generates new secrets for every run into `harness/build/e2e/secrets.env` (git-ignored).
+  Devices register through the backend's `signed-grant` identity (the harness signs the grants).
+- **Fast clock:** 1 product minute = 1 s, worker poll 500 ms, lease 12 minutes (= 12 s). The whole run takes about 5 minutes.
+- **Scenarios** (16, plus `console-smoke`): `delivered-before-timeout`, `read-policy-delivered-only`, `read-policy-read`,
+  `not-delivered-single-fallback`, `late-delivery-after-fallback`, `multi-device`, `cancellation`,
+  `token-refresh-near-expiry`, `rate-limited`, `receiver-retries-then-succeeds`, `receiver-final-failure`,
+  `retries-exhausted-fails`, `worker-crash-inside-window`, `worker-crash-outside-window`, `log-catalogue`, `log-hygiene`.
+- **Worker-crash scenarios** are driven by the script, not the harness container: it stops `worker-b`, asks the harness to
+  `prepare`, waits until the webhook call is in flight, kills `worker-a`, waits (inside or outside the trigger window), starts
+  both workers and asks the harness to `verify`.
+- **Results:** exit code 0 only if all 17 entries PASSED. `harness/build/e2e/summary.json`
+  (`{scenario, status, durationMs, failure: {expected, actual, hint}, logs}`), JUnit XML in `harness/build/e2e/junit/`,
+  container logs and the backend JSON logs in `harness/build/e2e/logs/`. Logs are collected and the stack is torn down even
+  when scenarios fail (unless `--keep`).
+- **Failures:** `grep -B2 -A6 '"FAILED"' harness/build/e2e/summary.json`, then search the logs by `trace.id` or
+  `rp.tracking_id`.
+- **Safety checks:** the script refuses to start if port 8080 or 8090 is taken (it names the port) and if a stack of an earlier
+  `--keep` run exists it removes it first. If a service is not ready within `E2E_READY_TIMEOUT` seconds (default 120) it names
+  the container and prints its last log lines.
+- The agent workflow is in [`.agents/skills/run-e2e/SKILL.md`](../.agents/skills/run-e2e/SKILL.md).
+
+## Web console and demo
+
+`./scripts/demo.sh [--realtime]` (Windows: `scripts\demo.ps1`) starts the same stack as the compose project
+`reliable-push-demo` and opens the console at <http://127.0.0.1:8090/>. The default is the fast clock; `--realtime` uses real
+minutes. It keeps running; the script prints the stop command:
+`docker compose -p reliable-push-demo -f harness/compose/docker-compose.yml -f harness/compose/demo.override.yml down -v`.
+
+The console has six screens: Devices, Send push, Live tracking, Fallback inbox, Scenarios and Logs. A permanent banner reads
+"Test harness — simulated data, not for production". No secret is shown in the page or exposed by its API; live updates use
+Server-Sent Events and reconnect automatically. The console API accepts writes (`POST`) only with `Content-Type: application/json`
+(an explicit `{}` when there is nothing to send) and rejects cross-site requests (`Origin` or `Sec-Fetch-Site` from another
+origin) with 403; `curl` and the scripts send neither header. The console and the harness are never built into the backend
+image or deployed with a Helm chart.

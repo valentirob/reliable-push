@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Logging profiles like the backend: ECS JSON on stdout by default, a human-readable pattern with "local". -->
+<Configuration status="WARN">
+    <Appenders>
+        <SpringProfile name="json | !local">
+            <Console name="Console" target="SYSTEM_OUT" follow="true">
+                <JsonTemplateLayout eventTemplateUri="classpath:EcsLayout.json">
+                    <EventTemplateAdditionalField key="service.name" value="reliable-push-harness"/>
+                </JsonTemplateLayout>
+            </Console>
+        </SpringProfile>
+        <SpringProfile name="local &amp; !json">
+            <Console name="Console" target="SYSTEM_OUT" follow="true">
+                <PatternLayout pattern="%d{ISO8601} %-5level [%t] %c{1.} - %m%n%throwable"/>
+            </Console>
+        </SpringProfile>
+    </Appenders>
+    <Loggers>
+        <Root level="INFO">
+            <AppenderRef ref="Console"/>
+        </Root>
+    </Loggers>
+</Configuration>

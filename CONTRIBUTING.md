@@ -46,9 +46,9 @@ The roles are defined in `.agents/skills/review-loop/SKILL.md`.
 ## End-to-end tests run locally
 
 E2E scenarios run only on a developer machine, never in CI:
-`./scripts/e2e.sh` (available once the harness lands). Report the result in the
+`./scripts/e2e.sh` (Windows: `pwsh scripts/e2e.ps1`). Report the result in the
 merge commit or PR description, for example
-`E2E: 14/14 passed (./scripts/e2e.sh, 2026-11-03)`. See
+`E2E: 17/17 passed (./scripts/e2e.sh, 2026-11-04)`. See
 `.agents/skills/run-e2e/SKILL.md`.
 
 ## Secrets
