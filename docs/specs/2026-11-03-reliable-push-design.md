@@ -62,6 +62,42 @@
 >   `POST /v1/notifications`/s for 5 minutes after a 60 s ramp (open model), ≤ 0.1 % failed, p95 ≤ 100 ms, p99 ≤ 250 ms
 >   per request group; **passed**, criterion and replica size unchanged. Results:
 >   [operations.md, "Measured capacity"](../operations.md#measured-capacity).
+>
+> **Changes during implementation (plan 2, 2026-11-05).** The Android SDK, its sample app and the emulator E2E suite are
+> built. The notes below override older wording in the sections they name (§12 is updated; the code is the reference):
+>
+> - §7 (SDK units): `ReliablePush` (public: `configure`, `register`, `handle`, `trackOpen`, `logout`, `deviceId`),
+>   `ReliablePushMessaging`, `ReliablePushOptions`, `RegisterResult`; internal: `DeviceApi` over `HttpURLConnection`,
+>   `TokenStore` (AES-GCM, AndroidKeyStore key), `EventQueue` (persistent, capped at 500, batches of 50), `EventSender`,
+>   `RetryScheduler`/`RetryJobService`, `NotificationPoster`. Runtime dependencies: Kotlin stdlib only; the release AAR is
+>   minified with R8 and stays under 100 KB (CI gate, 102,400 bytes).
+> - §7.1: **one token refresh per process** (one app launch); a refresh answered `401` clears the registration.
+> - §5, §7: `DELIVERED` is reported **only when the notification was actually shown** (notifications enabled and the
+>   channel not `IMPORTANCE_NONE`); otherwise no event is sent and the fallback decides. `DELIVERED` and `READ` are
+>   **persisted in the queue before `handle`/`trackOpen` return**. `handle` returns `false` when nothing was shown.
+> - §7 `configure` semantics: call it in `Application.onCreate` on every launch; the same base URL and app id is a no-op
+>   (R3), a different one replaces the stored config and clears registration, queue and retry job; events left from an
+>   earlier launch are sent at `configure`, once per launch (R8). The tap `PendingIntent` is `SINGLE_TOP`, so hosts call
+>   `trackOpen` from `onCreate` and `onNewIntent` (R7).
+> - §7 retry: one one-off `JobScheduler` job (network constraint, minimum latency 30 s, exponential backoff,
+>   `Retry-After` honoured up to 1 h), scheduled before every flush and cancelled when the queue is empty; no polling.
+>   The 30 s minimum latency counts from the push: after a long outage the job runs shortly after the network returns,
+>   and after repeated `5xx` the OS exponential backoff (capped at 5 h) can delay it longer (R10), so a very short
+>   notification timeout can fall back first.
+> - §7: `http` base URLs only for `localhost`, `127.0.0.1` and `10.0.2.2`; redirects are not followed. Android 17
+>   (`targetSdk 37`) apps whose backend is on a private network need `ACCESS_LOCAL_NETWORK` (R11).
+> - §10: the emulator test for blocked notifications revokes `POST_NOTIFICATIONS` without killing the process through the hidden
+>   test API `PermissionManager.revokePostNotificationPermissionWithoutKillForTest` (R12; `pm revoke` kills the instrumentation
+>   process); it is pinned to the API 37 AVD. The harness container runs as the invoking user (`E2E_UID:E2E_GID`, default
+>   1001:0) so it can read the mode-600 FCM service-account key through the read-only mount (R14).
+> - §7.2: **mode v2 (`AndroidConfigV2`) is deferred until Google's general availability**; FCM delivers v2-shaped
+>   messages to v1 apps through `onMessageReceived`, so mode v1 is the only supported mode.
+> - §10, §12: the harness console gains `POST /console/api/grants` and `POST /console/api/real-devices` (real devices in
+>   the Devices list), a **Host allowlist** on every `/console/api/**` request (DNS-rebinding guard), and an **optional
+>   real FCM sender** (service-account key under `harness/build/fcm/`, maintainer's Firebase project, git-ignored).
+>   `scripts/android-e2e.sh` runs the emulator suite against the harness stack (`Android E2E: 8/8 passed, 1 skipped`
+>   without the Firebase files); `.github/workflows/android-ci.yml` builds the SDK without emulator or credentials. Guide:
+>   [`docs/android.md`](../android.md).
 
 ## 1. Architecture
 
@@ -477,7 +513,7 @@ LICENSE  README.md  AGENTS.md  CLAUDE.md  CONTRIBUTING.md  SECURITY.md
 .agents/{rules,skills}/   .claude/{agents,skills->../.agents/skills}
 .github/workflows/
 backend/      client-java/      harness/      loadtest/      android/      ios/      deploy/helm/
-scripts/ (e2e.sh, e2e.ps1, demo.sh, demo.ps1, helm-smoke.sh, load.sh)
+scripts/ (e2e.sh, e2e.ps1, demo.sh, demo.ps1, helm-smoke.sh, load.sh, android-e2e.sh)
 docs/  requirements.md  STATUS.md  specs/  plans/  architecture.md  api.md
        integration-guide.md  security.md  operations.md  deployment.md  testing.md
 ```

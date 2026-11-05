@@ -6,10 +6,13 @@ import io.reliablepush.client.ReliablePushException;
 import io.reliablepush.harness.config.HarnessApp;
 import io.reliablepush.harness.config.HarnessProperties;
 import io.reliablepush.harness.devices.AndroidMode;
+import io.reliablepush.harness.fcm.FcmPusher;
 import io.reliablepush.harness.devices.BackendCallException;
 import io.reliablepush.harness.devices.DeviceBehaviour;
 import io.reliablepush.harness.devices.DeviceSimulator;
+import io.reliablepush.harness.devices.GrantMinter;
 import io.reliablepush.harness.devices.Platform;
+import io.reliablepush.harness.devices.RealDeviceRegistry;
 import io.reliablepush.harness.devices.SimulatedDevice;
 import io.reliablepush.harness.logs.BackendLogTail;
 import io.reliablepush.harness.logs.LogQuery;
@@ -62,9 +65,18 @@ public class ConsoleApiController {
     static final int RECENT_LIMIT = 200;
     static final int INBOX_LIMIT = 500;
     static final int MAX_TEXT = 1_000;
+    static final int MAX_LABEL = 100;
+    static final int MAX_FCM_TOKEN = 4096;
     static final long MAX_HANG_MS = 120_000;
 
     public record DeviceRequest(String appId, String userId, Platform platform, AndroidMode androidMode) {}
+
+    public record GrantRequest(String appId, String userId) {}
+
+    public record RealDeviceRequest(String appId, String userId, String deviceId, String platform, String label,
+                                    String fcmToken) {}
+
+    public record FcmTokenRequest(String fcmToken) {}
 
     public record OnlineRequest(Boolean online) {}
 
@@ -96,15 +108,22 @@ public class ConsoleApiController {
     private final Timeline timeline;
     private final WebhookInbox inbox;
     private final BackendLogTail logs;
+    private final GrantMinter grants;
+    private final RealDeviceRegistry realDevices;
+    private final FcmPusher fcm;
 
     public ConsoleApiController(HarnessProperties properties, DeviceSimulator simulator, FakeSender sender,
-                                Timeline timeline, WebhookInbox inbox, BackendLogTail logs) {
+                                Timeline timeline, WebhookInbox inbox, BackendLogTail logs, GrantMinter grants,
+                                RealDeviceRegistry realDevices, FcmPusher fcm) {
         this.properties = properties;
         this.simulator = simulator;
         this.sender = sender;
         this.timeline = timeline;
         this.inbox = inbox;
         this.logs = logs;
+        this.grants = grants;
+        this.realDevices = realDevices;
+        this.fcm = fcm;
     }
 
     // ---- apps ------------------------------------------------------------------------------------------------
@@ -118,6 +137,7 @@ public class ConsoleApiController {
             m.put("appId", id);
             m.put("windowMinutes", app.windowMinutes());
             m.put("timeScaleSeconds", properties.timeScaleSeconds());
+            m.put("fcmEnabled", fcm.enabled());
             return m;
         }).toList();
     }
@@ -134,17 +154,67 @@ public class ConsoleApiController {
     @GetMapping("/devices")
     public List<Map<String, Object>> devices(@RequestParam(required = false) String appId,
                                              @RequestParam(required = false) String userId) {
-        return simulator.allDevices(blankToNull(appId)).stream()
+        List<Map<String, Object>> all = new java.util.ArrayList<>(simulator.allDevices(blankToNull(appId)).stream()
                 .filter(d -> blankToNull(userId) == null || d.userId().equals(userId))
-                .map(ConsoleApiController::deviceJson).toList();
+                .map(ConsoleApiController::deviceJson).toList());
+        realDevices.all(blankToNull(appId)).stream()
+                .filter(d -> blankToNull(userId) == null || d.userId().equals(userId))
+                .map(ConsoleApiController::realDeviceJson).forEach(all::add);
+        return all;
+    }
+
+    /**
+     * A signed grant for the app's user, as the customer's backend would hand to its logged-in client: the sample app
+     * on an emulator registers with it. This is the only place a grant leaves the harness; it is never logged.
+     */
+    @PostMapping("/grants")
+    public ResponseEntity<Map<String, Object>> grant(@RequestBody GrantRequest r) {
+        requireApp(r.appId());
+        requireUser(r.userId());
+        String grant = grants.mint(r.appId(), r.userId());
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("grant", grant);
+        m.put("expiresAt", iso(grants.expiresAt(grant)));
+        return ResponseEntity.status(HttpStatus.CREATED).cacheControl(org.springframework.http.CacheControl.noStore())
+                .body(m);
+    }
+
+    /** A device that registered by itself (emulator app): listed in the console, no token held by the harness. */
+    @PostMapping("/real-devices")
+    public ResponseEntity<Map<String, Object>> addRealDevice(@RequestBody RealDeviceRequest r) {
+        requireApp(r.appId());
+        requireUser(r.userId());
+        UUID deviceId = uuid(r.deviceId(), "device id");
+        Platform platform;
+        try {
+            platform = Platform.valueOf(String.valueOf(r.platform()));
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("platform must be ANDROID or IOS");
+        }
+        String label = r.label() == null ? "" : r.label();
+        if (label.length() > MAX_LABEL) {
+            throw new IllegalArgumentException("label is too long (at most " + MAX_LABEL + " characters)");
+        }
+        String fcmToken = r.fcmToken() == null ? null : validFcmToken(r.fcmToken());
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(realDeviceJson(realDevices.add(r.appId(), r.userId(), deviceId, platform, label, fcmToken)));
+    }
+
+    /** The device's FCM token changed (onNewToken). The token is never echoed back. */
+    @PostMapping("/real-devices/{id}/fcm-token")
+    public Map<String, Object> setFcmToken(@PathVariable String id, @RequestBody FcmTokenRequest r) {
+        UUID deviceId = uuid(id, "device id");
+        String token = validFcmToken(r.fcmToken());
+        if (!realDevices.setFcmToken(deviceId, token)) {
+            throw new NotFoundException("unknown device");
+        }
+        return Map.of("deviceId", deviceId.toString(), "hasFcmToken", true);
     }
 
     @PostMapping("/devices")
     public ResponseEntity<Map<String, Object>> createDevice(@RequestBody DeviceRequest r) {
         requireApp(r.appId());
-        if (r.userId() == null || r.userId().isBlank() || r.userId().length() > 200) {
-            throw new IllegalArgumentException("userId is required (at most 200 characters)");
-        }
+        requireUser(r.userId());
         if (r.platform() == null) {
             throw new IllegalArgumentException("platform is required (IOS or ANDROID)");
         }
@@ -181,9 +251,7 @@ public class ConsoleApiController {
     @PostMapping("/push")
     public Map<String, Object> push(@RequestBody PushRequest r) {
         requireApp(r.appId());
-        if (r.userId() == null || r.userId().isBlank() || r.userId().length() > 200) {
-            throw new IllegalArgumentException("userId is required (at most 200 characters)");
-        }
+        requireUser(r.userId());
         String title = limited(r.title(), "title");
         String body = limited(r.body(), "body");
         Map<UUID, DeviceBehaviour> perDevice = null;
@@ -195,6 +263,11 @@ public class ConsoleApiController {
         }
         Notification n = sender.send(new SendPushCommand(r.appId(), r.userId(), title, body, r.policy(),
                 r.timeoutMinutes(), r.fallback(), perDevice));
+        for (FcmPusher.DevicePush p : fcm.push(r.appId(), r.userId(), n.trackingId(), title, body)) {
+            timeline.append(n.trackingId(), r.appId(), new TimelineEntry(Instant.now(), "fcm_push", Map.of(
+                    "deviceId", p.deviceId().toString(), "result", p.result().outcome().name(),
+                    "status", p.result().status())));
+        }
         return Map.of("trackingId", n.trackingId().toString());
     }
 
@@ -240,6 +313,7 @@ public class ConsoleApiController {
         m.put("apns", PayloadPreview.apns(tid, t, b));
         m.put("fcmV1", PayloadPreview.fcmV1(tid, t, b));
         m.put("fcmV2", PayloadPreview.fcmV2(tid, t, b));
+        m.put("androidDebugBroadcast", PayloadPreview.androidDebugBroadcast(tid, t, b));
         return m;
     }
 
@@ -370,6 +444,12 @@ public class ConsoleApiController {
         }
     }
 
+    private static void requireUser(String userId) {
+        if (userId == null || userId.isBlank() || userId.length() > 200) {
+            throw new IllegalArgumentException("userId is required (at most 200 characters)");
+        }
+    }
+
     private SimulatedDevice device(String id) {
         try {
             return simulator.device(uuid(id, "device id"));
@@ -387,6 +467,14 @@ public class ConsoleApiController {
         } catch (IllegalArgumentException | NullPointerException e) {
             throw new IllegalArgumentException(what + " is not a UUID");
         }
+    }
+
+    /** Never echoes the token in the error. */
+    private static String validFcmToken(String token) {
+        if (token == null || token.isBlank() || token.length() > MAX_FCM_TOKEN) {
+            throw new IllegalArgumentException("fcmToken must not be blank and at most " + MAX_FCM_TOKEN + " characters");
+        }
+        return token;
     }
 
     private static String limited(String s, String what) {
@@ -407,6 +495,7 @@ public class ConsoleApiController {
 
     static Map<String, Object> deviceJson(SimulatedDevice d) {
         Map<String, Object> m = new LinkedHashMap<>();
+        m.put("kind", "SIMULATED");
         m.put("deviceId", d.deviceId().toString());
         m.put("appId", d.appId());
         m.put("userId", d.userId());
@@ -414,6 +503,22 @@ public class ConsoleApiController {
         m.put("androidMode", d.androidMode() == null ? null : d.androidMode().name());
         m.put("tokenExpiresAt", iso(d.tokenExpiresAt()));
         m.put("online", d.online());
+        return m;
+    }
+
+    static Map<String, Object> realDeviceJson(RealDeviceRegistry.RealDevice d) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("kind", "REAL");
+        m.put("deviceId", d.deviceId().toString());
+        m.put("appId", d.appId());
+        m.put("userId", d.userId());
+        m.put("platform", d.platform().name());
+        m.put("androidMode", null);
+        m.put("tokenExpiresAt", null);
+        m.put("online", true);
+        m.put("label", d.label());
+        m.put("registeredAt", iso(d.registeredAt()));
+        m.put("hasFcmToken", d.fcmToken() != null);
         return m;
     }
 

@@ -13,6 +13,20 @@ updates:
           - minor
           - patch
 
+  # the Android SDK and sample (Gradle version catalog and wrapper)
+  - package-ecosystem: gradle
+    directory: /android
+    target-branch: develop
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: build(deps)
+    groups:
+      gradle-minor-patch:
+        update-types:
+          - minor
+          - patch
+
   # root reactor: client-java, harness and loadtest (the backend has its own build)
   - package-ecosystem: maven
     directory: /

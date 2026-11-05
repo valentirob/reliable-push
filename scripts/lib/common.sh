@@ -21,6 +21,8 @@ rp_die() {
 rp_compose() {
     local files=(-f "$RP_COMPOSE_FILE") f
     for f in ${RP_COMPOSE_OVERRIDES[@]+"${RP_COMPOSE_OVERRIDES[@]}"}; do files+=(-f "$f"); done
+    # bind source of the harness's optional real-FCM key (harness/build/fcm/service-account.json, placed by the maintainer)
+    mkdir -p "$RP_ROOT/harness/build/fcm"
     E2E_UID="$(id -u)" E2E_GID="$(id -g)" docker compose -p "$RP_PROJECT" "${files[@]}" "$@"
 }
 
@@ -89,4 +91,62 @@ rp_collect_logs() {
     if [ "$(rp_service_state harness)" = "running" ]; then
         rp_compose cp harness:/tmp/rp-logs/. "$RP_OUT/logs/" >/dev/null 2>&1 || true
     fi
+}
+
+# Builds the images, generates the per-run secrets, starts the stack and waits up to <seconds> for api, worker-a,
+# worker-b and harness (scripts/android-e2e.sh; e2e.sh and demo.sh keep their own copy of these steps). Sets
+# RP_STACK_STARTED=1 right before `up`, so the caller's exit trap knows to collect logs and tear down.
+RP_STACK_STARTED=0
+rp_start_stack() {
+    local timeout="$1" deadline pending still svc state ready rel
+    rel="${RP_OUT#"$RP_ROOT"/}"
+    rp_log "building images (backend, harness); output in $rel/logs/build.log"
+    if ! rp_compose build >"$RP_OUT/logs/build.log" 2>&1; then
+        tail -n 40 "$RP_OUT/logs/build.log" >&2
+        rp_die "image build failed ($rel/logs/build.log)"
+    fi
+    rp_log "generating per-run secrets"
+    rp_compose run --rm -q secrets >"$RP_OUT/logs/secrets.log" 2>&1 \
+        || { cat "$RP_OUT/logs/secrets.log" >&2; rp_die "secret generation failed"; }
+    rp_log "starting the stack"
+    RP_STACK_STARTED=1
+    rp_compose up -d >"$RP_OUT/logs/up.log" 2>&1 || { cat "$RP_OUT/logs/up.log" >&2; rp_die "docker compose up failed"; }
+
+    rp_log "waiting up to ${timeout}s for api, worker-a, worker-b and harness"
+    deadline=$(($(date +%s) + timeout))
+    pending="api worker-a worker-b harness"
+    while :; do
+        still=""
+        for svc in $pending; do
+            state="$(rp_service_state "$svc")"
+            if [ "$state" != "running" ]; then
+                rp_compose logs --no-color --tail 60 "$svc" >&2 || true
+                rp_die "container $svc is not running (state: ${state:-none}); logs in $rel/logs/$svc.log"
+            fi
+            case "$svc" in
+                api) rp_http_ok "$RP_API_URL/actuator/health/readiness" && ready=1 || ready=0 ;;
+                harness) rp_http_ok "$RP_HARNESS_URL/actuator/health/readiness" && ready=1 || ready=0 ;;
+                *) rp_container_ready "$svc" && ready=1 || ready=0 ;;
+            esac
+            [ "$ready" = 1 ] || still="$still $svc"
+        done
+        pending="${still# }"
+        [ -z "$pending" ] && break
+        if [ "$(date +%s)" -ge "$deadline" ]; then
+            for svc in $pending; do
+                printf '\n----- last log lines of %s -----\n' "$svc" >&2
+                rp_compose logs --no-color --tail 60 "$svc" >&2 || true
+            done
+            rp_die "container(s) not ready after ${timeout}s: $pending; logs in $rel/logs/"
+        fi
+        sleep 1
+    done
+    rp_log "stack ready"
+}
+
+# Major version of the JDK that runs `java` (JAVA_HOME first), e.g. 21; empty when there is none
+rp_java_major() {
+    local java="java"
+    [ -n "${JAVA_HOME:-}" ] && [ -x "$JAVA_HOME/bin/java" ] && java="$JAVA_HOME/bin/java"
+    "$java" -XshowSettings:properties -version 2>&1 | awk -F'= ' '/java.specification.version/ { print $2; exit }'
 }

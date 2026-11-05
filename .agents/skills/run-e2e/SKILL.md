@@ -13,8 +13,12 @@ Spec: `docs/specs/2026-11-03-reliable-push-design.md` §10.1.
   on 127.0.0.1. The images build inside Docker, but `console-smoke` (and so the full 17-entry run)
   runs through the host `./mvnw`: it needs JDK 21 and network access (Maven artifacts, Playwright's Chromium).
 - On a Mac with Colima: `export DOCKER_HOST=unix://$HOME/.colima/default/docker.sock`.
-- Mobile scenarios (cycles 2–3): Android emulator / Xcode iOS simulator booted.
-- Not in CI: `.github/workflows/harness-ci.yml` builds `client-java`, `harness` and `loadtest` only.
+- Mobile scenarios: the Android emulator suite is `./scripts/android-e2e.sh` (needs the Android SDK; it boots the AVD
+  `Medium_Phone_API_37.0` itself and stops it again). Without the maintainer's Firebase files it ends with
+  `Android E2E: 8/8 passed, 1 skipped` (`fcm-real-delivery` is skipped; see `docs/testing.md`). Run it after changes to
+  `android/` or to the harness console API it uses. iOS simulator scenarios come with the iOS cycle.
+- Not in CI: `.github/workflows/harness-ci.yml` builds `client-java`, `harness` and `loadtest` only; `android-ci.yml`
+  builds the Android SDK without an emulator.
 
 ## Run
 1. Full suite: `./scripts/e2e.sh` (Windows, PowerShell 7: `pwsh scripts/e2e.ps1`, optional `-Scenario <name> -Keep`; untested on

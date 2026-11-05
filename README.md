@@ -28,7 +28,7 @@ and keeps the FCM/APNs credentials.
 | Path | What | Stack |
 |---|---|---|
 | `backend/` | Tracking + fallback service (modular monolith, `api`/`worker` profiles) | Java 21, Spring Boot 4, PostgreSQL, Flyway |
-| `android/` | Android SDK (FCM v1 data mode + opt-in AndroidConfigV2 mode) | Kotlin, minSdk 26 |
+| `android/` | Android SDK, FCM v1 data mode ([guide](docs/android.md); the AndroidConfigV2 mode waits for Google's GA) | Kotlin, minSdk 26 |
 | `ios/` | iOS SDK + Notification Service Extension helper | Swift, iOS 15+, SPM |
 | `client-java/` | Optional zero-dependency Java client for the sender API | Java 17+, JDK only |
 | `harness/` | Fake sender, fake fallback receiver, device simulator, E2E scenarios, web console for manual tests and demos | Java, plain HTML/JS, docker-compose |
@@ -37,7 +37,7 @@ and keeps the FCM/APNs credentials.
 | `docs/` | Requirements, specs, plans, guides, status | Markdown |
 
 Components land incrementally; see [docs/STATUS.md](docs/STATUS.md) for what
-exists today (`backend/`, `client-java/` and `harness/` exist; the mobile SDKs are planned).
+exists today (`backend/`, `client-java/`, `harness/` and `android/` exist; the iOS SDK is planned).
 
 ### Try it: demo console
 

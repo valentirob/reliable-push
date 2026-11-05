@@ -7,10 +7,12 @@ on:
       - main
     paths:
       - 'backend/**'
+      - 'android/**'
       - '.github/workflows/codeql.yml'
   pull_request:
     paths:
       - 'backend/**'
+      - 'android/**'
       - '.github/workflows/codeql.yml'
   schedule:
     - cron: '23 4 * * 1' # weekly, Monday 04:23 UTC
@@ -24,7 +26,7 @@ concurrency:
 
 jobs:
   analyze:
-    name: Analyze (java-kotlin)
+    name: Analyze backend (java-kotlin)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -56,4 +58,44 @@ jobs:
       - name: Perform CodeQL analysis
         uses: github/codeql-action/analyze@1fc58d04a4d4374f921bdac573c3811c240f9c26 # v4.39.2
         with:
-          category: /language:java-kotlin
+          # category changed from /language:java-kotlin when the Android job was added (two analyses, one per category)
+          category: /language:java-kotlin/backend
+
+  analyze-android:
+    name: Analyze Android SDK (java-kotlin)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Java 21
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+          cache-dependency-path: |
+            android/**/*.gradle*
+            android/gradle/libs.versions.toml
+            android/gradle/wrapper/gradle-wrapper.properties
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@1fc58d04a4d4374f921bdac573c3811c240f9c26 # v4.39.2
+        with:
+          languages: java-kotlin
+          build-mode: manual
+
+      - name: Build the library (no tests)
+        working-directory: android
+        run: ./gradlew :reliablepush:assembleRelease
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@1fc58d04a4d4374f921bdac573c3811c240f9c26 # v4.39.2
+        with:
+          category: /language:java-kotlin/android

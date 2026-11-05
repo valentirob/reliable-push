@@ -1,0 +1,82 @@
+name: Android CI
+
+# Builds and tests the Android SDK (android/: library + sample) on a GitHub-hosted runner, which already has the
+# Android SDK (ANDROID_HOME). No emulator, no Firebase files and no credentials are needed: the sample builds
+# without google-services.json. The emulator end-to-end suite (./scripts/android-e2e.sh) runs locally only.
+
+on:
+  push:
+    branches:
+      - develop
+      - main
+      - 'release/**'
+      - 'hotfix/**'
+    paths:
+      - 'android/**'
+      - '.github/workflows/android-ci.yml'
+  pull_request:
+    paths:
+      - 'android/**'
+      - '.github/workflows/android-ci.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  android:
+    name: Android (build, tests, AAR size)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Validate the Gradle wrapper
+        uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+
+      - name: Set up Java 21
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+          cache-dependency-path: |
+            android/**/*.gradle*
+            android/gradle/libs.versions.toml
+            android/gradle/wrapper/gradle-wrapper.properties
+
+      # Compiles library and sample, runs lint and the Robolectric unit tests (instrumented tests need an emulator and are not run).
+      - name: Gradle build
+        working-directory: android
+        run: ./gradlew build
+
+      # The SDK has a size budget (spec 9.2, rule mobile-sdk.md): the minified release AAR stays under 100 KB (102400 bytes).
+      - name: Check the release AAR size
+        working-directory: android
+        run: |
+          aar=reliablepush/build/outputs/aar/reliablepush-release.aar
+          size=$(stat -c %s "$aar")
+          echo "reliablepush-release.aar: $size bytes (limit 102400)"
+          if [ "$size" -ge 102400 ]; then
+            echo "::error::reliablepush-release.aar is $size bytes, the limit is 102400"
+            exit 1
+          fi
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: android-reports
+          path: |
+            android/reliablepush/build/reports/tests/
+            android/reliablepush/build/test-results/
+            android/reliablepush/build/reports/lint-results-*.html
+            android/sample/build/reports/
+          if-no-files-found: warn
+          retention-days: 14

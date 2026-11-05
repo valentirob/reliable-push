@@ -91,10 +91,15 @@ services:
       context: ../..
       dockerfile: harness/Dockerfile
     read_only: true
+    # the invoking user, so a service-account key with mode 600 in harness/build/fcm/ is readable inside the container
+    # (the image's files are world-readable); 1001:0 when compose is run by hand
+    user: "${E2E_UID:-1001}:${E2E_GID:-0}"
     tmpfs:
       - /tmp
     volumes:
       - rp-logs:/tmp/rp-logs:ro
+      # optional real FCM mode: service-account.json placed here by the maintainer (empty directory otherwise)
+      - ../build/fcm:/run/fcm:ro
     env_file:
       - path: ../build/e2e/secrets.env
         required: false

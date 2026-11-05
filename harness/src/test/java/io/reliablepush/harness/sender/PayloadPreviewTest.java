@@ -56,4 +56,39 @@ class PayloadPreviewTest {
         assertThat(out).startsWith("{\n  \"message\": {\n    \"token\": \"<device-token>\",\n");
         assertThat(out).contains("\\\"hi\\\"").contains("\\n");
     }
+
+    @Test
+    void debugBroadcastQuotesValues(@org.junit.jupiter.api.io.TempDir java.nio.file.Path tmp) throws Exception {
+        java.nio.file.Path canary = tmp.resolve("pwned");
+        for (String[] c : new String[][] {
+                {"It's $(touch " + canary + ") `touch " + canary + "` \"b\" a  b", "Two words; echo hi | cat & \\n end"},
+                {"a\nb", "line1\nline2\n"},
+                {"", ""}}) {
+            assertRoundTrip(tmp, c[0], c[1]);
+        }
+        assertThat(java.nio.file.Files.exists(canary)).isFalse();
+    }
+
+    private void assertRoundTrip(java.nio.file.Path tmp, String title, String body) throws Exception {
+        org.junit.jupiter.api.Assumptions.assumeTrue(java.nio.file.Files.isExecutable(java.nio.file.Path.of("/bin/sh")));
+        String cmd = PayloadPreview.androidDebugBroadcast(TID, title, body);
+        assertThat(cmd).startsWith("adb shell am broadcast -a io.reliablepush.sample.DEBUG_PUSH"
+                + " -n io.reliablepush.sample/.DebugPushReceiver --es rp_tid " + TID + " --es title ");
+        // Round trip through two real shells: the host shell, then adb joining the args for the device shell.
+        java.nio.file.Path bin = java.nio.file.Files.createTempDirectory(tmp, "bin");
+        java.nio.file.Files.writeString(bin.resolve("adb"), "#!/bin/sh\nshift\nexec /bin/sh -c \"$*\"\n");
+        java.nio.file.Files.writeString(bin.resolve("am"),
+                "#!/bin/sh\nfor a in \"$@\"; do printf '%s\\0' \"$a\"; done\n");
+        bin.resolve("adb").toFile().setExecutable(true);
+        bin.resolve("am").toFile().setExecutable(true);
+        ProcessBuilder pb = new ProcessBuilder("/bin/sh", "-c", cmd).redirectErrorStream(true);
+        pb.environment().put("PATH", bin + ":" + pb.environment().get("PATH"));
+        Process p = pb.start();
+        String out = new String(p.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+        assertThat(p.waitFor()).isZero();
+        java.util.List<String> args = java.util.List.of(out.split("\0", -1));
+        assertThat(args.subList(0, 14)).containsExactly(
+                "broadcast", "-a", "io.reliablepush.sample.DEBUG_PUSH", "-n", "io.reliablepush.sample/.DebugPushReceiver",
+                "--es", "rp_tid", TID.toString(), "--es", "title", title, "--es", "body", body);
+    }
 }

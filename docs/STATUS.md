@@ -2,6 +2,59 @@
 
 Newest entry first. Updated at the end of every work session (see `.agents/skills/session-handoff/SKILL.md`).
 
+## 2026-11-05 (7) — Claude Code — `feature/cycle2-android-sdk` (plan 2, final fix wave)
+
+- **Done:** R18 fix wave (whole-branch review minors): SDK no longer posts or reports `DELIVERED` for a blocked channel
+  group or paused notifications; `register`/`logout` always call back (`Exception`), `TokenStore.save` never throws;
+  `Retry-After`/latency clamped to 1 h without overflow; `Sdk.flush` no longer reschedules a job `persist` just
+  scheduled; docs retry wording; harness validates the FCM `project_id`, maps any `RuntimeException` in `FcmSender.send`
+  to `FAILED(0)`, clears an FCM token only if unchanged (compare-and-clear); `AndroidE2eSummary` fails an expected
+  scenario that was SKIPPED (except `fcm-real-delivery`); `android-e2e.sh` usage, early skip of `--test
+  fcm-real-delivery`, separate `publishToMavenLocal` call, airplane mode restored to the saved state.
+- **State (not merged, not pushed):** `./gradlew build` OK (release AAR 67,347 bytes, gate 102,400); `./mvnw -B -pl
+  harness -am verify` OK; `./scripts/e2e.sh`: `E2E: 17/17 passed`; `./scripts/android-e2e.sh` and `--release-lib`:
+  `Android E2E: 8/8 passed, 1 skipped` (each after one rerun, see below); `--test fcm-real-delivery` skips in under 1 s.
+  Two single-entry failures were environmental and passed on rerun: `token-refresh-near-expiry` (the host stalled 15 min
+  inside the test, so the 20 s token had expired: refresh answered 401 by design) and, with `--release-lib`,
+  `offline-delivery-is-sent-when-network-returns` (JobScheduler did not start the job for 85 s after its latency, state
+  `NET READY`; the OS delay alarm is inexact). No emulator or stack left running.
+- **Follow-ups (not done):** `ReliablePushOptions` builder before 1.0; publish the R8 `mapping.txt`; move test hooks out
+  of the public `ReliablePush` object.
+
+## 2026-11-05 (6) — Claude Code — `feature/cycle2-android-sdk` (plan 2, Android SDK, Task 8 and handoff)
+
+- **Done:** all plan 2 tasks (0 to 8) are implemented and ticked: the Android SDK (`android/reliablepush`, Kotlin, Kotlin
+  stdlib only), the sample app, emulator E2E (`./scripts/android-e2e.sh`), the harness grants / real-devices / Host
+  allowlist (closes the earlier open item "console write guard / Host allowlist against DNS rebinding") and the optional
+  real FCM sender. Task 8: `.github/workflows/android-ci.yml` (`./gradlew build`, AAR size gate < 102,400 bytes, Gradle
+  wrapper validation, test reports on failure; no emulator, no credentials), a CodeQL Android job, Dependabot `gradle` for
+  `/android`, `maven-publish` + `signing` (only when `SIGNING_KEY`/`SIGNING_PASSWORD` are set; `publishToMavenLocal` runs,
+  the POM lists only `kotlin-stdlib`), `docs/android.md`, integration guide §4, README, `AGENTS.md`, `docs/testing.md`, the
+  run-e2e skill and the spec block "Changes during implementation (plan 2)". actionlint 1.7.12 is clean.
+- **AAR size:** the release AAR was 98,307 bytes, too close to the gate, so the library's release build is now minified
+  with R8 (`reliablepush/proguard-rules.pro`: keeps the public API in `io.reliablepush.android` and `RetryJobService`,
+  `-repackageclasses io.reliablepush.android.internal` so internal classes cannot collide with other minified libraries,
+  and no `-allowaccessmodification`, so no member is widened): **65,910 bytes**. `javap -public` of the 7 public and
+  manifest classes is identical between the debug and release classes. The unit tests run on the debug variant (no
+  `testReleaseUnitTest`); the minified code is exercised at runtime by `./scripts/android-e2e.sh --release-lib` (the
+  sample's debug build consumes the release AAR from mavenLocal): `Android E2E: 8/8 passed, 1 skipped`. The library's
+  own instrumented Keystore test in that run still runs against the debug library (internal class under test).
+- **State (verification on this branch, not merged, not pushed):** `cd android && ./gradlew build` OK;
+  `./mvnw -B -pl harness -am verify` OK (34 client + 135 harness unit + 79 harness integration tests, 0 failures);
+  `cd backend && ./mvnw -B verify` OK (240 unit + 218 integration, 0 failures, coverage gate met);
+  `./scripts/e2e.sh`: `E2E: 17/17 passed`; `./scripts/android-e2e.sh` and `./scripts/android-e2e.sh --release-lib`: each `Android E2E: 8/8 passed, 1 skipped`
+  (`fcm-real-delivery` skipped). No emulator or stack left running.
+- **Not run:** the real-FCM check (Task 7 Step 7): not run, it needs the maintainer's Firebase project
+  (`android/sample/google-services.json` and `harness/build/fcm/service-account.json`, see `docs/testing.md`).
+- **Next:** (1) final whole-branch review of `feature/cycle2-android-sdk` (from `648ee28`) and a fix wave; the deferred
+  minors are in `.superpowers/sdd/2026-11-05-cycle2-android-sdk/progress.md` (Task 7 ones are worth considering).
+  (2) The maintainer decides the merge into `develop` (`--no-ff`; merge line `E2E: 17/17 passed` and `Android E2E: 8/8
+  passed, 1 skipped`). (3) Optionally run `fcm-real-delivery` with the Firebase files. (4) Then cycle 3 (iOS).
+- **Open:** (a) Real FCM delivery unverified until the maintainer runs it. (b) Maven Central release not set up
+  (namespace and signing key are the maintainer's). (c) The chart was never installed on a real GKE or OpenShift cluster;
+  `scripts/*.ps1` untested on Windows. (d) The Android CI workflow has not run on GitHub yet (validated locally with
+  actionlint only); the Gradle actions SHA is `v6.4.0`.
+
 ## 2026-11-05 (5) — Claude Code — `develop`
 
 - **Done:** `feature/cycle1c-deploy-load` (with the plan commit) merged into `develop` (`--no-ff`, `e1be03f`) and pushed;
@@ -16,8 +69,8 @@ Newest entry first. Updated at the end of every work session (see `.agents/skill
   spec, then implement. Needs a local Android SDK / emulator for the instrumented and E2E tests (spec §10.1). Then cycle 3
   (iOS).
 - **Open:** (a) The chart was never installed on a real GKE or OpenShift cluster (the `BackendConfig` health check and
-  its firewall note are unverified on GKE). (b) `scripts/*.ps1` untested on Windows. (c) Console write guard: Host
-  allowlist against DNS rebinding. (d) Small leftovers from the plan 1C reviews, left on purpose: two long doc lines
+  its firewall note are unverified on GKE). (b) `scripts/*.ps1` untested on Windows. (c) ~~Console write guard: Host
+  allowlist against DNS rebinding~~ — resolved in plan 2 (Task 5). (d) Small leftovers from the plan 1C reviews, left on purpose: two long doc lines
   (`docs/deployment.md`, spec), cosmetic nits in `scripts/load.sh`, and a narrow race in `scripts/helm-smoke.sh` (a
   same-named cluster created during `kind create` would be treated as owned).
 

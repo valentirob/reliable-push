@@ -96,6 +96,52 @@ JDK 21 and network access (Maven artifacts, Playwright's Chromium). With Colima:
   the container and prints its last log lines.
 - The agent workflow is in [`.agents/skills/run-e2e/SKILL.md`](../.agents/skills/run-e2e/SKILL.md).
 
+## Android SDK tests
+
+Needs JDK 21 and the Android SDK (`ANDROID_HOME`; the build downloads missing packages). No Docker for the unit tests.
+
+| Goal | Command |
+|---|---|
+| Lint, unit tests (Robolectric, JUnit 4), debug and release AAR; what CI runs | `cd android && ./gradlew build` |
+| Unit tests only | `cd android && ./gradlew :reliablepush:testDebugUnitTest` |
+| Release AAR size (CI gate: under 102,400 bytes) | `ls -l android/reliablepush/build/outputs/aar/reliablepush-release.aar` |
+| Emulator E2E (local only) | `./scripts/android-e2e.sh [--test <method>] [--release-lib] [--keep]` |
+| Install into `~/.m2` (unsigned; signing only when `SIGNING_KEY` and `SIGNING_PASSWORD` are set) | `cd android && ./gradlew :reliablepush:publishToMavenLocal` |
+
+The release build is minified with R8 (`android/reliablepush/proguard-rules.pro` keeps the public API in
+`io.reliablepush.android` and the manifest's `RetryJobService`, moves internal classes into
+`io.reliablepush.android.internal` and does not widen member access); the unit tests and the default E2E run on the debug variant.
+`./scripts/android-e2e.sh --release-lib` runs the same emulator suite with the sample consuming the minified release AAR
+(installed into `~/.m2` by `publishToMavenLocal`), so run it after changing the keep rules.
+
+`./scripts/android-e2e.sh` starts the harness compose stack, boots the AVD `Medium_Phone_API_37.0` (override with
+`ANDROID_AVD`; it is stopped again if the script started it), runs the sample's instrumented tests and the library's
+Keystore tests, and writes `harness/build/android-e2e/` (`summary.json`, `junit/`, `logs/`); it ends with `Android E2E: 8/8 passed, 1 skipped`
+(the skipped entry is `fcm-real-delivery`, see the next section). The emulator reaches the stack at `10.0.2.2`
+(`8080` backend, `8090` harness). On Android 17 the E2E grants the sample `ACCESS_LOCAL_NETWORK`. The workflow
+`.github/workflows/android-ci.yml` never runs it: CI has no emulator and no Firebase files.
+
+## Real FCM pushes (optional, maintainer's Firebase project)
+
+`./scripts/android-e2e.sh` (emulator, needs the Android SDK) normally ends with `Android E2E: 8/8 passed, 1 skipped`: the
+ninth entry, `fcm-real-delivery`, sends a push through the real FCM HTTP v1 API and checks that Google Play services wakes
+the killed sample app, which reports `DELIVERED`. It runs only when both files below exist; without them it is `SKIPPED`
+(counted as neither passed nor failed, exit code 0) and every build and test passes as usual.
+
+1. In the Firebase console create a project and add an Android app with package `io.reliablepush.sample`.
+2. Download `google-services.json` into `android/sample/` (the Google Services Gradle plugin is applied only when it exists).
+3. Create a service-account key that may send FCM messages (role "Firebase Cloud Messaging API Admin") and save it as
+   `harness/build/fcm/service-account.json`; `chmod 600` it. Compose mounts `harness/build/fcm/` read-only at `/run/fcm`,
+   and the harness container runs as the invoking user so it can read the key.
+4. Run `./scripts/android-e2e.sh --test fcm-real-delivery`. The emulator needs Google Play services (the default AVD has
+   them) and internet access.
+
+Both files are git-ignored and never committed, logged or printed. The harness reports `fcmEnabled` in
+`GET /console/api/apps`, the console API shows only `hasFcmToken` for a device, and a push to a user with real devices that
+reported an FCM token adds an `fcm_push` entry (`SENT`, `UNREGISTERED` or `FAILED` with the HTTP status) to the
+notification's timeline; an `UNREGISTERED` answer drops the device's token. When you are done, delete the key in the Google
+Cloud console.
+
 ## Web console and demo
 
 `./scripts/demo.sh [--realtime]` (Windows: `scripts\demo.ps1`) starts the same stack as the compose project
@@ -107,8 +153,17 @@ The console has six screens: Devices, Send push, Live tracking, Fallback inbox, 
 "Test harness — simulated data, not for production". No secret is shown in the page or exposed by its API; live updates use
 Server-Sent Events and reconnect automatically. The console API accepts writes (`POST`) only with `Content-Type: application/json`
 (an explicit `{}` when there is nothing to send) and rejects cross-site requests (`Origin` or `Sec-Fetch-Site` from another
-origin) with 403; `curl` and the scripts send neither header. The console and the harness are never built into the backend
+origin) with 403. Every `/console/api/` request (reads too) must also carry a `Host` of `localhost`, `127.0.0.1`, `[::1]`,
+`10.0.2.2` or `harness` (any port), else 403, which defeats DNS rebinding. `curl`, the scripts and the emulator's `HttpURLConnection` send neither cross-site header. The console and the harness are never built into the backend
 image or deployed with a Helm chart.
+
+For real apps (the Android sample on an emulator, which reaches the host harness at `10.0.2.2:8090`) the console API also has
+`POST /console/api/grants {appId, userId}` (201 `{grant, expiresAt}`: a signed grant, minted by the same component as the
+simulator's; the only endpoint that returns one, never logged) and `POST /console/api/real-devices {appId, userId, deviceId,
+platform, label}` (201; kept in memory, at most 50). Real devices show in the Devices list as `REAL` (the harness holds no
+token for them, so no refresh/offline buttons); `GET /console/api/devices` marks every entry `"kind": "REAL"` or
+`"SIMULATED"`. The push preview also shows the `adb shell am broadcast` line for the sample app's debug receiver; its values
+are single-quoted twice (host shell and device shell), so paste it into a POSIX host shell (not PowerShell or cmd).
 
 ## Load tests (local only)
 
