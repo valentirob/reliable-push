@@ -3,7 +3,12 @@
 {{- $roles = append $roles (dict "component" "worker" "suffix" "-worker" "cfg" .Values.worker) -}}
 {{- end -}}
 {{- range $roles }}
-{{- if gt (int .cfg.replicas) 1 }}
+{{- /* With the API HPA the Deployment's replica count is the HPA's, at least autoscaling.api.minReplicas. */ -}}
+{{- $replicas := .cfg.replicas -}}
+{{- if and (ne .component "worker") $.Values.autoscaling.api.enabled -}}
+{{- $replicas = $.Values.autoscaling.api.minReplicas -}}
+{{- end -}}
+{{- if gt (int $replicas) 1 }}
 ---
 apiVersion: policy/v1
 kind: PodDisruptionBudget

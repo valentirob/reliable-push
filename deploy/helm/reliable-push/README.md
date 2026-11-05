@@ -11,15 +11,18 @@ least one app under `config.apps`. A missing one fails `helm template` with a me
 
 - **Secrets:** never in values. One existing Secret (`secrets.existingSecret`) is loaded with `envFrom`; it holds
   `SPRING_DATASOURCE_PASSWORD` and every key referenced as `env:NAME` in `config`. The chart cannot check that the keys
-  exist. Every key ending in `-ref` anywhere under `config` (maps and lists) must be `env:NAME`; anything else fails the
-  render (the message names the key path, never the value).
+  exist. Every key ending in `ref` anywhere under `config` (maps and lists; `-ref`, `_ref` or camelCase `Ref`, as Spring's
+  relaxed binding accepts them all) must be `env:NAME`; anything else fails the render (the message names the key path,
+  never the value).
 - **Modes:** `mode: combined` (default) runs one Deployment with profiles `api,worker,json`; `mode: split` runs
   `<fullname>-api` and `<fullname>-worker`. Services: `<fullname>-api` (port 80, API pods only) and
   `<fullname>-management` (port 8081, all pods; probes and `/actuator/prometheus`, never expose it publicly).
 - **Config:** `config` is rendered under `reliable-push:` in ConfigMap `<fullname>-config`, mounted at `/config`. A
   changed value changes the `checksum/config` pod annotation, so pods roll on `helm upgrade`.
 - **Sizing:** `api.*` (also used in combined mode) and `worker.*` set replicas, resources, Hikari pool size and worker
-  concurrency; see docs/operations.md for how they relate.
+  concurrency; see docs/operations.md for how they relate. They are env vars, which win over the same keys under
+  `config`. PodDisruptionBudgets are rendered for a component with more than one replica (with the API HPA:
+  `autoscaling.api.minReplicas`).
 - **Security:** non-root, read-only root filesystem, no privilege escalation, all capabilities dropped, `RuntimeDefault`
   seccomp, `/tmp` as `emptyDir`. No `runAsUser`/`fsGroup` by default (platform values may add them).
 - **Exposure:** `ingress` (Kubernetes Ingress, `values-gke.yaml` enables it with class `gce`) or `route` (OpenShift,

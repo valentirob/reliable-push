@@ -4,6 +4,11 @@ templates:
   - configmap.yaml
 release:
   name: rp
+# Pins the chart metadata the rendered ConfigMap (helm.sh/chart label) depends on, so the checksum tests below survive a
+# Chart.yaml version bump.
+chart:
+  version: 0.1.0
+  appVersion: "0.1.0"
 set:
   image.repository: registry.example.com/reliable-push
   database.url: jdbc:postgresql://db:5432/rp
@@ -230,8 +235,9 @@ tests:
           path: spec.template.spec.containers[0].image
           value: registry.example.com/reliable-push@sha256:0000000000000000000000000000000000000000000000000000000000000000
 
-  # The pinned hashes cover the rendered ConfigMap (including the helm.sh/chart label): refresh them when the chart
-  # version or the ConfigMap template changes. The point is that a changed config value changes the annotation.
+  # The pinned hashes cover the rendered ConfigMap (including the helm.sh/chart label, pinned by the suite's chart
+  # override): refresh them when the ConfigMap template changes. The point is that a changed config value changes the
+  # annotation.
   - it: checksum/config for default-timeout-minutes 10
     template: deployment.yaml
     asserts:

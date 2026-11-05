@@ -43,3 +43,35 @@ tests:
       - equal:
           path: metadata.name
           value: rp-reliable-push-api
+
+  - it: with the API HPA the PDB follows autoscaling.api.minReplicas, not api.replicas
+    set:
+      api.replicas: 1
+      autoscaling.api.enabled: true
+      autoscaling.api.minReplicas: 2
+    asserts:
+      - hasDocuments:
+          count: 1
+      - equal:
+          path: spec.selector.matchLabels["app.kubernetes.io/component"]
+          value: combined
+
+  - it: no API PDB with the HPA at minReplicas 1, whatever api.replicas says
+    set:
+      api.replicas: 3
+      autoscaling.api.enabled: true
+      autoscaling.api.minReplicas: 1
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: split mode with the HPA keeps the worker PDB on worker.replicas
+    set:
+      mode: split
+      api.replicas: 1
+      worker.replicas: 2
+      autoscaling.api.enabled: true
+      autoscaling.api.minReplicas: 2
+    asserts:
+      - hasDocuments:
+          count: 2

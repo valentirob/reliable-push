@@ -84,15 +84,35 @@ tests:
     asserts:
       - isKind:
           of: ConfigMap
-  - it: invalid mode is rejected
+  - it: a camelCase ref key with an inline value fails too
     template: validate.yaml
     set:
+      config.apps.shop.default-timeout-minutes: 10
+      config.apps.shop.fallback.hmacSecretRef: not-an-env-ref-s3cret
+    asserts:
+      - failedTemplate:
+          errorMessage: config.apps.shop.fallback.hmacSecretRef must be a reference of the form env:NAME (NAME is a key of secrets.existingSecret); inline values are not allowed
+  - it: a snake_case ref key with an inline value fails too
+    template: validate.yaml
+    set:
+      config.apps.shop.default-timeout-minutes: 10
+      config.apps.shop.fallback.hmac_secret_ref: not-an-env-ref-s3cret
+    asserts:
+      - failedTemplate:
+          errorMessage: config.apps.shop.fallback.hmac_secret_ref must be a reference of the form env:NAME (NAME is a key of secrets.existingSecret); inline values are not allowed
+  - it: invalid mode is rejected by the schema enum
+    template: validate.yaml
+    set:
+      config.apps.shop.default-timeout-minutes: 10
       mode: both
     asserts:
-      - failedTemplate: {}
-  - it: invalid worker strategy is rejected
+      - failedTemplate:
+          errorPattern: "/mode"
+  - it: invalid worker strategy is rejected by the schema enum
     template: validate.yaml
     set:
+      config.apps.shop.default-timeout-minutes: 10
       worker.strategy: Blue
     asserts:
-      - failedTemplate: {}
+      - failedTemplate:
+          errorPattern: "/worker/strategy"

@@ -83,8 +83,9 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end -}}
 
 {{/*
-Walks maps and lists under config: every key ending in "-ref" must be env:NAME. The message names the key path and
-never echoes the value (it may be an inline secret).
+Walks maps and lists under config: every key ending in "ref" (any case, with "-", "_" or camelCase: hmac-secret-ref,
+hmac_secret_ref, hmacSecretRef, as Spring's relaxed binding accepts them all) must be env:NAME. The message names the
+key path and never echoes the value (it may be an inline secret).
 */}}
 {{- define "rp.checkRefs" -}}
 {{- $path := .path -}}
@@ -92,7 +93,7 @@ never echoes the value (it may be an inline secret).
 {{- if kindIs "map" $v -}}
 {{- range $k, $x := $v -}}
 {{- $p := printf "%s.%s" $path $k -}}
-{{- if hasSuffix "-ref" $k -}}
+{{- if regexMatch "(?i)[-_]?ref$" $k -}}
 {{- if not (and (kindIs "string" $x) (regexMatch "^env:[A-Za-z_][A-Za-z0-9_]*$" $x)) -}}
 {{- fail (printf "%s must be a reference of the form env:NAME (NAME is a key of secrets.existingSecret); inline values are not allowed" $p) -}}
 {{- end -}}

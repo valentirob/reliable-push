@@ -50,6 +50,10 @@ config:
 # Sizing defaults come from the local load runs in docs/operations.md ("Measured capacity"); they are relative to that
 # machine, so confirm them on your cluster. Keep replicas x hikariMaximumPoolSize (API + worker) below PostgreSQL
 # max_connections (defaults: 2 x 10 + 2 x 20 = 60).
+# The chart sets these as env vars, which win over the same keys under config (the file): hikariMaximumPoolSize is
+# SPRING_DATASOURCE_HIKARI_MAXIMUMPOOLSIZE and worker.maxConcurrency is RELIABLEPUSH_WORKER_MAXCONCURRENCY, so
+# config.worker.max-concurrency has no effect. In combined mode the pods (API and worker role) use
+# api.hikariMaximumPoolSize; worker.hikariMaximumPoolSize applies to the split worker Deployment only.
 
 # API pods (and the combined Deployment, which also uses worker.maxConcurrency).
 api:
