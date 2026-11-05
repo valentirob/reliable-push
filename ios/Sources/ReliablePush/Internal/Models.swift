@@ -29,11 +29,17 @@ struct EventOutcome: Codable, Sendable, Equatable {
 
 /// ISO-8601 coding: fractional seconds accepted on input, always written with milliseconds.
 enum ISO8601Coding {
-    private static func formatter(fractional: Bool) -> ISO8601DateFormatter {
+    // ISO8601DateFormatter is thread-safe; building one per date made large queues quadratic.
+    private nonisolated(unsafe) static let withFraction: ISO8601DateFormatter = make([.withInternetDateTime, .withFractionalSeconds])
+    private nonisolated(unsafe) static let withoutFraction: ISO8601DateFormatter = make([.withInternetDateTime])
+
+    private static func make(_ options: ISO8601DateFormatter.Options) -> ISO8601DateFormatter {
         let f = ISO8601DateFormatter()
-        f.formatOptions = fractional ? [.withInternetDateTime, .withFractionalSeconds] : [.withInternetDateTime]
+        f.formatOptions = options
         return f
     }
+
+    private static func formatter(fractional: Bool) -> ISO8601DateFormatter { fractional ? withFraction : withoutFraction }
 
     static func makeEncoder() -> JSONEncoder {
         let encoder = JSONEncoder()

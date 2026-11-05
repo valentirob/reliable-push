@@ -289,7 +289,7 @@ Requirements: FR-4 to FR-8, FR-10, NFR-1, NFR-5, NFR-6, NFR-10. Rules: `.agents/
     - Batches of 50 until the queue is empty, a batch fails or the deadline passes.
     - On `401`: one refresh (if the gate allows) and one retry of the batch; a refresh answered `401` clears the registration → `.notRegistered`.
 
-- [ ] **Step 1: Failing tests:**
+- [x] **Step 1: Failing tests:**
   - `testQueueSurvivesNewInstance`
   - `testCapDropsOldestWithWarn`
   - `testSameKeyIsNotAddedTwice`
@@ -305,8 +305,8 @@ Requirements: FR-4 to FR-8, FR-10, NFR-1, NFR-5, NFR-6, NFR-10. Rules: `.agents/
   - `testSecondRefreshInSameProcessIsNotAttempted`
   - `testFlushLockSkipsWhenHeld`
   - `testDeadlineStopsBetweenBatches`
-- [ ] **Step 2: Run** → FAIL. **Step 3: Implement.** **Step 4: Run** → PASS.
-- [ ] **Step 5: Commit** `feat(ios): cross-process event queue and sender`
+- [x] **Step 2: Run** → FAIL. **Step 3: Implement.** **Step 4: Run** → PASS.
+- [x] **Step 5: Commit** `feat(ios): cross-process event queue and sender`
 
 ### Task 4: Public API, NSE helper and READ
 
