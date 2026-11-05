@@ -50,7 +50,8 @@ internal class DeviceApi(
             )
         }
         return call("POST", "/v1/events", token, JSONObject().put("events", arr).toString(), 200) { json ->
-            val items = json.getJSONArray("items")
+            // `items` is optional on our side: a 200 that omits it simply acknowledges nothing (see EventSender)
+            val items = json.optJSONArray("items") ?: JSONArray()
             List(items.length()) { i ->
                 val o = items.getJSONObject(i)
                 EventOutcome(o.getString("trackingId"), o.getString("outcome"))

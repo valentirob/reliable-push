@@ -211,7 +211,7 @@ The SDK posts the visible notification first, persists the event, schedules the 
   - `internal class RetryScheduler(context: Context, jobId: Int)` with `schedule(minLatencySeconds: Long = 30)` (`NETWORK_TYPE_ANY`, exponential backoff 30 s, `setPersisted(false)`) and `cancel()`.
   - `RetryJobService : JobService`: loads the config from `TokenStore`, runs `EventSender.flush()` on a background thread, `jobFinished(params, needsReschedule = result is RetryLater)`.
 
-- [ ] **Step 1: Failing tests:**
+- [x] **Step 1: Failing tests:**
   - `queueSurvivesNewInstance()`
   - `capDropsOldestWithWarn()`
   - `concurrentEnqueueKeepsEveryEvent()` (8 threads × 50 adds → 400 distinct)
@@ -224,8 +224,8 @@ The SDK posts the visible notification first, persists the event, schedules the 
   - `secondRefreshInSameProcessIsNotAttempted()`
   - `schedulesJobWithNetworkConstraintAndLatency()` (Robolectric `ShadowJobScheduler`)
   - `cancelRemovesJob()`
-- [ ] **Step 2: Run** → FAIL. **Step 3: Implement.** **Step 4: Run** → PASS.
-- [ ] **Step 5: Commit** `feat(android): persistent event queue with job scheduler retry`
+- [x] **Step 2: Run** → FAIL. **Step 3: Implement.** **Step 4: Run** → PASS.
+- [x] **Step 5: Commit** `feat(android): persistent event queue with job scheduler retry`
 
 ### Task 4: Public API, notification and v1 entry point
 
