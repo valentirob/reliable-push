@@ -285,13 +285,13 @@ The SDK posts the visible notification first, persists the event, schedules the 
   - `GET /console/api/devices` includes real devices with `"kind": "REAL"` (simulated ones are `"SIMULATED"`).
   - `PayloadPreview.androidDebugBroadcast(tid, title, body)`: the `adb shell am broadcast -a io.reliablepush.sample.DEBUG_PUSH -n io.reliablepush.sample/.DebugPushReceiver --es rp_tid … --es title … --es body …` line, with shell-quoted values. It is shown in the console's payload preview.
 
-- [ ] **Step 1: Failing tests:**
+- [x] **Step 1: Failing tests:**
   - `grantEndpointMintsVerifiableGrant()` (the HS256 signature verifies with the app's grant secret; `aud` = app, `sub` = user, `exp − iat` = 120; the real backend accepts it in Task 6's emulator run)
   - `grantRequiresJsonBodyAndKnownApp()`
   - `realDeviceAppearsInDeviceList()`
   - `debugBroadcastQuotesValues()` (a title with a quote and a space)
-- [ ] **Step 2: Run** `./mvnw -B -pl harness -am verify` → FAIL. **Step 3: Implement.** **Step 4: Run** → PASS; `./scripts/e2e.sh` → `E2E: 17/17 passed`.
-- [ ] **Step 5: Commit** `feat(harness): grants and real devices for emulator apps`
+- [x] **Step 2: Run** `./mvnw -B -pl harness -am verify` → FAIL. **Step 3: Implement.** **Step 4: Run** → PASS; `./scripts/e2e.sh` → `E2E: 17/17 passed`.
+- [x] **Step 5: Commit** `feat(harness): grants and real devices for emulator apps`
 
 ### Task 6: Sample app and emulator E2E
 

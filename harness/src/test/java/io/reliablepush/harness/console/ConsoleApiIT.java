@@ -190,6 +190,7 @@ class ConsoleApiIT {
             if (id.equals(d.get("deviceId").asString())) {
                 found = true;
                 assertThat(d.get("userId").asString()).isEqualTo("list-user");
+                assertThat(d.get("kind").asString()).isEqualTo("SIMULATED");
                 assertThat(d.get("platform").asString()).isEqualTo("ANDROID");
                 assertThat(d.get("androidMode").asString()).isEqualTo("V2");
                 assertThat(d.get("tokenExpiresAt").asString()).isNotBlank();

@@ -43,6 +43,24 @@ public final class PayloadPreview {
                         "data", map("rp_tid", tid.toString()))))));
     }
 
+    /**
+     * The {@code adb} line that hands a tracked push to the sample app's debug receiver without FCM. It is meant for
+     * pasting into a host shell: {@code adb shell} joins its arguments into one command line for the device shell, so
+     * every free-text value is single-quoted twice (once for the device shell, once for the host shell). The tracking
+     * id is a UUID and needs no quoting.
+     */
+    public static String androidDebugBroadcast(UUID tid, String title, String body) {
+        return "adb shell am broadcast -a io.reliablepush.sample.DEBUG_PUSH"
+                + " -n io.reliablepush.sample/.DebugPushReceiver"
+                + " --es rp_tid " + tid
+                + " --es title " + quote(quote(title))
+                + " --es body " + quote(quote(body));
+    }
+
+    private static String quote(String s) {
+        return "'" + s.replace("'", "'\\''") + "'";
+    }
+
     private static Map<String, Object> map(Object... kv) {
         Map<String, Object> m = new LinkedHashMap<>();
         for (int i = 0; i < kv.length; i += 2) {

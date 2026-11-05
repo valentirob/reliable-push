@@ -43,6 +43,12 @@ public class GrantMinter {
         this.clock = clock;
     }
 
+    /** The {@code exp} of a grant this minter produced (no signature check). */
+    public Instant expiresAt(String grant) {
+        byte[] payload = Base64.getUrlDecoder().decode(grant.split("\\.")[1]);
+        return Instant.ofEpochSecond(json.readTree(payload).get("exp").asLong());
+    }
+
     public String mint(String appId, String userId) {
         HarnessApp app = properties.app(appId);
         Instant now = clock.instant();

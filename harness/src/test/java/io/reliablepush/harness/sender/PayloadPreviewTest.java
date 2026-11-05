@@ -56,4 +56,32 @@ class PayloadPreviewTest {
         assertThat(out).startsWith("{\n  \"message\": {\n    \"token\": \"<device-token>\",\n");
         assertThat(out).contains("\\\"hi\\\"").contains("\\n");
     }
+
+    @Test
+    void debugBroadcastQuotesValues() throws Exception {
+        String title = "It's $(touch /tmp/rp-pwned) `x` \"b\" a  b";
+        String body = "Two words; echo hi | cat & \\n end";
+
+        String cmd = PayloadPreview.androidDebugBroadcast(TID, title, body);
+
+        assertThat(cmd).startsWith("adb shell am broadcast -a io.reliablepush.sample.DEBUG_PUSH"
+                + " -n io.reliablepush.sample/.DebugPushReceiver --es rp_tid " + TID + " --es title ");
+        // Round trip through two real shells: the host shell, then adb joining the args for the device shell.
+        java.nio.file.Path bin = java.nio.file.Files.createTempDirectory("rp-adb");
+        java.nio.file.Files.writeString(bin.resolve("adb"), "#!/bin/sh\nshift\nexec /bin/sh -c \"$*\"\n");
+        java.nio.file.Files.writeString(bin.resolve("am"),
+                "#!/bin/sh\nfor a in \"$@\"; do printf '%s\\0' \"$a\"; done\n");
+        bin.resolve("adb").toFile().setExecutable(true);
+        bin.resolve("am").toFile().setExecutable(true);
+        ProcessBuilder pb = new ProcessBuilder("/bin/sh", "-c", cmd).redirectErrorStream(true);
+        pb.environment().put("PATH", bin + ":" + pb.environment().get("PATH"));
+        Process p = pb.start();
+        String out = new String(p.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+        assertThat(p.waitFor()).isZero();
+        java.util.List<String> args = java.util.List.of(out.split("\0", -1));
+        assertThat(args.subList(0, 14)).containsExactly(
+                "broadcast", "-a", "io.reliablepush.sample.DEBUG_PUSH", "-n", "io.reliablepush.sample/.DebugPushReceiver",
+                "--es", "rp_tid", TID.toString(), "--es", "title", title, "--es", "body", body);
+        assertThat(java.nio.file.Files.exists(java.nio.file.Path.of("/tmp/rp-pwned"))).isFalse();
+    }
 }
