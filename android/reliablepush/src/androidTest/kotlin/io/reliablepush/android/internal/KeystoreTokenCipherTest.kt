@@ -23,11 +23,30 @@ class KeystoreTokenCipherTest {
         // fresh IV on every call
         assertFalse(blob.contentEquals(cipher.encrypt(plain)))
 
-        val tampered = blob.copyOf().also { it[it.size - 1] = (it[it.size - 1].toInt() xor 1).toByte() }
-        try {
-            cipher.decrypt(tampered)
-            fail("expected AEADBadTagException")
-        } catch (expected: AEADBadTagException) {
+        for (index in listOf(0, 12, blob.size - 1)) { // IV, ciphertext, tag
+            val tampered = blob.copyOf().also { it[index] = (it[index].toInt() xor 1).toByte() }
+            try {
+                cipher.decrypt(tampered)
+                fail("expected AEADBadTagException at $index")
+            } catch (expected: AEADBadTagException) {
+            }
         }
+        try {
+            cipher.decrypt(ByteArray(5))
+            fail("expected an exception for a short blob")
+        } catch (expected: Exception) {
+        }
+    }
+
+    @Test
+    fun resetReplacesTheKey() {
+        val blob = cipher.encrypt("x".toByteArray())
+        cipher.reset()
+        try {
+            cipher.decrypt(blob)
+            fail("old blob must be unreadable after reset")
+        } catch (expected: Exception) {
+        }
+        assertArrayEquals("y".toByteArray(), cipher.decrypt(cipher.encrypt("y".toByteArray())))
     }
 }

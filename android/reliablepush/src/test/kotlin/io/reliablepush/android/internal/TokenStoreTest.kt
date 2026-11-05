@@ -16,10 +16,17 @@ import org.robolectric.annotation.Config
 import org.robolectric.shadows.ShadowLog
 
 private class XorCipher(var failOnDecrypt: Boolean = false) : TokenCipher {
-    override fun encrypt(plain: ByteArray) = ByteArray(plain.size) { (plain[it].toInt() xor 0x5A).toByte() }
+    override fun encrypt(plain: ByteArray): ByteArray {
+        if (failEncryptTimes > 0) { failEncryptTimes--; throw java.security.GeneralSecurityException("key invalidated") }
+        return xor(plain)
+    }
+    private fun xor(plain: ByteArray) = ByteArray(plain.size) { (plain[it].toInt() xor 0x5A).toByte() }
+    var failEncryptTimes = 0
+    var resets = 0
+    override fun reset() { resets++; failEncryptTimes = 0 }
     override fun decrypt(blob: ByteArray): ByteArray {
         if (failOnDecrypt) throw java.security.GeneralSecurityException("key gone")
-        return encrypt(blob)
+        return xor(blob)
     }
 }
 
@@ -74,6 +81,35 @@ class TokenStoreTest {
         store.save(Registration("d", "not-a-jwt", 1))
         assertNull(store.load())
         assertNull(prefs.getString("device_id", null))
+    }
+
+    @Test
+    fun saveRecoversWhenKeyIsReplaced() {
+        val cipher = XorCipher().apply { failEncryptTimes = 1 }
+        val store = TokenStore(context, cipher)
+        assertTrue(store.save(Registration("dev-1", fakeJwt(0, 100), 100_000)))
+        assertEquals(1, cipher.resets)
+        assertEquals("dev-1", store.load()!!.deviceId)
+    }
+
+    @Test
+    fun saveReturnsFalseWhenEncryptionKeepsFailing() {
+        val cipher = object : TokenCipher {
+            override fun encrypt(plain: ByteArray): ByteArray = throw java.security.GeneralSecurityException("x")
+            override fun decrypt(blob: ByteArray): ByteArray = blob
+            override fun reset() {}
+        }
+        val store = TokenStore(context, cipher)
+        assertFalse(store.save(Registration("dev-1", fakeJwt(0, 100), 100_000)))
+        assertNull(store.load())
+    }
+
+    @Test
+    fun unreadableTokenResetsCipher() {
+        TokenStore(context, XorCipher()).save(Registration("dev-1", fakeJwt(0, 100), 100_000))
+        val cipher = XorCipher(failOnDecrypt = true)
+        TokenStore(context, cipher).load()
+        assertEquals(1, cipher.resets)
     }
 
     @Test

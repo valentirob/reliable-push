@@ -24,6 +24,8 @@ class DeviceTokenTest {
     fun needsRefreshBelowTwentyPercent() {
         val t = DeviceToken.parse(fakeJwt(0, 100))!!
         assertFalse(t.needsRefresh(80_000))
+        assertFalse(t.needsRefresh(80_000))
+        assertTrue(t.needsRefresh(80_001))
         assertTrue(t.needsRefresh(81_000))
         assertTrue(t.needsRefresh(100_000))
         assertTrue(t.needsRefresh(500_000))
@@ -40,5 +42,11 @@ class DeviceTokenTest {
         assertNull(DeviceToken.parse(fakeJwt(100, 100)))
         assertNull(DeviceToken.parse(fakeJwt(100, 50)))
         assertNotNull(DeviceToken.parse(fakeJwt(1, 2)))
+        assertNull(DeviceToken.parse(fakeJwt(0, 100_000_000_000L)))
+        assertNull(DeviceToken.parse(fakeJwt(0, Long.MAX_VALUE)))
+        for (bad in listOf("""{"iat":"abc","exp":100}""", """{"iat":0,"exp":"abc"}""", """{"iat":0}""")) {
+            val p = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(bad.toByteArray())
+            assertNull(DeviceToken.parse("h.$p.s"))
+        }
     }
 }

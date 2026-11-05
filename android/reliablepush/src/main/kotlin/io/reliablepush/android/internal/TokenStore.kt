@@ -15,13 +15,30 @@ internal class TokenStore(context: Context, private val cipher: TokenCipher) {
     private val prefs: SharedPreferences =
         context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
-    fun save(state: Registration) {
-        val blob = Base64.encodeToString(cipher.encrypt(state.deviceToken.toByteArray(Charsets.UTF_8)), Base64.NO_WRAP)
+    /**
+     * Returns false (and stores nothing) if the token cannot be encrypted even after replacing the key.
+     * Never throws for crypto failures, so callers on a push path need no try/catch; the device then
+     * simply counts as not registered.
+     */
+    fun save(state: Registration): Boolean {
+        val bytes = state.deviceToken.toByteArray(Charsets.UTF_8)
+        val encrypted = try {
+            cipher.encrypt(bytes)
+        } catch (e: Exception) {
+            cipher.reset()
+            try {
+                cipher.encrypt(bytes)
+            } catch (e2: Exception) {
+                clear()
+                return false
+            }
+        }
         prefs.edit()
             .putString(KEY_DEVICE_ID, state.deviceId)
-            .putString(KEY_TOKEN, blob)
+            .putString(KEY_TOKEN, Base64.encodeToString(encrypted, Base64.NO_WRAP))
             .putLong(KEY_EXPIRES_AT, state.expiresAt)
             .commit()
+        return true
     }
 
     fun load(): StoredRegistration? {
@@ -54,6 +71,7 @@ internal class TokenStore(context: Context, private val cipher: TokenCipher) {
 
     private fun unreadable(): StoredRegistration? {
         clear()
+        try { cipher.reset() } catch (e: Exception) { /* best effort */ }
         Log.w("ReliablePush", "event=token.unreadable") // Task 4 moves this to SdkLog
         return null
     }

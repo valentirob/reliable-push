@@ -12,6 +12,8 @@ internal data class DeviceToken(val raw: String, val issuedAt: Long, val expires
     }
 
     companion object {
+        private const val MAX_SECONDS = 100_000_000_000L // year ~5138; keeps the millis maths far from overflow
+
         fun parse(raw: String): DeviceToken? {
             val parts = raw.split('.')
             if (parts.size != 3) return null
@@ -19,7 +21,7 @@ internal data class DeviceToken(val raw: String, val issuedAt: Long, val expires
                 val payload = JSONObject(String(Base64.getUrlDecoder().decode(parts[1]), Charsets.UTF_8))
                 val iat = payload.getLong("iat")
                 val exp = payload.getLong("exp")
-                if (iat < 0 || exp <= iat || exp > Long.MAX_VALUE / 1000) return null
+                if (iat < 0 || exp <= iat || iat >= MAX_SECONDS || exp >= MAX_SECONDS) return null
                 DeviceToken(raw, iat * 1000, exp * 1000)
             } catch (e: Exception) { // bad base64, bad JSON, missing/non-numeric claims
                 null

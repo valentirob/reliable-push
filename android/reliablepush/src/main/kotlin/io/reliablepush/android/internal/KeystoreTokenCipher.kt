@@ -2,6 +2,7 @@ package io.reliablepush.android.internal
 
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
+import java.security.GeneralSecurityException
 import java.security.KeyStore
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -14,6 +15,15 @@ import javax.crypto.spec.GCMParameterSpec
  */
 internal class KeystoreTokenCipher : TokenCipher {
     override fun encrypt(plain: ByteArray): ByteArray {
+        return try {
+            encryptOnce(plain)
+        } catch (e: GeneralSecurityException) { // key permanently invalidated or unrecoverable: replace it, retry once
+            reset()
+            encryptOnce(plain)
+        }
+    }
+
+    private fun encryptOnce(plain: ByteArray): ByteArray {
         val cipher = Cipher.getInstance(TRANSFORMATION)
         cipher.init(Cipher.ENCRYPT_MODE, key())
         return cipher.iv + cipher.doFinal(plain)
@@ -26,10 +36,28 @@ internal class KeystoreTokenCipher : TokenCipher {
         return cipher.doFinal(blob, IV_SIZE, blob.size - IV_SIZE)
     }
 
-    @Synchronized
-    private fun key(): SecretKey {
+    override fun reset() {
+        synchronized(LOCK) {
+            try {
+                KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }.deleteEntry(ALIAS)
+            } catch (e: GeneralSecurityException) {
+                // nothing more to do; the next key() call tries to generate over it
+            }
+        }
+    }
+
+    private fun key(): SecretKey = synchronized(LOCK) {
         val ks = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
-        (ks.getKey(ALIAS, null) as? SecretKey)?.let { return it }
+        val existing = try {
+            ks.getKey(ALIAS, null) as? SecretKey
+        } catch (e: GeneralSecurityException) { // UnrecoverableKeyException, KeyPermanentlyInvalidatedException
+            ks.deleteEntry(ALIAS)
+            null
+        }
+        existing ?: generate()
+    }
+
+    private fun generate(): SecretKey {
         val gen = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, ANDROID_KEYSTORE)
         gen.init(
             KeyGenParameterSpec.Builder(ALIAS, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
@@ -43,6 +71,7 @@ internal class KeystoreTokenCipher : TokenCipher {
     }
 
     private companion object {
+        val LOCK = Any() // process-wide: all instances share one keystore alias
         const val ANDROID_KEYSTORE = "AndroidKeyStore"
         const val ALIAS = "io.reliablepush.devicetoken"
         const val TRANSFORMATION = "AES/GCM/NoPadding"
