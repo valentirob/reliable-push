@@ -2,6 +2,25 @@
 
 Newest entry first. Updated at the end of every work session (see `.agents/skills/session-handoff/SKILL.md`).
 
+## 2026-11-05 (5) — Claude Code — `develop`
+
+- **Done:** `feature/cycle1c-deploy-load` (with the plan commit) merged into `develop` (`--no-ff`, `e1be03f`) and pushed;
+  local branches `feature/cycle1c-deploy-load` and `feature/plan-cycle1c` deleted. The final fix wave was re-reviewed
+  clean before the merge. Plans 1A, 1B and 1C (cycle 1: backend, harness, deploy and load) are all on `develop`.
+- **State:** the merged tree is identical to the branch head verified in entry (4) (`E2E: 17/17 passed`, NFR-2 passed with
+  `nfr2Criterion: true`); on `develop` `./mvnw -B -pl harness,loadtest -am verify` re-run: 34 client + 106 harness unit +
+  73 harness integration + 19 loadtest tests, 0 failures. GitHub Actions on `develop` (`e1be03f`): Backend CI ✅, Client
+  and harness CI (incl. the new `loadtest` job) ✅, Helm chart CI (first run) ✅, CodeQL ✅. `main` is still the initial
+  commit (no release yet).
+- **Next:** cycle 2, the Android SDK (spec §7, §7.2): write its implementation plan (`docs/plans/`) from the approved
+  spec, then implement. Needs a local Android SDK / emulator for the instrumented and E2E tests (spec §10.1). Then cycle 3
+  (iOS).
+- **Open:** (a) The chart was never installed on a real GKE or OpenShift cluster (the `BackendConfig` health check and
+  its firewall note are unverified on GKE). (b) `scripts/*.ps1` untested on Windows. (c) Console write guard: Host
+  allowlist against DNS rebinding. (d) Small leftovers from the plan 1C reviews, left on purpose: two long doc lines
+  (`docs/deployment.md`, spec), cosmetic nits in `scripts/load.sh`, and a narrow race in `scripts/helm-smoke.sh` (a
+  same-named cluster created during `kind create` would be treated as owned).
+
 ## 2026-11-05 (4) — Claude Code — `feature/cycle1c-deploy-load` (plan 1C, Task 9 and final fix wave)
 
 - **Done:** CI and docs for plan 1C; all plan 1C tasks are ticked. `.github/workflows/helm-ci.yml` (runs
