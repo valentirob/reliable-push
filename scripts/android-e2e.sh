@@ -14,9 +14,11 @@
 # emulator, containers). Exit code 0 only if no entry FAILED and at least one PASSED (or only SKIPPED ones were asked for).
 # Optional real FCM: fcm-real-delivery runs only when the maintainer placed android/sample/google-services.json and
 # harness/build/fcm/service-account.json (both git-ignored, never created by a script); otherwise it is SKIPPED, which
-# counts as neither passed nor failed ("Android E2E: 8/8 passed, 1 skipped"). See docs/testing.md, "Real FCM pushes". Each run first removes the Gradle connected-test results
-# (android/{reliablepush,sample}/build/outputs/androidTest-results). On an attached device it sets the animation scales
-# to 0 and restores them at the end; logcat is collected from the start of the run (the device's buffer is not cleared).
+# counts as neither passed nor failed ("Android E2E: 8/8 passed, 1 skipped"); `--test fcm-real-delivery` then skips at
+# once, before any preflight, emulator or stack. See docs/testing.md, "Real FCM pushes".
+# Each run first removes the Gradle connected-test results (android/{reliablepush,sample}/build/outputs/
+# androidTest-results). On an attached device it sets the animation scales to 0 and restores them (and the airplane
+# mode it found) at the end; logcat is collected from the start of the run (the device's buffer is not cleared).
 # Environment: ANDROID_AVD, ANDROID_SERIAL, E2E_READY_TIMEOUT (stack readiness, default 120 s), ANDROID_BOOT_TIMEOUT
 # (emulator boot, default 300 s).
 set -euo pipefail
@@ -29,7 +31,8 @@ RP_TAG="android-e2e"
 . "$RP_ROOT/scripts/lib/common.sh"
 
 usage() {
-    sed -n '2,20p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    # the header: every comment line after the shebang, up to the first line that is not one
+    awk 'NR > 1 { if ($0 ~ /^#/) print; else exit }' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
 }
 
 PKG="io.reliablepush.sample"
@@ -80,6 +83,21 @@ if [ -n "$TEST" ] && [ "$TEST" != "$COLD_START" ] && [ "$TEST" != "$FCM_REAL" ];
         || rp_die "unknown test '$TEST'; known: $(printf '%s ' $SAMPLE_TESTS)$COLD_START $FCM_REAL"
 fi
 
+GOOGLE_SERVICES_MISSING=""
+[ -f "$GOOGLE_SERVICES" ] || GOOGLE_SERVICES_MISSING="android/sample/google-services.json"
+[ -f "$FCM_KEY" ] || GOOGLE_SERVICES_MISSING="${GOOGLE_SERVICES_MISSING:+$GOOGLE_SERVICES_MISSING, }harness/build/fcm/service-account.json"
+if [ "$TEST" = "$FCM_REAL" ] && [ -n "$GOOGLE_SERVICES_MISSING" ]; then
+    # nothing to run: skip before the preflight, the emulator and the stack
+    rm -rf "$RP_OUT/summary.json"
+    mkdir -p "$RP_OUT"
+    rp_log "$FCM_REAL: SKIPPED (missing: $GOOGLE_SERVICES_MISSING)"
+    "${JAVA_HOME:+$JAVA_HOME/bin/}java" "$RP_ROOT/scripts/lib/AndroidE2eSummary.java" "$RP_OUT/summary.json" \
+        --entry "$FCM_REAL|SKIPPED|0|||needs android/sample/google-services.json and harness/build/fcm/service-account.json (not found: $GOOGLE_SERVICES_MISSING); see docs/testing.md, Real FCM pushes|" \
+        | sed '$d'
+    rp_log "Android E2E: 0/0 passed, 1 skipped"
+    exit 0
+fi
+
 READY_TIMEOUT="${E2E_READY_TIMEOUT:-120}"
 BOOT_TIMEOUT="${ANDROID_BOOT_TIMEOUT:-300}"
 for v in "$READY_TIMEOUT" "$BOOT_TIMEOUT"; do
@@ -109,6 +127,7 @@ SERIAL=""
 EMU_STARTED=0
 EMU_PID=""
 ANIM_SAVED=""
+AIRPLANE_SAVED=""
 adb_s() { "$ADB" -s "$SERIAL" "$@"; }
 
 ANIM_KEYS="window_animation_scale transition_animation_scale animator_duration_scale"
@@ -149,7 +168,11 @@ restore_attached_device() {
             adb_s shell settings put global "$key" "$value" >/dev/null 2>&1
         fi
     done
-    adb_s shell cmd connectivity airplane-mode disable >/dev/null 2>&1
+    if [ "$AIRPLANE_SAVED" = 1 ]; then
+        adb_s shell cmd connectivity airplane-mode enable >/dev/null 2>&1
+    else
+        adb_s shell cmd connectivity airplane-mode disable >/dev/null 2>&1
+    fi
     return 0
 }
 
@@ -237,6 +260,8 @@ LOGCAT_SINCE="$(adb_s shell date +%s 2>/dev/null | tr -dc '0-9' || true)"
 [ -n "$LOGCAT_SINCE" ] && LOGCAT_SINCE="$LOGCAT_SINCE.000"
 # animations off (UiAutomator), screen awake and unlocked (the notification shade test)
 if [ "$EMU_STARTED" = 0 ]; then
+    AIRPLANE_SAVED="$(adb_s shell settings get global airplane_mode_on | tr -d '\r')"
+    [ "$AIRPLANE_SAVED" = 1 ] || AIRPLANE_SAVED=0
     ANIM_SAVED="$(for s in $ANIM_KEYS; do
         v="$(adb_s shell settings get global "$s" | tr -d '\r')"
         printf '%s ' "${v:-null}"
@@ -258,8 +283,8 @@ GRADLE_ARGS=(
     "-Pandroid.testInstrumentationRunnerArguments.baseUrl=$EMU_BASE_URL"
 )
 if [ "$RELEASE_LIB" = 1 ]; then
-    # the sample then consumes the minified release AAR from mavenLocal, so publish it first
-    GRADLE_TASKS=(:reliablepush:publishToMavenLocal "${GRADLE_TASKS[@]}")
+    # the sample then consumes the minified release AAR from mavenLocal: published by its own gradle call below, since
+    # the sample's dependency is resolved when its build is configured, before a publish in the same call would run
     GRADLE_ARGS+=("-Prp.sampleLibVariant=release")
 fi
 EXPECT=()
@@ -282,6 +307,12 @@ RESULTS_DIRS=("$RP_ROOT/android/reliablepush/build/outputs/androidTest-results"
     "$RP_ROOT/android/sample/build/outputs/androidTest-results")
 rm -rf "${RESULTS_DIRS[@]}"
 rp_log "gradle ${GRADLE_TASKS[*]} on $SERIAL; output in harness/build/android-e2e/logs/gradle.log"
+if [ "$RELEASE_LIB" = 1 ]; then
+    rp_log "gradle :reliablepush:publishToMavenLocal (release AAR); output in harness/build/android-e2e/logs/gradle-publish.log"
+    (cd "$RP_ROOT/android" && ./gradlew --no-daemon :reliablepush:publishToMavenLocal) \
+        >"$RP_OUT/logs/gradle-publish.log" 2>&1 \
+        || { tail -n 25 "$RP_OUT/logs/gradle-publish.log" >&2; rp_die "publishToMavenLocal failed (logs/gradle-publish.log)"; }
+fi
 gradle_rc=0
 (cd "$RP_ROOT/android" && ./gradlew --no-daemon --continue "${GRADLE_TASKS[@]}" "${GRADLE_ARGS[@]}") \
     >"$RP_OUT/logs/gradle.log" 2>&1 || gradle_rc=$?
@@ -405,17 +436,11 @@ killed_app_delivery() {
         ENTRIES+=(--entry "$name|FAILED|$ms|the push starts the killed app process, SampleApp configures the SDK and DELIVERED is reported|${fail//|/ }|harness/build/android-e2e/logs/logcat.txt (ReliablePush tag), $name-*.log and the harness log|")
     fi
 }
-fcm_missing() {
-    local m=""
-    [ -f "$GOOGLE_SERVICES" ] || m="android/sample/google-services.json"
-    [ -f "$FCM_KEY" ] || m="${m:+$m, }harness/build/fcm/service-account.json"
-    printf '%s' "$m"
-}
 if [ -z "$TEST" ] || [ "$TEST" = "$COLD_START" ]; then
     killed_app_delivery "$COLD_START" broadcast
 fi
 if [ -z "$TEST" ] || [ "$TEST" = "$FCM_REAL" ]; then
-    missing="$(fcm_missing)"
+    missing="$GOOGLE_SERVICES_MISSING"
     if [ -z "$missing" ]; then
         killed_app_delivery "$FCM_REAL" fcm
     else

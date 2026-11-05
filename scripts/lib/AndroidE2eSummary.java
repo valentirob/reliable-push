@@ -10,7 +10,8 @@
 // SKIPPED the hint says what is missing and is printed and kept in summary.json as "hint").
 // STATUS is PASSED, FAILED or SKIPPED. SKIPPED (optional real-FCM entry, a skipped JUnit test) counts in neither
 // <passed> nor <total>.
-// --expect: a scenario that must be there; a missing one becomes FAILED ("did not run").
+// --expect: a scenario that must be there; a missing one becomes FAILED ("did not run"), and so does one that is
+// SKIPPED, except fcm-real-delivery (optional: SKIPPED stays SKIPPED).
 // Same entry shape as harness/build/e2e/summary.json (SKIPPED entries add "hint"). Prints one line per entry, then
 // "<passed>/<total> <skipped>" (for example "8/8 1"), on stdout.
 import java.io.File;
@@ -36,6 +37,9 @@ public class AndroidE2eSummary {
             "token-refresh-near-expiry", "DELIVERED after a token refresh (backend log device.token_refreshed)",
             "logout-revokes-device", "notification shown, no DELIVERED after logout, FALLBACK_TRIGGERED with one webhook",
             "keystore-token-cipher", "AndroidKeyStore AES-GCM round trip, tamper detection and key reset");
+
+    /** Scenarios allowed to be SKIPPED even when expected (they need files only the maintainer can place). */
+    static final java.util.Set<String> OPTIONAL = java.util.Set.of("fcm-real-delivery");
 
     static final class Entry {
         String scenario;
@@ -86,6 +90,15 @@ public class AndroidE2eSummary {
                 en.actual = "did not run (no result in the connected-test JUnit XML)";
                 en.hint = "harness/build/android-e2e/logs/gradle.log (build, install or instrumentation problem)";
                 entries.put(name, en);
+            }
+        }
+        for (String name : expect) {
+            Entry en = entries.get(name);
+            if (en != null && en.status.equals("SKIPPED") && !OPTIONAL.contains(name)) {
+                en.status = "FAILED"; // an expected scenario that did not run is a failure, not a pass-by-omission
+                en.expected = EXPECTED.getOrDefault(name, "the test runs and passes");
+                en.actual = "skipped (an assumption failed or the test is @Ignore)";
+                en.hint = "stack trace in harness/build/android-e2e/junit/; logcat in harness/build/android-e2e/logs/logcat.txt";
             }
         }
         StringBuilder sb = new StringBuilder("[ ");
