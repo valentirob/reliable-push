@@ -183,15 +183,15 @@ The SDK posts the visible notification first, persists the event, schedules the 
   - `internal data class DeviceToken(val raw: String, val issuedAt: Long, val expiresAt: Long)` with `companion fun parse(raw: String): DeviceToken?` and `fun needsRefresh(nowMillis: Long): Boolean` (remaining < 20 % of `expiresAt − issuedAt`, or expired).
   - `internal object RefreshGate { fun tryAcquire(): Boolean }`: true once per process. `reset()` is `@VisibleForTesting`.
 
-- [ ] **Step 1: Failing tests:**
+- [x] **Step 1: Failing tests:**
   - `needsRefreshBelowTwentyPercent()`: token with iat 0, exp 100 s → false at 80 s, true at 81 s; expired → true.
   - `parseRejectsMalformedToken()`
   - `storeRoundTripsThroughCipher()`: a fake XOR cipher; the token is never stored in plain text (read the raw prefs).
   - `unreadableTokenIsTreatedAsNotRegistered()`: the cipher throws on decrypt → `load()` returns null, prefs cleared, WARN `token.unreadable`.
   - `refreshGateAllowsOncePerProcess()`
   - Instrumented `KeystoreTokenCipherTest.roundTripAndTamperDetection()`: a flipped byte → `AEADBadTagException`.
-- [ ] **Step 2: Run** → FAIL. **Step 3: Implement.** **Step 4: Run** unit tests → PASS. The instrumented test runs in Task 6's emulator run (record it there).
-- [ ] **Step 5: Commit** `feat(android): encrypted token store and refresh rule`
+- [x] **Step 2: Run** → FAIL. **Step 3: Implement.** **Step 4: Run** unit tests → PASS. The instrumented test runs in Task 6's emulator run (record it there).
+- [x] **Step 5: Commit** `feat(android): encrypted token store and refresh rule`
 
 ### Task 3: Event queue, sender and retry job
 
