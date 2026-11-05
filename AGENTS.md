@@ -20,7 +20,7 @@ sending pushes itself.
 | Path | What | Stack |
 |---|---|---|
 | `backend/` | Tracking + fallback service (modular monolith, `api`/`worker` profiles) | Java 21, Spring Boot 4, PostgreSQL, Flyway |
-| `android/` | Android SDK (FCM v1 data mode + opt-in AndroidConfigV2 mode) | Kotlin, minSdk 26 |
+| `android/` | Android SDK, FCM v1 data mode (AndroidConfigV2 mode deferred until Google's GA); guide `docs/android.md` | Kotlin, minSdk 26 |
 | `ios/` | iOS SDK + Notification Service Extension helper | Swift, iOS 15+, SPM |
 | `client-java/` | Optional zero-dependency Java client for the sender API | Java 17+, JDK only |
 | `harness/` | Fake sender, fake fallback receiver, device simulator, E2E scenarios, web console for manual tests and demos (`./scripts/demo.sh`) | Java, plain HTML/JS, docker-compose |
@@ -85,6 +85,8 @@ running the Maven commands. Details: `docs/testing.md`.
 | Console smoke test against a running stack (needs Playwright's Chromium) | `./mvnw -B -pl harness -am verify -Pconsole-smoke` |
 | Demo / manual-test web console (local only; `--realtime` for real minutes) | `./scripts/demo.sh [--realtime]` → http://127.0.0.1:8090/ |
 | E2E (local only, manual or agent) | `./scripts/e2e.sh [--scenario <name>] [--keep]` (Windows: `pwsh scripts/e2e.ps1`) — details in `.agents/skills/run-e2e/SKILL.md` |
+| Android SDK build + lint + unit tests + AAR (needs the Android SDK, `ANDROID_HOME`) | `cd android && ./gradlew build` |
+| Android emulator E2E against the harness stack (local only; boots the AVD; `Android E2E: 8/8 passed, 1 skipped` without Firebase files) | `./scripts/android-e2e.sh [--test <method>] [--keep]` — details in `docs/testing.md` |
 | Helm chart checks: lint, unit tests, kubeconform (Docker only, pinned images) | `deploy/helm/scripts/validate.sh` |
 | Helm kind smoke install (local only; needs kind, kubectl, JDK 21; `--keep` keeps the cluster) | `./scripts/helm-smoke.sh [--keep]` |
 | Loadtest module build + unit tests (compiles the simulations, never runs Gatling) | `./mvnw -B -pl loadtest verify` |

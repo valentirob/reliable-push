@@ -371,23 +371,23 @@ without making any build or test depend on credentials.
   - `docs/integration-guide.md` (§4 Mobile apps → Android), `README.md`, `AGENTS.md`, `docs/testing.md`, `.agents/skills/run-e2e/SKILL.md`
   - `docs/specs/2026-11-03-reliable-push-design.md` ("Changes during implementation (plan 2)"), `docs/STATUS.md`
 
-- [ ] **Step 1: CI.** Workflow `android-ci.yml`:
+- [x] **Step 1: CI.** Workflow `android-ci.yml`:
   - Triggers like `harness-ci.yml`, paths `android/**` and the workflow file; `permissions: contents: read`; actions pinned to the SHAs used in the other workflows.
   - `gradle/actions/wrapper-validation`, pinned by SHA.
   - JDK 21; `./gradlew build` in `android/`.
   - AAR size check: `reliablepush-release.aar` < 102400 bytes, else fail with the size.
   - Upload the unit test reports on failure.
   - No emulator, no Firebase credentials.
-- [ ] **Step 2: Security and updates.**
+- [x] **Step 2: Security and updates.**
   - CodeQL gains an Android job (java-kotlin, manual build `./gradlew :reliablepush:assembleRelease`, paths `android/**`).
   - Dependabot `gradle` for `/android`.
   - Validate with `docker run --rm -v "$PWD":/repo -w /repo rhysd/actionlint:1.7.12` → no errors.
-- [ ] **Step 3: Publication.**
+- [x] **Step 3: Publication.**
   - `maven-publish` with a `release` publication: AAR, sources and javadoc jars; POM with name, description, MIT license, SCM URL, developer.
   - `signing` only when `SIGNING_KEY`/`SIGNING_PASSWORD` env vars are set.
   - Run `./gradlew :reliablepush:publishToMavenLocal`; the POM lists **no** runtime dependency besides `kotlin-stdlib`.
   - Releasing to Central is out of scope (needs the maintainer's namespace and key).
-- [ ] **Step 4: Docs.**
+- [x] **Step 4: Docs.**
   - `docs/android.md`:
     - setup;
     - host `FirebaseMessagingService` snippet and `trackOpen` in the launch activity;
@@ -401,11 +401,11 @@ without making any build or test depend on credentials.
   - README components table; `AGENTS.md` commands (`cd android && ./gradlew build`, `./scripts/android-e2e.sh`).
   - `docs/testing.md` Android section; the run-e2e skill mentions the Android suite.
   - Spec changes block for plan 2: mode v2 deferred until GA, harness grants and real devices, optional real FCM sender, the SDK units, the one-refresh-per-process rule, DELIVERED only when posted.
-- [ ] **Step 5: Final verification**, each command run once:
+- [x] **Step 5: Final verification**, each command run once:
   - `cd android && ./gradlew build`
   - `./mvnw -B -pl harness -am verify`
   - `cd backend && ./mvnw -B verify` (unchanged; a regression guard)
   - `./scripts/e2e.sh` → `E2E: 17/17 passed`
   - `./scripts/android-e2e.sh` → `Android E2E: 8/8 passed` (plus `fcm-real-delivery`: PASSED, or SKIPPED without the maintainer's Firebase files)
   - Record the counts and both lines in `docs/STATUS.md`.
-- [ ] **Step 6: Commit** `ci(android): build, size check and codeql; docs: android sdk`, then run the `session-handoff` skill.
+- [x] **Step 6: Commit** `ci(android): build, size check and codeql; docs: android sdk`, then run the `session-handoff` skill.

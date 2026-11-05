@@ -96,6 +96,28 @@ JDK 21 and network access (Maven artifacts, Playwright's Chromium). With Colima:
   the container and prints its last log lines.
 - The agent workflow is in [`.agents/skills/run-e2e/SKILL.md`](../.agents/skills/run-e2e/SKILL.md).
 
+## Android SDK tests
+
+Needs JDK 21 and the Android SDK (`ANDROID_HOME`; the build downloads missing packages). No Docker for the unit tests.
+
+| Goal | Command |
+|---|---|
+| Lint, unit tests (Robolectric, JUnit 4), debug and release AAR; what CI runs | `cd android && ./gradlew build` |
+| Unit tests only | `cd android && ./gradlew :reliablepush:testDebugUnitTest` |
+| Release AAR size (CI gate: under 102,400 bytes) | `ls -l android/reliablepush/build/outputs/aar/reliablepush-release.aar` |
+| Emulator E2E (local only) | `./scripts/android-e2e.sh [--test <method>] [--keep]` |
+| Install into `~/.m2` (unsigned; signing only when `SIGNING_KEY` and `SIGNING_PASSWORD` are set) | `cd android && ./gradlew :reliablepush:publishToMavenLocal` |
+
+The release build is minified with R8 (`android/reliablepush/proguard-rules.pro` keeps the public API in
+`io.reliablepush.android` and the manifest's `RetryJobService`); the unit tests run on the debug variant.
+
+`./scripts/android-e2e.sh` starts the harness compose stack, boots the AVD `Medium_Phone_API_37.0` (override with
+`ANDROID_AVD`; it is stopped again if the script started it), runs the sample's instrumented tests and the library's
+Keystore tests, and writes `harness/build/android-e2e/` (`summary.json`, `junit/`, `logs/`); it ends with `Android E2E: 8/8 passed, 1 skipped`
+(the skipped entry is `fcm-real-delivery`, see the next section). The emulator reaches the stack at `10.0.2.2`
+(`8080` backend, `8090` harness). On Android 17 the E2E grants the sample `ACCESS_LOCAL_NETWORK`. The workflow
+`.github/workflows/android-ci.yml` never runs it: CI has no emulator and no Firebase files.
+
 ## Real FCM pushes (optional, maintainer's Firebase project)
 
 `./scripts/android-e2e.sh` (emulator, needs the Android SDK) normally ends with `Android E2E: 8/8 passed, 1 skipped`: the

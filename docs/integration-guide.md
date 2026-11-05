@@ -242,9 +242,19 @@ printf '%s.%s' "$TS" "$BODY" | openssl dgst -sha256 -hmac "$RP_SHOP_HOOK_SECRET"
 
 ## 4. Mobile apps
 
-The SDKs (planned in later cycles) are initialised with the backend URL and `appId`, register the device with the user's ID
-token after login (`POST /v1/devices`), report `DELIVERED` from the push entry point and `READ` on tap. Until the SDKs
-exist, the device API in [api.md](api.md) is the contract.
+The SDKs are initialised with the backend URL and `appId`, register the device with the user's ID token after login
+(`POST /v1/devices`), report `DELIVERED` from the push entry point and `READ` on tap.
+
+### Android
+
+The Android SDK is described in [android.md](android.md): setup in `Application.onCreate`, the host
+`FirebaseMessagingService`, `trackOpen` in the launch activity, `POST_NOTIFICATIONS`, backup rules, Play Data Safety
+entries and known limits. Mode v2 is not supported yet.
+
+### iOS
+
+The iOS SDK is planned for a later cycle. Until then, and for any other client, the device API in [api.md](api.md) is the
+contract.
 
 ## Operating notes
 
