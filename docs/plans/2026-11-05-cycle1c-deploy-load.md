@@ -38,10 +38,10 @@
 
 ### Task 0: Prerequisites (needs the maintainer's OK before installing anything)
 
-- [ ] **Step 1:** Ask the maintainer to approve installing `kind` and `kubectl` with Homebrew (`brew install kind kubectl`); they are used only by `scripts/helm-smoke.sh`. Helm, helm-unittest and kubeconform run from container images, Gatling from Maven: nothing else is installed.
-- [ ] **Step 2:** Pick and pin versions (latest release ≥ 2 weeks old, digest included) in `deploy/helm/tools.env`: `alpine/helm`, `helmunittest/helm-unittest`, `ghcr.io/yannh/kubeconform`, `kindest/node` (a Kubernetes 1.30+ node matching the installed kind release). Record the Gatling and `gatling-maven-plugin` versions for Task 6.
-- [ ] **Step 3:** Verify: `kind version`, `kubectl version --client`, `docker run --rm "$HELM_IMAGE" version` print the pinned versions. Colima has at least 4 CPUs / 6 GiB (`colima list`). The load stack caps API 2 + PostgreSQL 1 + Gatling 1 CPUs; if Task 8 runs come out `INVALID` or show CPU contention, ask the maintainer to restart Colima with 6 CPUs / 8 GiB (`colima stop && colima start --cpu 6 --memory 8`) — never restart it without that OK.
-- [ ] **Step 4:** Commit `build: pin helm, kubeconform and kind images` (only `deploy/helm/tools.env`).
+- [x] **Step 1:** Ask the maintainer to approve installing `kind` and `kubectl` with Homebrew (`brew install kind kubectl`); they are used only by `scripts/helm-smoke.sh`. Helm, helm-unittest and kubeconform run from container images, Gatling from Maven: nothing else is installed.
+- [x] **Step 2:** Pick and pin versions (latest release ≥ 2 weeks old, digest included) in `deploy/helm/tools.env`: `alpine/helm`, `helmunittest/helm-unittest`, `ghcr.io/yannh/kubeconform`, `kindest/node` (a Kubernetes 1.30+ node matching the installed kind release). Record the Gatling and `gatling-maven-plugin` versions for Task 6.
+- [x] **Step 3:** Verify: `kind version`, `kubectl version --client`, `docker run --rm "$HELM_IMAGE" version` print the pinned versions. Colima has at least 4 CPUs / 6 GiB (`colima list`). The load stack caps API 2 + PostgreSQL 1 + Gatling 1 CPUs; if Task 8 runs come out `INVALID` or show CPU contention, ask the maintainer to restart Colima with 6 CPUs / 8 GiB (`colima stop && colima start --cpu 6 --memory 8`) — never restart it without that OK.
+- [x] **Step 4:** Commit `build: pin helm, kubeconform and kind images` (only `deploy/helm/tools.env`).
 
 ### Task 1: Backend — management port
 
