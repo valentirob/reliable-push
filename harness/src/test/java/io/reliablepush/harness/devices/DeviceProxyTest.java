@@ -20,6 +20,7 @@ class DeviceProxyTest {
 
     private HttpServer target;
     private DeviceProxy proxy;
+    private final HttpClient http = HttpClient.newHttpClient();
 
     @BeforeEach
     void start() throws IOException {
@@ -38,12 +39,13 @@ class DeviceProxyTest {
 
     @AfterEach
     void stop() {
+        http.close();
         proxy.close();
         target.stop(0);
     }
 
     private HttpResponse<String> post(String body) throws Exception {
-        return HttpClient.newHttpClient().send(HttpRequest.newBuilder(
+        return http.send(HttpRequest.newBuilder(
                 URI.create("http://127.0.0.1:" + proxy.port() + "/echo"))
                 .POST(HttpRequest.BodyPublishers.ofString(body)).build(), HttpResponse.BodyHandlers.ofString());
     }
@@ -64,7 +66,7 @@ class DeviceProxyTest {
             open.getOutputStream().write("POST /echo HTTP/1.1\r\nHost: x\r\nContent-Length: 100\r\n\r\npartial"
                     .getBytes(StandardCharsets.UTF_8));
             open.getOutputStream().flush();
-            Thread.sleep(200);
+            org.awaitility.Awaitility.await().atMost(java.time.Duration.ofSeconds(5)).until(() -> proxy.openConnections() == 1);
 
             proxy.setOnline(false);
 
@@ -86,6 +88,35 @@ class DeviceProxyTest {
         proxy.setOnline(true);
 
         assertThat(post("again").body()).isEqualTo("echo:again");
+    }
+
+    @Test
+    void connectionBeyondTheCapIsClosed() throws Exception {
+        proxy.close();
+        proxy = new DeviceProxy(0, "127.0.0.1", target.getAddress().getPort()).withMaxConnections(1);
+        proxy.start();
+        try (Socket first = new Socket("127.0.0.1", proxy.port())) {
+            org.awaitility.Awaitility.await().atMost(java.time.Duration.ofSeconds(5))
+                    .until(() -> proxy.openConnections() == 1);
+            try (Socket second = new Socket("127.0.0.1", proxy.port())) {
+                second.setSoTimeout(5000);
+                assertThat(readsEndOfStream(second.getInputStream())).isTrue();
+            }
+        }
+    }
+
+    @Test
+    void unreachableUpstreamIsATransportError() throws Exception {
+        int dead;
+        try (java.net.ServerSocket s = new java.net.ServerSocket(0)) {
+            dead = s.getLocalPort();
+        }
+        proxy.close();
+        proxy = new DeviceProxy(0, "127.0.0.1", dead);
+        proxy.start();
+
+        org.junit.jupiter.api.Assertions.assertTimeoutPreemptively(java.time.Duration.ofSeconds(10),
+                () -> org.junit.jupiter.api.Assertions.assertThrows(IOException.class, () -> post("x")));
     }
 
     private static boolean readsEndOfStream(InputStream in) {

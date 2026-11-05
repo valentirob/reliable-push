@@ -144,6 +144,8 @@ while :; do
     fi
     sleep 1
 done
+rp_wait_device_proxy 30 \
+    || rp_die "the device proxy on 127.0.0.1:8091 does not forward to the backend (GET /actuator/health did not answer 200)"
 rp_log "stack ready"
 
 # ---- scenarios -------------------------------------------------------------------------------------------------

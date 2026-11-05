@@ -15,7 +15,14 @@ class DeviceProxyConfig {
         if (target == null) {
             return DeviceProxy.disabled();
         }
+        if (!"http".equals(target.getScheme()) || target.getHost() == null) {
+            throw new IllegalStateException("harness.device-proxy-target must be an http://host[:port] URL");
+        }
+        String host = target.getHost();
+        if (host.startsWith("[") && host.endsWith("]")) {
+            host = host.substring(1, host.length() - 1);
+        }
         int port = target.getPort() > 0 ? target.getPort() : 80;
-        return new DeviceProxy(properties.proxyListenPort(), target.getHost(), port);
+        return new DeviceProxy(properties.proxyListenPort(), host, port);
     }
 }

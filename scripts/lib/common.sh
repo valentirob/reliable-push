@@ -97,6 +97,16 @@ rp_collect_logs() {
 # worker-b and harness (scripts/android-e2e.sh; e2e.sh and demo.sh keep their own copy of these steps). Sets
 # RP_STACK_STARTED=1 right before `up`, so the caller's exit trap knows to collect logs and tear down.
 RP_STACK_STARTED=0
+# Bounded wait until the harness's device-traffic proxy (127.0.0.1:8091 -> api:8080) forwards: the backend's actuator
+# answers 200 through it. Returns 1 on timeout (callers fail the start with their own die function).
+rp_wait_device_proxy() {
+    local deadline=$(($(date +%s) + ${1:-60}))
+    until rp_http_ok "http://127.0.0.1:8091/actuator/health"; do
+        [ "$(date +%s)" -lt "$deadline" ] || return 1
+        sleep 1
+    done
+}
+
 rp_start_stack() {
     local timeout="$1" deadline pending still svc state ready rel
     rel="${RP_OUT#"$RP_ROOT"/}"
@@ -141,6 +151,8 @@ rp_start_stack() {
         fi
         sleep 1
     done
+    rp_wait_device_proxy 30 \
+        || rp_die "the device proxy on 127.0.0.1:8091 does not forward to the backend (GET /actuator/health did not answer 200)"
     rp_log "stack ready"
 }
 

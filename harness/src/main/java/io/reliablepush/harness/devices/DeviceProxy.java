@@ -22,7 +22,10 @@ import org.apache.logging.log4j.Logger;
 public final class DeviceProxy implements AutoCloseable {
 
     static final int MAX_CONNECTIONS = 256;
+    private int maxConnections = MAX_CONNECTIONS;
     private static final int CONNECT_TIMEOUT_MS = 5_000;
+    private static final int IDLE_TIMEOUT_MS = 60_000;
+    private static final long WARN_EVERY_MS = 10_000;
     private static final int BUFFER = 8 * 1024;
     private static final Logger LOG = LogManager.getLogger(DeviceProxy.class);
 
@@ -33,6 +36,7 @@ public final class DeviceProxy implements AutoCloseable {
     private final Set<Connection> open = ConcurrentHashMap.newKeySet();
     private volatile boolean online = true;
     private volatile ServerSocket server;
+    private final java.util.concurrent.atomic.AtomicLong lastWarn = new java.util.concurrent.atomic.AtomicLong();
 
     public DeviceProxy(int listenPort, String targetHost, int targetPort) {
         this(listenPort, targetHost, targetPort, true);
@@ -50,8 +54,19 @@ public final class DeviceProxy implements AutoCloseable {
         return new DeviceProxy(0, "", 0, false);
     }
 
+    /** Test hook: lower the connection cap. */
+    DeviceProxy withMaxConnections(int max) {
+        this.maxConnections = max;
+        return this;
+    }
+
     public boolean enabled() {
         return enabled;
+    }
+
+    /** Currently open relayed connections (tests, diagnostics). */
+    int openConnections() {
+        return open.size();
     }
 
     public boolean online() {
@@ -106,9 +121,24 @@ public final class DeviceProxy implements AutoCloseable {
                 Thread.ofVirtual().name("device-proxy-conn").start(() -> handle(client));
             } catch (IOException e) {
                 if (!s.isClosed()) {
-                    LOG.warn("device proxy accept failed: {}", e.getClass().getSimpleName());
+                    warnLimited("device proxy accept failed: " + e.getClass().getSimpleName());
+                    try {
+                        Thread.sleep(100);
+                    } catch (InterruptedException interrupted) {
+                        Thread.currentThread().interrupt();
+                        return;
+                    }
                 }
             }
+        }
+    }
+
+    /** At most one WARN per 10 s (the first one always logs); never carries payload bytes. */
+    private void warnLimited(String message) {
+        long now = System.nanoTime() / 1_000_000;
+        long last = lastWarn.get();
+        if ((last == 0 || now - last >= WARN_EVERY_MS) && lastWarn.compareAndSet(last, Math.max(now, 1))) {
+            LOG.warn(message);
         }
     }
 
@@ -116,13 +146,20 @@ public final class DeviceProxy implements AutoCloseable {
         Connection c = new Connection(client);
         // register first, then look at the switch: setOnline(false) sets the flag before it sweeps the registry
         open.add(c);
-        if (!online || open.size() > MAX_CONNECTIONS) {
+        if (!online) {
+            c.close();
+            return;
+        }
+        if (open.size() > maxConnections) {
+            warnLimited("device proxy connection cap (" + maxConnections + ") reached, refusing connections");
             c.close();
             return;
         }
         try {
+            client.setSoTimeout(IDLE_TIMEOUT_MS);
             Socket upstream = new Socket();
             c.upstream = upstream;
+            upstream.setSoTimeout(IDLE_TIMEOUT_MS);
             upstream.connect(new InetSocketAddress(targetHost, targetPort), CONNECT_TIMEOUT_MS);
             if (!online) {
                 c.close();
