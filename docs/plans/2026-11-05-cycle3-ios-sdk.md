@@ -520,7 +520,7 @@ Why: Task 6 proves the SDK logic but not the real entry, where APNs makes the OS
   - `docs/integration-guide.md` (§4 Mobile apps → iOS), `README.md`, `AGENTS.md`, `docs/testing.md`, `.agents/skills/run-e2e/SKILL.md`
   - `docs/specs/2026-11-03-reliable-push-design.md` ("Changes during implementation (plan 3)", §12), `docs/STATUS.md`
 
-- [ ] **Step 1: CI.** Workflow `ios-ci.yml`:
+- [x] **Step 1: CI.** Workflow `ios-ci.yml`:
   - Triggers like `android-ci.yml`; paths `Package.swift`, `ios/**` and the workflow file. `permissions: contents: read`; actions pinned by SHA.
   - Runs on the GitHub macOS image whose Xcode major version matches Task 0, with `xcode-select` to that exact Xcode.
   - `xcodebuild test` of the package on a Simulator of that image.
@@ -528,11 +528,11 @@ Why: Task 6 proves the SDK logic but not the real entry, where APNs makes the OS
   - `ios/scripts/size.sh`; `plutil -lint` of the privacy manifest.
   - Uploads the `.xcresult` on failure.
   - No UI tests, no harness, no credentials.
-- [ ] **Step 2: Security.**
+- [x] **Step 2: Security.**
   - CodeQL gains a Swift job (`macos` runner, manual build `xcodebuild build -scheme ReliablePush -destination generic/platform=iOS CODE_SIGNING_ALLOWED=NO`, paths as above).
   - Dependabot: no change (the package has no dependencies; the GitHub Actions entry already covers the workflows).
   - Validate with `docker run --rm -v "$PWD":/repo -w /repo rhysd/actionlint:1.7.12` → no errors.
-- [ ] **Step 3: Docs.** `docs/ios.md` covers:
+- [x] **Step 3: Docs.** `docs/ios.md` covers:
   - adding the package by URL;
   - the App Group (and why the Keychain group defaults to it);
   - the NSE target with the helper snippet;
@@ -556,7 +556,7 @@ Why: Task 6 proves the SDK logic but not the real entry, where APNs makes the OS
   - the `docs/testing.md` iOS section;
   - the run-e2e skill (the iOS suite);
   - the spec changes block for plan 3 (root `Package.swift`; Keychain group = App Group by default; locked-device rule; debug URL instead of `simctl push`, since the Simulator does not run NSEs for simulated pushes; device proxy; optional APNs sender; size gate measurement).
-- [ ] **Step 4: Final verification**, each command run once:
+- [x] **Step 4: Final verification**, each command run once:
   - package tests on the Simulator, and `ios/scripts/size.sh`
   - `./mvnw -B -pl harness -am verify`
   - `cd backend && ./mvnw -B verify` (unchanged; a regression guard)
@@ -566,4 +566,4 @@ Why: Task 6 proves the SDK logic but not the real entry, where APNs makes the OS
   - `./scripts/ios-e2e.sh` → `iOS E2E: 8/8 passed, 1 skipped` (R18; or `apns-real-delivery` PASSED with the maintainer's files)
 
   Record the counts and the three lines in `docs/STATUS.md`.
-- [ ] **Step 5: Commit** `ci(ios): package tests, sample build, size check and codeql; docs: ios sdk`, then run the `session-handoff` skill.
+- [x] **Step 5: Commit** `ci(ios): package tests, sample build, size check and codeql; docs: ios sdk`, then run the `session-handoff` skill.

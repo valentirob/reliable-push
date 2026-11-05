@@ -38,7 +38,7 @@ Reports: `target/surefire-reports/` (unit), `target/failsafe-reports/` (integrat
 | Console smoke | Playwright for Java against the harness web console | local only | The 17th entry of the E2E run: a headless browser registers a device, sends a push and sees `DELIVERED` and the fallback in the inbox |
 | Load | `loadtest/`, Gatling (Java DSL), `./scripts/load.sh` | local only, never in CI (CI compiles the simulations and runs the module's unit tests) | NFR-2 ingest (`EventIngestSimulation`) and the fallback burst drained by the workers (`FallbackBurstSimulation` + `BurstDrainProbe`) |
 | Helm chart | helm-unittest, `helm lint --strict`, kubeconform (`deploy/helm/scripts/validate.sh`); kind smoke install (`./scripts/helm-smoke.sh`) | validate: CI and local; kind: local only | Required values and secret rules, rendering per mode and platform, schemas; a real install with a worker rollout during dispatch |
-| Mobile | Robolectric, XCTest, emulator/simulator tests | per SDK | Planned in cycles 2 and 3 |
+| Mobile | Robolectric and emulator tests (Android), XCTest unit tests and Simulator UI tests (iOS) | unit tests: CI (`android-ci.yml`, `ios-ci.yml`); emulator and Simulator suites: local only | See the Android and iOS sections below |
 
 ## Notes on how the suites work
 
@@ -120,6 +120,27 @@ Keystore tests, and writes `harness/build/android-e2e/` (`summary.json`, `junit/
 (the skipped entry is `fcm-real-delivery`, see the next section). The emulator reaches the stack at `10.0.2.2`
 (`8080` backend, `8090` harness). On Android 17 the E2E grants the sample `ACCESS_LOCAL_NETWORK`. The workflow
 `.github/workflows/android-ci.yml` never runs it: CI has no emulator and no Firebase files.
+
+## iOS SDK tests
+
+Need Xcode 26.6 selected with `xcode-select` and an iOS Simulator (iPhone 17); the Command Line Tools alone have no XCTest.
+Versions are pinned in `ios/README.md`. No Docker for the unit tests.
+
+| What | Command |
+|---|---|
+| Package unit tests (XCTest; what CI runs) | `xcodebuild test -scheme ReliablePush -destination "platform=iOS Simulator,name=${IOS_SIMULATOR:-iPhone 17}"` |
+| Binary size (CI gate: stripped arm64 dylib at `-O` under 307,200 bytes) | `ios/scripts/size.sh` |
+| Privacy manifest lint | `plutil -lint ios/Sources/ReliablePush/PrivacyInfo.xcprivacy` |
+| Simulator E2E (local only) | `./scripts/ios-e2e.sh [--test <name>] [--keep]` |
+
+`./scripts/ios-e2e.sh` starts the harness compose stack (backend on `127.0.0.1:8080`, harness on `8090`, device proxy on
+`8091`), runs the sample app's UI tests (6) and hosted Keychain / App Group tests (2) on the Simulator and writes
+`harness/build/ios-e2e/` (`summary.json`, result bundles, `logs/`); it ends with `iOS E2E: 8/8 passed, 1 skipped`. The
+Simulator does not run a Notification Service Extension for `xcrun simctl push` or `.apns` files, so the tests open the
+sample's debug URL `rpsample://debug-push?...`, which runs the same `ReliablePushExtension` code in the app process and
+shows the result as a local notification that the test taps. "Offline" is the harness device proxy's online/offline switch
+(the Simulator shares the Mac's network and has no airplane mode). `.github/workflows/ios-ci.yml` never runs it: CI builds
+and unit-tests the package, builds the sample (Debug and Release) and checks the size and the manifest.
 
 ## Real FCM pushes (optional, maintainer's Firebase project)
 

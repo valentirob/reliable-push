@@ -1,0 +1,86 @@
+name: iOS CI
+
+# Builds and tests the iOS SDK (root Package.swift + ios/) on a GitHub-hosted macOS runner. The Xcode version matches the
+# toolchain pinned in ios/README.md (Xcode 26.6). No UI tests, no harness and no credentials: the Simulator end-to-end
+# suite (./scripts/ios-e2e.sh) runs locally only.
+
+on:
+  push:
+    branches:
+      - develop
+      - main
+      - 'release/**'
+      - 'hotfix/**'
+    paths:
+      - 'Package.swift'
+      - 'ios/**'
+      - '.github/workflows/ios-ci.yml'
+  pull_request:
+    paths:
+      - 'Package.swift'
+      - 'ios/**'
+      - '.github/workflows/ios-ci.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # The macos-26 image (arm64) has Xcode 26.6 at this path and an iPhone 17 simulator (iOS 26.5).
+  DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+  IOS_SIMULATOR: iPhone 17
+
+jobs:
+  ios:
+    name: iOS (package tests, sample build, binary size)
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Select Xcode 26.6
+        run: |
+          sudo xcode-select -s /Applications/Xcode_26.6.app
+          xcodebuild -version
+
+      - name: Lint the privacy manifest
+        run: plutil -lint ios/Sources/ReliablePush/PrivacyInfo.xcprivacy
+
+      # XCTest unit tests of the package on the Simulator (the Command Line Tools alone cannot run them).
+      - name: Package tests
+        run: |
+          xcodebuild test -scheme ReliablePush \
+            -destination "platform=iOS Simulator,name=$IOS_SIMULATOR" \
+            -resultBundlePath "$RUNNER_TEMP/package-tests.xcresult"
+
+      # Builds the sample app with its Notification Service Extension; the UI tests need the harness and are not run.
+      - name: Build the sample (Debug)
+        run: |
+          xcodebuild build -project ios/Sample/ReliablePushSample.xcodeproj -scheme ReliablePushSample \
+            -configuration Debug -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO \
+            -resultBundlePath "$RUNNER_TEMP/sample-debug.xcresult"
+
+      - name: Build the sample (Release)
+        run: |
+          xcodebuild build -project ios/Sample/ReliablePushSample.xcodeproj -scheme ReliablePushSample \
+            -configuration Release -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO \
+            -resultBundlePath "$RUNNER_TEMP/sample-release.xcresult"
+
+      # The SDK has a size budget (spec 9.2, rule mobile-sdk.md): the stripped arm64 dylib stays under 307,200 bytes.
+      - name: Check the binary size
+        run: ios/scripts/size.sh
+
+      - name: Upload result bundles
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ios-xcresult
+          path: ${{ runner.temp }}/*.xcresult
+          if-no-files-found: warn
+          retention-days: 14

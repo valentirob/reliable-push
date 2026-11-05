@@ -16,9 +16,14 @@ Spec: `docs/specs/2026-11-03-reliable-push-design.md` §10.1.
 - Mobile scenarios: the Android emulator suite is `./scripts/android-e2e.sh` (needs the Android SDK; it boots the AVD
   `Medium_Phone_API_37.0` itself and stops it again). Without the maintainer's Firebase files it ends with
   `Android E2E: 8/8 passed, 1 skipped` (`fcm-real-delivery` is skipped; see `docs/testing.md`). Run it after changes to
-  `android/` or to the harness console API it uses. iOS simulator scenarios come with the iOS cycle.
+  `android/` or to the harness console API it uses. The iOS Simulator suite is
+  `./scripts/ios-e2e.sh` (needs Xcode 26.6 and an iOS Simulator, see `ios/README.md`; it uses the device proxy on
+  `127.0.0.1:8091`, so that port must be free). Without the maintainer's APNs files it ends with
+  `iOS E2E: 8/8 passed, 1 skipped` (`apns-real-delivery` is skipped; see `docs/testing.md`). Run it after changes to
+  `ios/` or `Package.swift` or to the harness console API it uses.
 - Not in CI: `.github/workflows/harness-ci.yml` builds `client-java`, `harness` and `loadtest` only; `android-ci.yml`
-  builds the Android SDK without an emulator.
+  builds the Android SDK without an emulator; `ios-ci.yml` runs the package tests and builds the sample on a macOS runner
+  without UI tests.
 
 ## Run
 1. Full suite: `./scripts/e2e.sh` (Windows, PowerShell 7: `pwsh scripts/e2e.ps1`, optional `-Scenario <name> -Keep`; untested on
