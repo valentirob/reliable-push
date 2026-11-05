@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Release build: merged with the generated Info.plist. No URL scheme, no ATS exception. -->
+	<key>RPBaseURL</key>
+	<string>$(RP_BASE_URL)</string>
+	<key>RPAppId</key>
+	<string>$(RP_APP_ID)</string>
+	<key>RPAppGroup</key>
+	<string>$(RP_APP_GROUP)</string>
+</dict>
+</plist>

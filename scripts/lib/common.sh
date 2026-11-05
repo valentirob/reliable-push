@@ -1,4 +1,5 @@
-# Shared helpers of scripts/e2e.sh (and scripts/demo.sh). Sourced, not executed. Bash 3.2 compatible (macOS).
+# Shared helpers of scripts/e2e.sh (and scripts/demo.sh, android-e2e.sh, ios-e2e.sh). Sourced, not executed.
+# Bash 3.2 compatible (macOS).
 # Needs: docker with the compose v2 plugin, curl. No jq: the JSON answers of the harness are matched with grep -E.
 
 RP_ROOT="${RP_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
@@ -94,8 +95,8 @@ rp_collect_logs() {
 }
 
 # Builds the images, generates the per-run secrets, starts the stack and waits up to <seconds> for api, worker-a,
-# worker-b and harness (scripts/android-e2e.sh; e2e.sh and demo.sh keep their own copy of these steps). Sets
-# RP_STACK_STARTED=1 right before `up`, so the caller's exit trap knows to collect logs and tear down.
+# worker-b and harness (scripts/android-e2e.sh and ios-e2e.sh; e2e.sh and demo.sh keep their own copy of these
+# steps). Sets RP_STACK_STARTED=1 right before `up`, so the caller's exit trap knows to collect logs and tear down.
 RP_STACK_STARTED=0
 # Bounded wait until the harness's device-traffic proxy (127.0.0.1:8091 -> api:8080) forwards: the backend's actuator
 # answers 200 through it. Returns 1 on timeout (callers fail the start with their own die function).
@@ -161,4 +162,21 @@ rp_java_major() {
     local java="java"
     [ -n "${JAVA_HOME:-}" ] && [ -x "$JAVA_HOME/bin/java" ] && java="$JAVA_HOME/bin/java"
     "$java" -XshowSettings:properties -version 2>&1 | awk -F'= ' '/java.specification.version/ { print $2; exit }'
+}
+
+# Prints "<label>: <passed>/<total> passed[, <skipped> skipped]" from the last line of a summary tool
+# ("<passed>/<total> <skipped>", scripts/lib/IosE2eSummary.java) and returns 1 unless every counted entry passed and
+# at least one entry ran (scripts/ios-e2e.sh).
+rp_summary_verdict() {
+    local label="$1" line="$2" passed total skipped
+    passed="${line%%/*}"
+    total="${line#*/}"
+    total="${total%% *}"
+    skipped="${line##* }"
+    if [ "$skipped" -gt 0 ]; then
+        rp_log "$label: $passed/$total passed, $skipped skipped"
+    else
+        rp_log "$label: $passed/$total passed"
+    fi
+    [ "$passed" = "$total" ] && { [ "$total" != 0 ] || [ "$skipped" != 0 ]; }
 }

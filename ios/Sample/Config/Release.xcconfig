@@ -1,0 +1,5 @@
+// Release: no debug URL scheme, no harness client, no App Transport Security exception. Set RP_BASE_URL to the
+// production backend (https only).
+#include "Shared.xcconfig"
+
+RP_BASE_URL = https:/$()/reliable-push.example.com

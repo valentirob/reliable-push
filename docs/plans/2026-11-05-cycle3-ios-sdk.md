@@ -440,7 +440,7 @@ Requirements: FR-4 to FR-8, FR-10, NFR-1, NFR-5, NFR-6, NFR-10. Rules: `.agents/
     8. Collects the container logs and tears down. It shuts the Simulator down only if it booted it.
     9. Prints `iOS E2E: N/N passed[, M skipped]`; exit 0 means all passed.
 
-- [ ] **Step 1: Tests.** Each UI test creates its own user id, launches the app with `RP_RESET=1`, taps Register and waits for the real-device entry. It asks the harness to send (`POST /console/api/push`), opens the debug URL with `XCUIApplication.open(_:)` (iOS 16.4+; the Simulator runtime is newer), and polls `GET /console/api/notifications/{id}`. Each test relaunches the app, so it has a fresh process and the refresh gate is reset.
+- [x] **Step 1: Tests.** Each UI test creates its own user id, launches the app with `RP_RESET=1`, taps Register and waits for the real-device entry. It asks the harness to send (`POST /console/api/push`), opens the debug URL with `XCUIApplication.open(_:)` (iOS 16.4+; the Simulator runtime is newer), and polls `GET /console/api/notifications/{id}`. Each test relaunches the app, so it has a fresh process and the refresh gate is reset.
   - `testDeliveredIsReported`: NOT_DELIVERED, timeout 5 → `DELIVERED`, inbox empty after the timeout.
   - `testReadIsReportedOnTap`: NOT_READ → home button, tap the banner (Springboard) → `READ`.
   - `testOfflineDeliveryIsSentOnNextLaunch`: device network offline (`/device-network`), deliver, still `PENDING` after 3 s, online, terminate and relaunch the app (no reset) → `DELIVERED` before the timeout (timeout 60).
@@ -448,9 +448,9 @@ Requirements: FR-4 to FR-8, FR-10, NFR-1, NFR-5, NFR-6, NFR-10. Rules: `.agents/
   - `testTokenRefreshNearExpiry`: app `news` (validity 20 s), wait 17 s, deliver → `DELIVERED`, and the backend log has `device.token_refreshed` for the device id.
   - `testLogoutRevokesDevice`: logout, then a push → no `DELIVERED`, the fallback fires.
   - Hosted `SharedStorageTests.testKeychainAccessGroupAndAppGroupAreUsable`: a `KeychainStore` with access group `$(RP_APP_GROUP)` and the App Group container round-trip without `errSecMissingEntitlement`, which proves the entitlements the NSE relies on.
-- [ ] **Step 2: Run** `./scripts/ios-e2e.sh` before the sample exists → FAIL. **Step 3: Implement** the sample, the project and the script. Validate the project with `xcodebuild -list -project ios/Sample/ReliablePushSample.xcodeproj`.
-- [ ] **Step 4: Run** → `iOS E2E: 7/7 passed` (6 UI entries + the hosted storage test). Feedback loop as in `run-e2e`: at most 3 rounds, then stop and record.
-- [ ] **Step 5: Commit** `feat(ios): sample app and simulator e2e against the harness`
+- [x] **Step 2: Run** `./scripts/ios-e2e.sh` before the sample exists → FAIL. **Step 3: Implement** the sample, the project and the script. Validate the project with `xcodebuild -list -project ios/Sample/ReliablePushSample.xcodeproj`.
+- [x] **Step 4: Run** → `iOS E2E: 8/8 passed` (6 UI entries + the 2 hosted storage tests; ruling R18: `SharedStorageTests.testKeychainRoundTripWithoutAccessGroup`, R9's real Keychain round trip that the SwiftPM host skips, is the 8th entry; the plan's original line was `7/7 passed`). Feedback loop as in `run-e2e`: at most 3 rounds, then stop and record.
+- [x] **Step 5: Commit** `feat(ios): sample app and simulator e2e against the harness`
 
 ### Task 7: Real APNs pushes (optional, maintainer's Apple Developer team)
 
@@ -488,7 +488,7 @@ Why: Task 6 proves the SDK logic but not the real entry, where APNs makes the OS
     2. Terminate the app (`simctl terminate`).
     3. Send a console push → `DELIVERED` within 60 s through the real NSE.
 
-    Otherwise the entry is `SKIPPED` and the line reads `iOS E2E: 7/7 passed, 1 skipped`.
+    Otherwise the entry is `SKIPPED` and the line reads `iOS E2E: 8/8 passed, 1 skipped` (R18).
 
 - [ ] **Step 1: Failing tests:**
   - `providerTokenIsEs256WithRawSignature` (verify with the test public key after converting back to DER; header and claims as above)
@@ -499,7 +499,7 @@ Why: Task 6 proves the SDK logic but not the real entry, where APNs makes the OS
   - `missingCredentialsDisableRealMode`
 - [ ] **Step 2: Run** `./mvnw -B -pl harness -am verify` → FAIL. **Step 3: Implement.** **Step 4: Run** → PASS.
   - The sample builds without a team: `xcodebuild build` (Debug, Simulator, `RP_APNS` unset) → OK.
-  - `./scripts/ios-e2e.sh` → `7/7 passed, 1 skipped`.
+  - `./scripts/ios-e2e.sh` → `8/8 passed, 1 skipped` (R18).
 - [ ] **Step 5: Docs** (`docs/testing.md`, "Real APNs pushes"). The maintainer:
   1. registers the bundle id (or a variant set through `RP_BUNDLE_ID`) and the App Group with Push Notifications;
   2. creates an APNs auth key and saves it as `harness/build/apns/AuthKey.p8` (`chmod 600`);
@@ -563,7 +563,7 @@ Why: Task 6 proves the SDK logic but not the real entry, where APNs makes the OS
   - `cd android && ./gradlew build`
   - `./scripts/e2e.sh` → `E2E: 17/17 passed`
   - `./scripts/android-e2e.sh` → `Android E2E: 8/8 passed, 1 skipped`
-  - `./scripts/ios-e2e.sh` → `iOS E2E: 7/7 passed, 1 skipped` (or `apns-real-delivery` PASSED with the maintainer's files)
+  - `./scripts/ios-e2e.sh` → `iOS E2E: 8/8 passed, 1 skipped` (R18; or `apns-real-delivery` PASSED with the maintainer's files)
 
   Record the counts and the three lines in `docs/STATUS.md`.
 - [ ] **Step 5: Commit** `ci(ios): package tests, sample build, size check and codeql; docs: ios sdk`, then run the `session-handoff` skill.

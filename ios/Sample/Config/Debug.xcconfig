@@ -1,0 +1,7 @@
+// Debug: the local harness stack (scripts/ios-e2e.sh). The launch environment can override the base URL, the app id
+// and the harness URL (RP_BASE_URL, RP_APP_ID, RP_HARNESS_URL); RP_RESET=1 clears the SDK's state before configure.
+#include "Shared.xcconfig"
+
+// The harness's device proxy to the backend (127.0.0.1:8091); `$()` keeps `//` from starting a comment.
+RP_BASE_URL = http:/$()/127.0.0.1:8091
+RP_HARNESS_URL = http:/$()/127.0.0.1:8090

@@ -1,0 +1,22 @@
+// Settings shared by every target and configuration of the sample. Override on the xcodebuild command line, e.g.
+// `xcodebuild ... RP_BUNDLE_ID=com.example.sample RP_APP_GROUP=group.com.example.sample`.
+
+// Bundle id of the app; the extension is $(RP_BUNDLE_ID).NSE, the test bundles .Tests / .UITests.
+RP_BUNDLE_ID = io.reliablepush.sample
+// App Group shared by the app and the Notification Service Extension (also the SDK's Keychain access group).
+RP_APP_GROUP = group.io.reliablepush.sample
+// Backend app id at the reliable-push backend.
+RP_APP_ID = shop
+
+MARKETING_VERSION = 0.1.0
+CURRENT_PROJECT_VERSION = 1
+IPHONEOS_DEPLOYMENT_TARGET = 15.0
+SWIFT_VERSION = 6.0
+TARGETED_DEVICE_FAMILY = 1
+
+// No Apple Developer team: Simulator builds are signed to run locally (ad hoc); the entitlements (App Group) still
+// apply on the Simulator. A team (real devices, real APNs) is set by the maintainer, never committed.
+CODE_SIGN_STYLE = Manual
+CODE_SIGN_IDENTITY = -
+DEVELOPMENT_TEAM =
+PROVISIONING_PROFILE_SPECIFIER =
