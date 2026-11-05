@@ -4,5 +4,7 @@
     public protected *;
 }
 -keep class io.reliablepush.android.internal.RetryJobService { *; }
+# Internal classes are moved into one package so they cannot collide with other pre-minified libraries (a.a, b.a ...)
+-repackageclasses io.reliablepush.android.internal
 -keepattributes Signature,InnerClasses,EnclosingMethod,RuntimeVisibleAnnotations,*Annotation*
 -keep class kotlin.Metadata { *; }

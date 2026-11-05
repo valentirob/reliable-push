@@ -20,7 +20,7 @@ android {
         release {
             // Keeps the AAR under the 100 KB budget (CI gate); proguard-rules.pro keeps the whole public API
             isMinifyEnabled = true
-            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            proguardFiles("proguard-rules.pro") // not the default android-optimize file: it adds -allowaccessmodification, which widens private members
         }
     }
 

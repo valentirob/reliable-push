@@ -68,7 +68,15 @@ kotlin {
 }
 
 dependencies {
-    implementation(project(":reliablepush"))
+    // -Prp.sampleLibVariant=release (./scripts/android-e2e.sh --release-lib): the debug sample consumes the library's
+    // minified RELEASE AAR from mavenLocal (published by :reliablepush:publishToMavenLocal), so the emulator suite
+    // exercises the R8-processed code that ships. Otherwise it uses the project (debug variant for the debug build).
+    if (providers.gradleProperty("rp.sampleLibVariant").orNull == "release") {
+        debugImplementation("io.reliablepush:reliable-push-android:${providers.gradleProperty("VERSION_NAME").get()}")
+        releaseImplementation(project(":reliablepush"))
+    } else {
+        implementation(project(":reliablepush"))
+    }
     // the SDK has it compile-only: the host app provides firebase-messaging
     implementation(libs.firebase.messaging)
 

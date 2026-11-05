@@ -105,11 +105,14 @@ Needs JDK 21 and the Android SDK (`ANDROID_HOME`; the build downloads missing pa
 | Lint, unit tests (Robolectric, JUnit 4), debug and release AAR; what CI runs | `cd android && ./gradlew build` |
 | Unit tests only | `cd android && ./gradlew :reliablepush:testDebugUnitTest` |
 | Release AAR size (CI gate: under 102,400 bytes) | `ls -l android/reliablepush/build/outputs/aar/reliablepush-release.aar` |
-| Emulator E2E (local only) | `./scripts/android-e2e.sh [--test <method>] [--keep]` |
+| Emulator E2E (local only) | `./scripts/android-e2e.sh [--test <method>] [--release-lib] [--keep]` |
 | Install into `~/.m2` (unsigned; signing only when `SIGNING_KEY` and `SIGNING_PASSWORD` are set) | `cd android && ./gradlew :reliablepush:publishToMavenLocal` |
 
 The release build is minified with R8 (`android/reliablepush/proguard-rules.pro` keeps the public API in
-`io.reliablepush.android` and the manifest's `RetryJobService`); the unit tests run on the debug variant.
+`io.reliablepush.android` and the manifest's `RetryJobService`, moves internal classes into
+`io.reliablepush.android.internal` and does not widen member access); the unit tests and the default E2E run on the debug variant.
+`./scripts/android-e2e.sh --release-lib` runs the same emulator suite with the sample consuming the minified release AAR
+(installed into `~/.m2` by `publishToMavenLocal`), so run it after changing the keep rules.
 
 `./scripts/android-e2e.sh` starts the harness compose stack, boots the AVD `Medium_Phone_API_37.0` (override with
 `ANDROID_AVD`; it is stopped again if the script started it), runs the sample's instrumented tests and the library's

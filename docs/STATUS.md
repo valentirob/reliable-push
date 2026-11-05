@@ -13,14 +13,17 @@ Newest entry first. Updated at the end of every work session (see `.agents/skill
   the POM lists only `kotlin-stdlib`), `docs/android.md`, integration guide §4, README, `AGENTS.md`, `docs/testing.md`, the
   run-e2e skill and the spec block "Changes during implementation (plan 2)". actionlint 1.7.12 is clean.
 - **AAR size:** the release AAR was 98,307 bytes, too close to the gate, so the library's release build is now minified
-  with R8 (`reliablepush/proguard-rules.pro` keeps the public API in `io.reliablepush.android` and `RetryJobService`):
-  **64,501 bytes**. The public classes keep every public member (javap diff debug vs release: nothing missing); the unit
-  tests run on the debug variant (AGP has no `testReleaseUnitTest` here) and the emulator E2E, whose sample consumes the
-  library, passed.
+  with R8 (`reliablepush/proguard-rules.pro`: keeps the public API in `io.reliablepush.android` and `RetryJobService`,
+  `-repackageclasses io.reliablepush.android.internal` so internal classes cannot collide with other minified libraries,
+  and no `-allowaccessmodification`, so no member is widened): **65,910 bytes**. `javap -public` of the 7 public and
+  manifest classes is identical between the debug and release classes. The unit tests run on the debug variant (no
+  `testReleaseUnitTest`); the minified code is exercised at runtime by `./scripts/android-e2e.sh --release-lib` (the
+  sample's debug build consumes the release AAR from mavenLocal): `Android E2E: 8/8 passed, 1 skipped`. The library's
+  own instrumented Keystore test in that run still runs against the debug library (internal class under test).
 - **State (verification on this branch, not merged, not pushed):** `cd android && ./gradlew build` OK;
   `./mvnw -B -pl harness -am verify` OK (34 client + 135 harness unit + 79 harness integration tests, 0 failures);
   `cd backend && ./mvnw -B verify` OK (240 unit + 218 integration, 0 failures, coverage gate met);
-  `./scripts/e2e.sh`: `E2E: 17/17 passed`; `./scripts/android-e2e.sh`: `Android E2E: 8/8 passed, 1 skipped`
+  `./scripts/e2e.sh`: `E2E: 17/17 passed`; `./scripts/android-e2e.sh` and `./scripts/android-e2e.sh --release-lib`: each `Android E2E: 8/8 passed, 1 skipped`
   (`fcm-real-delivery` skipped). No emulator or stack left running.
 - **Not run:** the real-FCM check (Task 7 Step 7): not run, it needs the maintainer's Firebase project
   (`android/sample/google-services.json` and `harness/build/fcm/service-account.json`, see `docs/testing.md`).

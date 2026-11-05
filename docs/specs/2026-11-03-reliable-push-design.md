@@ -84,6 +84,10 @@
 >   the job runs 30 to 60 s after the network returns (R10), so a very short notification timeout can fall back first.
 > - §7: `http` base URLs only for `localhost`, `127.0.0.1` and `10.0.2.2`; redirects are not followed. Android 17
 >   (`targetSdk 37`) apps whose backend is on a private network need `ACCESS_LOCAL_NETWORK` (R11).
+> - §10: the emulator test for blocked notifications revokes `POST_NOTIFICATIONS` without killing the process through the hidden
+>   test API `PermissionManager.revokePostNotificationPermissionWithoutKillForTest` (R12; `pm revoke` kills the instrumentation
+>   process); it is pinned to the API 37 AVD. The harness container runs as the invoking user (`E2E_UID:E2E_GID`, default
+>   1001:0) so it can read the mode-600 FCM service-account key through the read-only mount (R14).
 > - §7.2: **mode v2 (`AndroidConfigV2`) is deferred until Google's general availability**; FCM delivers v2-shaped
 >   messages to v1 apps through `onMessageReceived`, so mode v1 is the only supported mode.
 > - §10, §12: the harness console gains `POST /console/api/grants` and `POST /console/api/real-devices` (real devices in

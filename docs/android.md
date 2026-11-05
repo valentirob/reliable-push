@@ -3,7 +3,7 @@
 The Android SDK (`io.reliablepush:reliable-push-android`, Kotlin, `minSdk 26`, `compileSdk 37`) tracks pushes that your
 backend sends through FCM: it posts the notification, reports `DELIVERED`, reports `READ` when the user taps it, and
 retries events that could not be sent. Runtime dependencies: Kotlin stdlib only (no AndroidX, OkHttp, WorkManager or
-coroutines); `firebase-messaging` is a `compileOnly` dependency, so your app supplies it. The release AAR is about 64 KB.
+coroutines); `firebase-messaging` is a `compileOnly` dependency, so your app supplies it. The release AAR is about 66 KB.
 
 Your backend registers each notification with reliable-push and puts the returned `trackingId` into the FCM message as
 `rp_tid`: see [integration-guide.md](integration-guide.md) §1 and §2. This page is the app side.
@@ -80,7 +80,7 @@ class MessagingService : FirebaseMessagingService() {
 ```
 
 Declare the service in your manifest as usual. Messages without `rp_tid` are ignored (`false`), so the app keeps its own
-pushes. A tracked message is **always shown**: store policy forbids hidden notifications. Title and body come from the
+pushes. A tracked message is **never hidden**: it is shown, or blocked by the OS (then there is no `DELIVERED`); store policy forbids hidden notifications. If your push entry point is not an FCM service, call `ReliablePush.handle(context, data)` with the message's data map instead. Title and body come from the
 `title` and `body` data keys (fallback: the app name and an empty body).
 
 ## 5. Track opens in the launch activity

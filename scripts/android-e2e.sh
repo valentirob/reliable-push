@@ -3,6 +3,7 @@
 #
 #   ./scripts/android-e2e.sh                  # SDK instrumented tests, sample E2E tests, then the cold-start check
 #   ./scripts/android-e2e.sh --test <method>  # one AndroidE2ETest method, cold-start-delivery or fcm-real-delivery
+#   ./scripts/android-e2e.sh --release-lib    # same, but the sample consumes the library's minified RELEASE variant (R8)
 #   ./scripts/android-e2e.sh --keep           # leave the stack running afterwards (console: http://127.0.0.1:8090)
 #
 # Needs ANDROID_HOME (adb, emulator), JDK 21, Docker with compose v2. Uses the device adb sees (ANDROID_SERIAL picks
@@ -28,7 +29,7 @@ RP_TAG="android-e2e"
 . "$RP_ROOT/scripts/lib/common.sh"
 
 usage() {
-    sed -n '2,19p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    sed -n '2,20p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
 }
 
 PKG="io.reliablepush.sample"
@@ -44,6 +45,7 @@ EMU_BASE_URL="http://10.0.2.2:8080"
 
 TEST=""
 KEEP=0
+RELEASE_LIB=0
 while [ $# -gt 0 ]; do
     case "$1" in
         --test)
@@ -53,6 +55,10 @@ while [ $# -gt 0 ]; do
             ;;
         --test=*)
             TEST="${1#--test=}"
+            shift
+            ;;
+        --release-lib)
+            RELEASE_LIB=1
             shift
             ;;
         --keep)
@@ -251,6 +257,11 @@ GRADLE_ARGS=(
     "-Pandroid.testInstrumentationRunnerArguments.harnessUrl=$EMU_HARNESS_URL"
     "-Pandroid.testInstrumentationRunnerArguments.baseUrl=$EMU_BASE_URL"
 )
+if [ "$RELEASE_LIB" = 1 ]; then
+    # the sample then consumes the minified release AAR from mavenLocal, so publish it first
+    GRADLE_TASKS=(:reliablepush:publishToMavenLocal "${GRADLE_TASKS[@]}")
+    GRADLE_ARGS+=("-Prp.sampleLibVariant=release")
+fi
 EXPECT=()
 if [ -z "$TEST" ]; then
     GRADLE_TASKS+=(:reliablepush:connectedDebugAndroidTest :sample:connectedDebugAndroidTest)

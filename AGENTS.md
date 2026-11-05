@@ -86,7 +86,7 @@ running the Maven commands. Details: `docs/testing.md`.
 | Demo / manual-test web console (local only; `--realtime` for real minutes) | `./scripts/demo.sh [--realtime]` → http://127.0.0.1:8090/ |
 | E2E (local only, manual or agent) | `./scripts/e2e.sh [--scenario <name>] [--keep]` (Windows: `pwsh scripts/e2e.ps1`) — details in `.agents/skills/run-e2e/SKILL.md` |
 | Android SDK build + lint + unit tests + AAR (needs the Android SDK, `ANDROID_HOME`) | `cd android && ./gradlew build` |
-| Android emulator E2E against the harness stack (local only; boots the AVD; `Android E2E: 8/8 passed, 1 skipped` without Firebase files) | `./scripts/android-e2e.sh [--test <method>] [--keep]` — details in `docs/testing.md` |
+| Android emulator E2E against the harness stack (local only; boots the AVD; `Android E2E: 8/8 passed, 1 skipped` without Firebase files) | `./scripts/android-e2e.sh [--test <method>] [--release-lib] [--keep]` — details in `docs/testing.md` |
 | Helm chart checks: lint, unit tests, kubeconform (Docker only, pinned images) | `deploy/helm/scripts/validate.sh` |
 | Helm kind smoke install (local only; needs kind, kubectl, JDK 21; `--keep` keeps the cluster) | `./scripts/helm-smoke.sh [--keep]` |
 | Loadtest module build + unit tests (compiles the simulations, never runs Gatling) | `./mvnw -B -pl loadtest verify` |
