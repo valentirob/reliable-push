@@ -115,23 +115,31 @@ mkdir -p "$OUT"
 chmod 700 "$OUT"
 
 # ---------------------------------------------------------------- cluster
+# The --keep marker holds the ID of the cluster's control-plane container: a cluster of the same name created by anyone
+# else (or recreated since) has another ID and is never reused or deleted.
+control_plane_id() { docker inspect -f '{{.Id}}' "$CLUSTER-control-plane" 2>/dev/null; }
+rm -rf "$OUT/logs" "$OUT/helm-status.txt" # stale logs of a previous run would be counted and grepped below
 if kind get clusters --quiet 2>/dev/null | grep -qx "$CLUSTER"; then
-    if [ -f "$KEPT_MARKER" ] && [ -f "$KUBECONFIG_FILE" ]; then
+    cp_id="$(control_plane_id)"
+    if [ -f "$KEPT_MARKER" ] && [ -f "$KUBECONFIG_FILE" ] && [ -n "$cp_id" ] && [ "$(cat "$KEPT_MARKER")" = "$cp_id" ]; then
         say "reusing the kept cluster $CLUSTER"
         OWNED=1
         kubectl --kubeconfig "$KUBECONFIG_FILE" delete namespace "$NS" --ignore-not-found --wait=true --timeout=120s >/dev/null
     else
-        fail "kind cluster $CLUSTER already exists and was not kept by this script; delete it (kind delete cluster --name $CLUSTER) and rerun"
+        fail "kind cluster $CLUSTER already exists and was not kept by this script (no marker, or its control-plane container ID differs); delete it (kind delete cluster --name $CLUSTER) and rerun"
     fi
 else
-    rm -rf "$OUT/logs" "$OUT/helm-status.txt"
     say "creating kind cluster $CLUSTER ($KIND_NODE_IMAGE)"
     kind create cluster --name "$CLUSTER" --image "$KIND_NODE_IMAGE" --kubeconfig "$KUBECONFIG_FILE" --wait 180s >"$OUT/kind-create.log" 2>&1 \
         || { cat "$OUT/kind-create.log" >&2; OWNED=1; fail "kind create cluster failed"; } # a half-created cluster is ours
     OWNED=1
 fi
 chmod 600 "$KUBECONFIG_FILE"
-[ "$KEEP" = 1 ] && : >"$KEPT_MARKER"
+if [ "$KEEP" = 1 ]; then
+    cp_id="$(control_plane_id)"
+    [ -n "$cp_id" ] || fail "cannot read the ID of container $CLUSTER-control-plane"
+    printf '%s\n' "$cp_id" >"$KEPT_MARKER" || fail "cannot write $KEPT_MARKER"
+fi
 kind get kubeconfig --name "$CLUSTER" --internal >"$KUBECONFIG_INTERNAL" || fail "kind get kubeconfig failed"
 chmod 600 "$KUBECONFIG_INTERNAL"
 kubectl --kubeconfig "$KUBECONFIG_FILE" create namespace "$NS" >/dev/null || fail "create namespace"

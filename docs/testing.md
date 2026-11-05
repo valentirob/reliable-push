@@ -152,4 +152,6 @@ image or deployed with a Helm chart.
   `fallback.reclaimed`). Each check prints `PASS`/`FAIL`; exit 0 = passed. It uses its own kubeconfig in
   `harness/build/helm-smoke/` and never touches `~/.kube/config`; helm runs from `HELM_IMAGE`. Without `--keep` the
   cluster is deleted at the end; with `--keep` delete it with
-  `kind delete cluster --name rp-smoke --kubeconfig harness/build/helm-smoke/kubeconfig`.
+  `kind delete cluster --name rp-smoke --kubeconfig harness/build/helm-smoke/kubeconfig`. A kept cluster is marked with
+  its control-plane container ID: the next run reuses (and may delete) only that cluster, and refuses an `rp-smoke`
+  cluster it did not create. Each run starts with empty `logs/`.
