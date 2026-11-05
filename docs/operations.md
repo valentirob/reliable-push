@@ -60,6 +60,7 @@ says so (minutes for `worker.lease` and `fallback.backoff`, days for `device-tok
 | `worker.batch-size` | `100` | 1-10000; at most this many rows per claim. A tick keeps claiming while claims come back full, for up to half the lease |
 | `worker.max-concurrency` | `batch-size` | 1-10000; webhook calls in flight per worker instance (one virtual thread each). A row is claimed only when a slot is free |
 | `worker.lease` | `2m` | A product duration (scaled by the fast clock); a bare number means minutes. Must be longer than every app's `fallback.http-timeout`; otherwise startup fails (a warning only with the fast clock) |
+| `worker.shutdown-timeout` | largest app `fallback.http-timeout` + `5s` | Positive; how long a stopping worker (`SIGTERM`) waits for its webhook calls in flight. Must not exceed `spring.lifecycle.timeout-per-shutdown-phase` (`30s`, set in `application.yml`), otherwise startup fails naming both keys; with a `fallback.http-timeout` above 25 s raise that too |
 | `worker.backlog-refresh-interval` | `30s` | Optional; how often `rp_due_backlog` is recomputed |
 | `retention-days` | `30` | At least 1. Closed notifications older than this are deleted daily |
 | `retention.cron` | `0 17 3 * * *` | Spring cron expression (six fields, always UTC) of the daily retention run (worker role); `-` disables the schedule |
@@ -242,6 +243,11 @@ is harmless. It logs `retention.purged` with the count. Devices are not purged b
   20-minute trigger window, so most of it would expire. Size for `backlog / (rows per second x replicas)` well inside
   `trigger-window-minutes`: raise `max-concurrency` (and the receiver's capacity), add worker replicas, or both.
   `rp_due_backlog` shows how far behind the workers are.
+- **Graceful stop:** on `SIGTERM` (Kubernetes rolling update, scale-down) a worker claims nothing more and finishes the
+  webhook calls in flight, writing their outcomes before the connection pool closes, for at most
+  `worker.shutdown-timeout`. A call that outlives it is logged once at WARN (`worker stop timed out; N rows may be
+  re-sent after their lease`) and its row is re-sent after the lease. Set `terminationGracePeriodSeconds` above
+  `shutdown-timeout + 30 s` (the chart default is 60) so the kubelet does not `SIGKILL` the pod first.
 - **Crash re-sends:** if a worker dies after the receiver accepted a call but before the outcome was written, another
   worker re-sends once after the lease ends. Such re-sends are not counted against `max-attempts`. Receivers must
   de-duplicate on `Idempotency-Key` ([integration-guide.md](integration-guide.md)).

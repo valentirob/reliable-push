@@ -4,6 +4,10 @@ spring:
   # Runs both roles unless overridden (SPRING_PROFILES_ACTIVE=api or worker).
   profiles:
     default: api,worker
+  lifecycle:
+    # Each shutdown phase may take this long; the worker stop (reliable-push.worker.shutdown-timeout) runs in one phase
+    # and must fit, otherwise startup fails. Keep terminationGracePeriodSeconds above it + 30 s.
+    timeout-per-shutdown-phase: 30s
   threads:
     virtual:
       enabled: true
@@ -24,6 +28,8 @@ spring:
       enabled: false
 
 server:
+  # on SIGTERM the web server finishes the requests in flight (bounded by spring.lifecycle.timeout-per-shutdown-phase)
+  shutdown: graceful
   tomcat:
     # JSON request bodies are limited to 64 KB by BodySizeLimitFilter (/v1/**);
     # this only bounds how much Tomcat swallows of an upload the filter rejected unread.
