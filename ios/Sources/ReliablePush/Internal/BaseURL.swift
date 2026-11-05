@@ -1,13 +1,5 @@
 import Foundation
 
-/// Errors thrown by the SDK's public API.
-public enum ReliablePushError: Error, Sendable {
-    /// The base URL uses cleartext `http` for a host other than `localhost`, `127.0.0.1` or `::1`.
-    case insecureBaseURL
-    /// The base URL is not an absolute http(s) URL, or carries user info, a query or a fragment.
-    case invalidBaseURL
-}
-
 enum BaseURL {
     private static let cleartextHosts: Set<String> = ["localhost", "127.0.0.1", "::1"]
 

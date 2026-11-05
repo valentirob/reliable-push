@@ -1,9 +1,9 @@
 import Foundation
 import os
 
-/// The SDK logger: `os.Logger(subsystem: "io.reliablepush", category: "ReliablePush")`, message
-/// `event=<name> key=value…`. WARN is written at `.error`, INFO at `.info`; debug and info only when `debug` is true
-/// (default: `DEBUG` builds). Fields whose key names a token, a user id or notification content are never written.
+/// The SDK logger: unified logging, subsystem `io.reliablepush`, category `ReliablePush` (`os_log`, see `log`),
+/// message `event=<name> key=value…` (fields in call order). WARN is written at `.error`, INFO at `.info`; debug and
+/// info only when `debug` is true (default: `DEBUG` builds). Fields whose key names a token, a user id or notification content are never written.
 /// Callers still must not pass such values under other names. Values are logged `privacy: .private` unless the key is
 /// `trackingId` or `deviceId` (the only public fields).
 enum SDKLog {
@@ -27,7 +27,10 @@ enum SDKLog {
         var sink: Sink?
     }
 
-    private static let logger = Logger(subsystem: "io.reliablepush", category: "ReliablePush")
+    // `os_log` with an `OSLog`, not `os.Logger`: same subsystem, category, levels and privacy in the unified log,
+    // but `Logger`'s format strings go into `__oslogstring`, a 16 KB-aligned section that costs a whole page of the
+    // size budget (spec §9.2).
+    private static let log = OSLog(subsystem: "io.reliablepush", category: "ReliablePush")
     private static let state = Locked(State())
 
     static var debug: Bool {
@@ -40,26 +43,31 @@ enum SDKLog {
         set { state.withLock { $0.sink = newValue } }
     }
 
-    static func debug(_ event: String, _ fields: [String: String] = [:]) { emit(.debug, event, fields) }
-    static func info(_ event: String, _ fields: [String: String] = [:]) { emit(.info, event, fields) }
-    static func warn(_ event: String, _ fields: [String: String] = [:]) { emit(.warn, event, fields) }
+    static func debug(_ event: String, _ fields: KeyValuePairs<String, String> = [:]) { emit(.debug, event, fields) }
+    static func info(_ event: String, _ fields: KeyValuePairs<String, String> = [:]) { emit(.info, event, fields) }
+    static func warn(_ event: String, _ fields: KeyValuePairs<String, String> = [:]) { emit(.warn, event, fields) }
 
-    private static func emit(_ level: Level, _ event: String, _ fields: [String: String]) {
+    /// Fields are written in the order given (`KeyValuePairs`: no dictionary, no sort, so a small binary).
+    private static func emit(_ level: Level, _ event: String, _ fields: KeyValuePairs<String, String>) {
         let snapshot = state.withLock { $0 }
         if level != .warn && !snapshot.debug { return }
-        let kept = fields.filter { !deniedKeys.contains($0.key.lowercased()) }.sorted { $0.key < $1.key }
-        let publicPart = kept.filter { publicKeys.contains($0.key.lowercased()) }.map { "\($0.key)=\($0.value)" }
-        let privatePart = kept.filter { !publicKeys.contains($0.key.lowercased()) }.map { "\($0.key)=\($0.value)" }
-        let head = "event=\(event)"
-        let pub = ([head] + publicPart).joined(separator: " ")
-        let all = ([head] + kept.map { "\($0.key)=\($0.value)" }).joined(separator: " ")
-        snapshot.sink?(level, all)
-        let priv = privatePart.joined(separator: " ")
-        switch level {
-        case .debug: logger.debug("\(pub, privacy: .public) \(priv, privacy: .private)")
-        case .info: logger.info("\(pub, privacy: .public) \(priv, privacy: .private)")
-        case .warn: logger.error("\(pub, privacy: .public) \(priv, privacy: .private)")
+        var pub = "event=" + event
+        var all = pub
+        var priv = ""
+        for (key, value) in fields {
+            let name = key.lowercased()
+            if deniedKeys.contains(name) { continue }
+            let pair = key + "=" + value
+            all += " " + pair
+            if publicKeys.contains(name) {
+                pub += " " + pair
+            } else {
+                priv += priv.isEmpty ? pair : " " + pair
+            }
         }
+        snapshot.sink?(level, all)
+        let type: OSLogType = level == .warn ? .error : level == .info ? .info : .debug
+        os_log("%{public}@ %{private}@", log: log, type: type, pub as NSString, priv as NSString)
     }
 }
 

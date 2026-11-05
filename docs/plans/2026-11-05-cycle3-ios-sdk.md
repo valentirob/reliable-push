@@ -345,7 +345,7 @@ Requirements: FR-4 to FR-8, FR-10, NFR-1, NFR-5, NFR-6, NFR-10. Rules: `.agents/
     - `func serviceExtensionTimeWillExpire()`: calls the pending handler immediately with the best content, if not called yet (WARN `extension.time_expired`). The event stays queued.
   - `NotificationGate`: `protocol NotificationSettingsSource { func current() async -> GateSettings }`. The real one reads `UNUserNotificationCenter.current().notificationSettings()`; the tests inject a fake.
 
-- [ ] **Step 1: Failing tests:**
+- [x] **Step 1: Failing tests:**
   - `testNotOursReturnsFalseAndDoesNotCallHandler`
   - `testMalformedRpTidReturnsFalseWithWarn`
   - `testDeliveredIsPersistedBeforeHandlerAndSent`
@@ -363,10 +363,10 @@ Requirements: FR-4 to FR-8, FR-10, NFR-1, NFR-5, NFR-6, NFR-10. Rules: `.agents/
   - `testConfigureWithOtherAppIdClearsRegistration`
   - `testReleaseLoggingOnlyWarnAndAbove` (`SDKLog` with `debug: false` emits nothing below WARN; a test log sink)
   - `testNoTokenOrContentInLogs`
-- [ ] **Step 2: Run** → FAIL.
-- [ ] **Step 3: Implement.** `SDK` is the composition root, built at `configure` or by the extension. Concurrency: actors or locks for internal state, no global mutable state outside `SDK` and `RefreshGate`, Swift 6 clean with no warnings.
-- [ ] **Step 4: Run** → PASS, and `ios/scripts/size.sh` passes.
-- [ ] **Step 5: Commit** `feat(ios): public api, notification service extension helper and read tracking`
+- [x] **Step 2: Run** → FAIL.
+- [x] **Step 3: Implement.** `SDK` is the composition root, built at `configure` or by the extension. Concurrency: actors or locks for internal state, no global mutable state outside `SDK` and `RefreshGate`, Swift 6 clean with no warnings.
+- [x] **Step 4: Run** → PASS, and `ios/scripts/size.sh` passes.
+- [x] **Step 5: Commit** `feat(ios): public api, notification service extension helper and read tracking`
 
 ### Task 5: Harness — device-traffic proxy and iOS preview
 

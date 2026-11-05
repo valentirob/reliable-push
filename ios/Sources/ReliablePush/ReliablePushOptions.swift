@@ -1,0 +1,17 @@
+import Foundation
+
+/// Options shared by `ReliablePush.configure` (app) and `ReliablePushExtension` (Notification Service Extension).
+public struct ReliablePushOptions: Sendable {
+    /// Keychain access group holding the device token, shared by the app and the extension. `nil` (the default) uses
+    /// the App Group id, which is a valid keychain access group and needs no extra entitlement.
+    public var keychainAccessGroup: String?
+    /// Overall time, in seconds, the extension spends sending events before it calls the content handler. Default 5;
+    /// clamped to 0...25 so the notification is always handed back well inside the system's ~30 s budget.
+    public var extensionSendTimeout: TimeInterval
+
+    /// Creates options; every parameter has the documented default.
+    public init(keychainAccessGroup: String? = nil, extensionSendTimeout: TimeInterval = 5) {
+        self.keychainAccessGroup = keychainAccessGroup
+        self.extensionSendTimeout = extensionSendTimeout
+    }
+}
