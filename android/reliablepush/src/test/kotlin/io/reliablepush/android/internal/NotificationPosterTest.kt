@@ -8,8 +8,8 @@ import android.app.PendingIntent
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.content.pm.ActivityInfo
-import android.content.pm.ResolveInfo
+import android.content.IntentFilter
+import android.util.Log
 import androidx.test.core.app.ApplicationProvider
 import io.reliablepush.android.ReliablePushOptions
 import org.junit.Assert.assertEquals
@@ -23,6 +23,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
+import org.robolectric.shadows.ShadowLog
 
 class TestLaunchActivity : Activity()
 
@@ -65,16 +66,13 @@ class NotificationPosterTest {
     @Test
     fun defaultsToTheLauncherActivityAndTheAppIcon() {
         val launcher = ComponentName(context.packageName, TestLaunchActivity::class.java.name)
-        shadowOf(context.packageManager).addResolveInfoForIntent(
-            Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER).setPackage(context.packageName),
-            ResolveInfo().apply {
-                activityInfo = ActivityInfo().apply {
-                    packageName = launcher.packageName
-                    name = launcher.className
-                    applicationInfo = context.applicationInfo
-                }
-            },
-        )
+        shadowOf(context.packageManager).apply {
+            addActivityIfNotPresent(launcher)
+            addIntentFilterForActivity(
+                launcher,
+                IntentFilter(Intent.ACTION_MAIN).apply { addCategory(Intent.CATEGORY_LAUNCHER) },
+            )
+        }
         context.applicationInfo.icon = android.R.drawable.ic_dialog_alert
 
         assertTrue(NotificationPoster(context, ReliablePushOptions()).post(tid, "t", "b"))
@@ -118,6 +116,42 @@ class NotificationPosterTest {
         )
         assertTrue(NotificationPoster(context, options).post(tid, "t", "b"))
         assertNotNull(posted())
+    }
+
+    @Test
+    fun customizerThrowingAnErrorStillPostsTheNotification() {
+        val options = ReliablePushOptions(
+            launchActivity = TestLaunchActivity::class.java,
+            customizer = { _, _ -> throw AssertionError("host bug") },
+        )
+        assertTrue(NotificationPoster(context, options).post(tid, "t", "b"))
+        assertNotNull(posted())
+    }
+
+    @Test
+    fun customizerMovingToABlockedOrMissingChannelPostsNothing() {
+        nm.createNotificationChannel(NotificationChannel("muted", "Muted", NotificationManager.IMPORTANCE_NONE))
+        val toMuted = ReliablePushOptions(customizer = { b, _ -> b.setChannelId("muted") })
+        assertFalse(NotificationPoster(context, toMuted).post(tid, "t", "b"))
+        val toMissing = ReliablePushOptions(customizer = { b, _ -> b.setChannelId("does_not_exist") })
+        assertFalse(NotificationPoster(context, toMissing).post(tid, "t", "b"))
+        assertNull(posted())
+
+        nm.createNotificationChannel(NotificationChannel("loud", "Loud", NotificationManager.IMPORTANCE_HIGH))
+        val toLoud = ReliablePushOptions(customizer = { b, _ -> b.setChannelId("loud") })
+        assertTrue(NotificationPoster(context, toLoud).post(tid, "t", "b"))
+        assertEquals("loud", posted()!!.channelId)
+    }
+
+    @Test
+    fun missingLaunchActivityIsLoggedButStillPosts() {
+        ShadowLog.clear()
+        assertTrue(NotificationPoster(context, ReliablePushOptions()).post(tid, "t", "b"))
+        assertNull(posted()!!.contentIntent)
+        assertTrue(
+            ShadowLog.getLogsForTag("ReliablePush")
+                .any { it.type == Log.WARN && it.msg == "event=notification.no_launch_activity tid=$tid" },
+        )
     }
 
     @Test

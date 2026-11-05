@@ -15,8 +15,10 @@ import java.util.concurrent.TimeUnit
  * [TokenStore] with the Keystore cipher, the [EventQueue] in `noBackupFilesDir/reliablepush`, [EventSender] and
  * [RetryScheduler]. Used by `ReliablePush` and by [RetryJobService] ([fromStoredConfig]).
  *
- * Every method here does storage or network I/O and must run on the SDK executor ([execute]); `TokenStore` writes
- * with a synchronous `commit()`.
+ * Threads: network work (and everything that decrypts the token) runs on the single SDK thread ([execute]), so
+ * flushes never overlap. Recording an event ([persist]) is disk-only and runs on the caller's thread or on a second,
+ * persist-only thread ([persistOffMain]) that never does network I/O, so an event is on disk without waiting for a
+ * flush that may take tens of seconds. `TokenStore` writes with a synchronous `commit()`.
  */
 internal class Sdk private constructor(context: Context, val baseUrl: String, val appId: String, val jobId: Int) {
     private val app: Context = context.applicationContext
@@ -39,11 +41,12 @@ internal class Sdk private constructor(context: Context, val baseUrl: String, va
                 store.clear()
                 queue.clear()
                 scheduler.cancel()
-                if (previous != null && previous.jobId != jobId) previous.scheduler.cancel()
                 SdkLog.info("sdk.reconfigured", "app_id" to appId)
             }
             store.saveConfig(baseUrl, appId)
         }
+        // one retry job only: the old id's job goes; flush() schedules under the new id if events remain
+        if (previous != null && previous.jobId != jobId) previous.scheduler.cancel()
         flush()
     }
 
@@ -88,14 +91,24 @@ internal class Sdk private constructor(context: Context, val baseUrl: String, va
         return confirmed
     }
 
-    /** Queues [type] for [trackingId] and flushes; without a registration nothing is queued (WARN). */
-    fun track(trackingId: String, type: String, occurredAtMillis: Long) {
-        if (store.load() == null) {
+    /**
+     * Records [type] for [trackingId] durably: queued on disk and the retry job scheduled, so it survives the process
+     * being killed right after. Disk only (no network, no decryption): the registration check is by presence of a
+     * stored token; an unreadable token is found later by the flush. Returns false (WARN) when not registered.
+     */
+    fun persist(trackingId: String, type: String, occurredAtMillis: Long): Boolean {
+        if (store.deviceId() == null) {
             SdkLog.warn("tracking.not_registered", "tid" to trackingId, "type" to type)
-            return
+            return false
         }
         queue.add(QueuedEvent(trackingId, type, occurredAtMillis))
-        flush()
+        scheduler.schedule()
+        return true
+    }
+
+    /** [persist], then a flush on the SDK thread. */
+    fun record(trackingId: String, type: String, occurredAtMillis: Long) {
+        if (persist(trackingId, type, occurredAtMillis)) execute { flush() }
     }
 
     /**
@@ -126,6 +139,11 @@ internal class Sdk private constructor(context: Context, val baseUrl: String, va
             Thread(r, "rp-sdk").apply { isDaemon = true }
         }
 
+        /** Disk-only work requested from the main thread (see [persistOffMain]); never network I/O. */
+        private val persistExecutor: ExecutorService = Executors.newSingleThreadExecutor { r ->
+            Thread(r, "rp-persist").apply { isDaemon = true }
+        }
+
         private val mainHandler by lazy { Handler(Looper.getMainLooper()) }
 
         /** Test hook: Robolectric has no AndroidKeyStore. */
@@ -153,12 +171,23 @@ internal class Sdk private constructor(context: Context, val baseUrl: String, va
 
         /** Runs [task] on the SDK thread. Nothing it throws reaches the host app (logged as ERROR, class name only). */
         fun execute(task: () -> Unit) {
-            executor.execute {
-                try {
-                    task()
-                } catch (t: Throwable) {
-                    SdkLog.error("sdk.failed", "error" to t.javaClass.simpleName)
-                }
+            executor.execute { guarded(task) }
+        }
+
+        /**
+         * Runs disk-only [task] before returning, except on the main thread, where it goes to the persist-only thread
+         * (which is never held up by network calls). Push entry points (FCM) run on a worker thread, so the event is on
+         * disk when `handle` returns there.
+         */
+        fun persistOffMain(task: () -> Unit) {
+            if (Looper.myLooper() == Looper.getMainLooper()) persistExecutor.execute { guarded(task) } else guarded(task)
+        }
+
+        private fun guarded(task: () -> Unit) {
+            try {
+                task()
+            } catch (t: Throwable) {
+                SdkLog.error("sdk.failed", "error" to t.javaClass.simpleName)
             }
         }
 
@@ -166,8 +195,14 @@ internal class Sdk private constructor(context: Context, val baseUrl: String, va
             mainHandler.post(block)
         }
 
-        /** Test hook: waits until everything submitted so far has run. */
+        /** Test hook: waits until the persist-only thread has run everything submitted so far. */
+        fun awaitPersisted() {
+            persistExecutor.submit {}.get(30, TimeUnit.SECONDS)
+        }
+
+        /** Test hook: waits until both SDK threads have run everything submitted so far. */
         fun awaitIdle() {
+            awaitPersisted()
             executor.submit {}.get(30, TimeUnit.SECONDS)
         }
     }

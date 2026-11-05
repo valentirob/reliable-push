@@ -9,7 +9,8 @@ import android.app.Notification
  *
  * @property channelId notification channel the SDK posts to; created on the first post unless the host created it.
  * @property channelName user-visible name of that channel when the SDK creates it.
- * @property smallIcon drawable resource of the notification's small icon; `0` uses the app icon.
+ * @property smallIcon drawable resource of the notification's small icon: pass a monochrome (white on transparent)
+ *   drawable. `0` falls back to the app icon, which can render as a grey square (adaptive or full-colour icons).
  * @property launchActivity activity opened when the notification is tapped; `null` uses the launcher activity. It
  *   receives the extra `rp_tid`: call [ReliablePush.trackOpen] from its `onCreate` and `onNewIntent`.
  * @property jobId id of the SDK's one-off `JobScheduler` retry job; change it only if it clashes with a host job.

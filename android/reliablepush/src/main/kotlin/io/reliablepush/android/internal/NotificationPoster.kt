@@ -13,9 +13,10 @@ import io.reliablepush.android.ReliablePushOptions
  *
  * It never requests permissions: it only checks that the app may show notifications
  * ([NotificationManager.areNotificationsEnabled], false also when `POST_NOTIFICATIONS` is denied on Android 13+) and
- * that the SDK channel is not set to [NotificationManager.IMPORTANCE_NONE]. The channel ([ReliablePushOptions.channelId])
- * is created on first post with [NotificationManager.IMPORTANCE_DEFAULT]; a host that creates it first keeps its
- * own settings.
+ * that the notification's channel exists and is not set to [NotificationManager.IMPORTANCE_NONE]. The SDK channel
+ * ([ReliablePushOptions.channelId]) is created on first post with [NotificationManager.IMPORTANCE_DEFAULT]; a host that
+ * creates it first keeps its own settings. If the host's customizer moves the notification to another channel, that
+ * channel is the one checked.
  *
  * Notification: tag [TAG], id `rp_tid.hashCode()`, auto-cancel, content intent = an immutable activity
  * [PendingIntent] on [ReliablePushOptions.launchActivity] (or the launcher activity) with extra [EXTRA_TRACKING_ID],
@@ -34,11 +35,11 @@ internal class NotificationPoster(context: Context, private val options: Reliabl
                     NotificationChannel(options.channelId, options.channelName, NotificationManager.IMPORTANCE_DEFAULT),
                 )
             }
-            val channel = nm.getNotificationChannel(options.channelId)
-            if (channel == null || channel.importance == NotificationManager.IMPORTANCE_NONE) {
-                return notPosted(trackingId, "channel_blocked")
-            }
-            nm.notify(TAG, trackingId.hashCode(), build(trackingId, title, body))
+            val notification = build(trackingId, title, body)
+            val channel = nm.getNotificationChannel(notification.channelId)
+                ?: return notPosted(trackingId, "channel_missing") // the system would drop it silently
+            if (channel.importance == NotificationManager.IMPORTANCE_NONE) return notPosted(trackingId, "channel_blocked")
+            nm.notify(TAG, trackingId.hashCode(), notification)
             true
         } catch (e: RuntimeException) { // e.g. SecurityException if the permission is revoked meanwhile
             notPosted(trackingId, "error")
@@ -56,7 +57,7 @@ internal class NotificationPoster(context: Context, private val options: Reliabl
         options.customizer?.let { customize ->
             try {
                 customize(builder, trackingId)
-            } catch (e: Exception) { // a host bug must not cost the user the notification
+            } catch (e: Throwable) { // a host bug (even an Error) must not crash the push service or hide the notification
                 SdkLog.warn("notification.customizer_failed", "tid" to trackingId, "error" to e.javaClass.simpleName)
             }
         }
@@ -72,7 +73,10 @@ internal class NotificationPoster(context: Context, private val options: Reliabl
     private fun contentIntent(trackingId: String): PendingIntent? {
         val intent = options.launchActivity?.let { Intent(context, it) }
             ?: context.packageManager.getLaunchIntentForPackage(context.packageName)
-            ?: return null
+        if (intent == null) { // a tap then opens nothing and READ cannot be reported
+            SdkLog.warn("notification.no_launch_activity", "tid" to trackingId)
+            return null
+        }
         intent.putExtra(EXTRA_TRACKING_ID, trackingId)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
         return PendingIntent.getActivity(

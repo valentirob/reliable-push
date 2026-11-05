@@ -10,8 +10,8 @@ import io.reliablepush.android.internal.SdkLog
 /**
  * Entry point of the Reliable Push SDK: reports whether each push was delivered (shown) and read (tapped).
  *
- * Threading: storage and network work runs on one SDK background thread, in call order; callbacks run on the main
- * thread. Every method may be called from any thread.
+ * Threading: network work runs on one SDK background thread, in call order; callbacks run on the main thread.
+ * Every method may be called from any thread.
  *
  * Data sent to the backend: device id, tracking id, event type (`DELIVERED`/`READ`), timestamp and app id; at
  * registration also the host's ID token. Nothing else (no notification content).
@@ -28,7 +28,9 @@ public object ReliablePush {
     private var state: State? = null
 
     /**
-     * Configures the SDK. Call it in `Application.onCreate`, on every launch, before any other method.
+     * Configures the SDK. Call it in `Application.onCreate`, on every launch, before any other method: `Application`
+     * runs before the app's `FirebaseMessagingService`, so pushes are tracked from the first one. (A push handled before
+     * `configure` still uses the configuration stored by an earlier launch, but with default [options].)
      *
      * Idempotent: the same [baseUrl] and [appId] keep the registration (only [options] are replaced). A different
      * [baseUrl] or [appId] replaces the stored configuration and clears the registration, the queued events and the
@@ -88,10 +90,11 @@ public object ReliablePush {
      *
      * A message without the data key `rp_tid` is not the SDK's: `false`, nothing happens. A malformed `rp_tid` (not a
      * UUID) is ignored with a WARN: `false`. Otherwise the notification is posted on the calling thread, so it is
-     * visible when this returns; only if it was actually posted is `DELIVERED` queued, the retry job scheduled and the
-     * queue flushed, all on the SDK thread (the device token is decrypted and checked there, which is too slow for
-     * the caller). When the device is not registered the notification is shown but nothing is queued (WARN
-     * `tracking.not_registered`).
+     * visible when this returns. Only if it was actually posted is `DELIVERED` written to the on-disk queue and the
+     * retry job scheduled, also before returning (disk only, a few milliseconds), so the event survives the process
+     * being killed as soon as the push entry point returns; the send itself happens later on the SDK thread. Called
+     * on the main thread, the disk write moves to a background thread instead. When the device is not registered the
+     * notification is shown but nothing is queued (WARN `tracking.not_registered`).
      *
      * Title: data `title`, else [fallbackTitle], else the app label. Body: data `body`, else [fallbackBody], else empty.
      *
@@ -111,7 +114,7 @@ public object ReliablePush {
             return false
         }
         val app = context.applicationContext
-        val current = state
+        val current = stateFor(app)
         val title = data["title"].orIfEmpty(fallbackTitle) ?: app.applicationInfo.loadLabel(app.packageManager).toString()
         val body = data["body"].orIfEmpty(fallbackBody) ?: ""
         if (!NotificationPoster(app, current?.options ?: ReliablePushOptions()).post(trackingId, title, body)) return false
@@ -119,7 +122,7 @@ public object ReliablePush {
         if (current == null) {
             SdkLog.warn("tracking.not_registered", "tid" to trackingId, "reason" to "not_configured")
         } else {
-            Sdk.execute { current.sdk.track(trackingId, "DELIVERED", occurredAt) }
+            Sdk.persistOffMain { current.sdk.record(trackingId, "DELIVERED", occurredAt) }
         }
         return true
     }
@@ -127,7 +130,8 @@ public object ReliablePush {
     /**
      * Reports that the user opened a notification. Call it from the launch activity's `onCreate` and `onNewIntent`
      * with the intent. If the intent carries the extra `rp_tid` (a UUID), `READ` is queued and sent, and the extra is
-     * removed so a recreated activity does not report it again. Other intents are ignored.
+     * removed so a recreated activity does not report it again. Other intents are ignored. The event is written to
+     * disk before returning (from the main thread: on a disk-only background thread), then sent on the SDK thread.
      */
     public fun trackOpen(intent: Intent?) {
         val trackingId = try {
@@ -143,7 +147,7 @@ public object ReliablePush {
             SdkLog.warn("tracking.not_registered", "tid" to trackingId, "reason" to "not_configured")
             return
         }
-        Sdk.execute { current.sdk.track(trackingId, "READ", occurredAt) }
+        Sdk.persistOffMain { current.sdk.record(trackingId, "READ", occurredAt) }
     }
 
     /**
@@ -172,6 +176,17 @@ public object ReliablePush {
      */
     public val deviceId: String?
         get() = state?.sdk?.store?.deviceId()
+
+    /**
+     * The configured state or, for a host that has not called [configure] yet in this process, one built from the
+     * configuration an earlier launch stored (default options), kept so [trackOpen] (which has no context) finds it.
+     */
+    private fun stateFor(app: Context): State? = state ?: synchronized(lock) {
+        state ?: Sdk.fromStoredConfig(app, ReliablePushOptions().jobId)?.let { sdk ->
+            SdkLog.init(app)
+            State(sdk, ReliablePushOptions()).also { state = it }
+        }
+    }
 
     private fun configured(): Sdk = checkNotNull(state) { "ReliablePush.configure must be called first" }.sdk
 

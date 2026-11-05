@@ -35,6 +35,7 @@ import org.robolectric.annotation.Config
 import org.robolectric.shadows.ShadowLog
 import java.util.Collections
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [37])
@@ -56,6 +57,7 @@ class ReliablePushTest {
     @Volatile private var eventsStatus = 200
     @Volatile private var eventsRetryAfter: String? = null
     @Volatile private var revokeStatus = 204
+    @Volatile private var eventsGate: (() -> Unit)? = null
     private val jobPendingAtEventsCall = Collections.synchronizedList(ArrayList<Boolean>())
 
     @Before
@@ -85,6 +87,7 @@ class ReliablePushTest {
                 ScriptedResponse(registerStatus)
             }
         "POST /v1/events" -> {
+            eventsGate?.invoke()
             jobPendingAtEventsCall.add(js.getPendingJob(jobId) != null)
             if (eventsStatus == 200) {
                 val arr = JSONObject(req.body).getJSONArray("events")
@@ -248,6 +251,7 @@ class ReliablePushTest {
         val threads = ids.map { id -> Thread { start.await(); ReliablePush.handle(context, push(id = id)) }.apply { start() } }
         start.countDown()
         threads.forEach { it.join(10_000) }
+        assertEquals(20, queueSize()) // persisted by the handle calls themselves, not by the SDK thread
         settle()
         assertEquals(20, queueSize())
         eventsStatus = 200
@@ -330,7 +334,7 @@ class ReliablePushTest {
         assertNull(ReliablePush.deviceId)
         assertTrue(warnings().any { it.startsWith("event=auth.failed") })
 
-        ReliablePush.configure(context, TestBackend().use { it.baseUrl }, "news", options) // closed port
+        registerStatus = ScriptedResponse.DROP // connection closed without an answer
         ReliablePush.register(idToken) { result = it }
         settle()
         assertEquals(RegisterResult.Failed(null), result)
@@ -400,9 +404,104 @@ class ReliablePushTest {
     @Test
     fun configureWithSameConfigIsNoOp() {
         registered()
-        configure()
+        eventsStatus = 503
+        ReliablePush.handle(context, push())
         settle()
+        val calls = backend.requests.size
+
+        // same baseUrl + appId: no reconfiguration (which would flush the queued event again), new options apply
+        ReliablePush.configure(context, backend.baseUrl, "news", options.copy(channelId = "other_channel"))
+        settle()
+        assertEquals(calls, backend.requests.size)
         assertEquals("dev-1", ReliablePush.deviceId)
+        assertEquals(1, queueSize())
+
+        val second = "1c7a8d3f-9b8e-4b54-8e9f-7d2a1b3c4d5e"
+        assertTrue(ReliablePush.handle(context, push(id = second)))
+        assertEquals("other_channel", posted(second)!!.channelId)
+    }
+
+    @Test
+    fun changingTheJobIdCancelsTheOldJob() {
+        registered()
+        eventsStatus = 503
+        ReliablePush.handle(context, push())
+        settle()
+        assertNotNull(js.getPendingJob(jobId))
+
+        ReliablePush.configure(context, backend.baseUrl, "news", options.copy(jobId = jobId + 1))
+        settle()
+        assertNull(js.getPendingJob(jobId))
+        assertNotNull(js.getPendingJob(jobId + 1)) // the queued event keeps a retry under the new id
+        assertEquals("dev-1", ReliablePush.deviceId)
+        assertEquals(1, queueSize())
+    }
+
+    // ---- durability: DELIVERED / READ are on disk before handle / trackOpen return ----
+
+    /** Holds the SDK thread inside a flush (an HTTP call the backend does not answer yet) until the returned latch opens. */
+    private fun blockSdkThreadInFlush(): CountDownLatch {
+        val inFlush = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        eventsGate = { inFlush.countDown(); release.await(8, TimeUnit.SECONDS) }
+        Thread { ReliablePush.handle(context, push(id = "2d8b9e4a-0c9f-4c65-9fa0-8e3b2c4d5e6f")) }.apply { start(); join() }
+        assertTrue("SDK thread did not reach the flush", inFlush.await(5, TimeUnit.SECONDS))
+        return release
+    }
+
+    private fun queued(): List<Pair<String, String>> =
+        EventQueue(Sdk.queueDir(context)).peek(100).map { it.trackingId to it.type } // a fresh instance reads the file
+
+    @Test
+    fun deliveredIsPersistedBeforeHandleReturns() {
+        registered()
+        val release = blockSdkThreadInFlush()
+        try {
+            var returned: Boolean? = null
+            Thread { returned = ReliablePush.handle(context, push()) }.apply { start(); join() } // FCM worker thread
+            assertEquals(true, returned)
+            assertTrue(queued().contains(tid to "DELIVERED"))
+            assertNotNull(js.getPendingJob(jobId))
+        } finally {
+            release.countDown()
+            eventsGate = null
+        }
+        settle()
+        assertTrue(events().contains(tid to "DELIVERED"))
+    }
+
+    @Test
+    fun openIsPersistedWithoutWaitingForTheSdkThread() {
+        registered()
+        val release = blockSdkThreadInFlush()
+        try {
+            ReliablePush.trackOpen(Intent().putExtra("rp_tid", tid)) // main thread: persisted off the main thread
+            Sdk.awaitPersisted()
+            assertTrue(queued().contains(tid to "READ"))
+            assertNotNull(js.getPendingJob(jobId))
+
+            val other = "3e9c0f5b-1d0a-4d76-8ab1-9f4c3d5e6f70"
+            Thread { ReliablePush.trackOpen(Intent().putExtra("rp_tid", other)) }.apply { start(); join() }
+            assertTrue(queued().contains(other to "READ")) // any other thread: persisted before returning
+        } finally {
+            release.countDown()
+            eventsGate = null
+        }
+        settle()
+        assertTrue(events().contains(tid to "READ"))
+    }
+
+    @Test
+    fun handleBeforeConfigureUsesTheStoredConfig() {
+        registered()
+        ReliablePush.resetForTest() // a new process whose host has not called configure (yet)
+        assertTrue(ReliablePush.handle(context, push()))
+        settle()
+        assertTrue(events().contains(tid to "DELIVERED"))
+
+        ReliablePush.trackOpen(Intent().putExtra("rp_tid", tid)) // no context: uses what handle loaded
+        settle()
+        assertTrue(events().contains(tid to "READ"))
     }
 
     @Test

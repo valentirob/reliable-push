@@ -15,13 +15,20 @@ internal data class RecordedRequest(
     val body: String,
 )
 
-/** A scripted answer. [delayMs] is slept before answering (to provoke client timeouts). */
+/**
+ * A scripted answer. [delayMs] is slept before answering (to provoke client timeouts). Status [DROP] closes the
+ * connection without any answer (an I/O error on the client).
+ */
 internal data class ScriptedResponse(
     val status: Int,
     val body: String = "",
     val headers: Map<String, String> = emptyMap(),
     val delayMs: Long = 0,
-)
+) {
+    companion object {
+        const val DROP = -1
+    }
+}
 
 /**
  * Tiny scripted HTTP server on 127.0.0.1 (ephemeral port) for unit tests. Answers come from [enqueue]d responses in
@@ -54,6 +61,7 @@ internal class TestBackend : AutoCloseable {
             requests.add(req)
             val resp = handler?.invoke(req) ?: queue.poll() ?: ScriptedResponse(500)
             if (resp.delayMs > 0) Thread.sleep(resp.delayMs)
+            if (resp.status == ScriptedResponse.DROP) return // closing an unanswered exchange drops the connection
             resp.headers.forEach { (k, v) -> ex.responseHeaders.add(k, v) }
             val bytes = resp.body.toByteArray(Charsets.UTF_8)
             if (resp.status == 204 || bytes.isEmpty()) {
