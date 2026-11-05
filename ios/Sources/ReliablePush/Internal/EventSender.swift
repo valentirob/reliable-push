@@ -17,6 +17,7 @@ enum FlushResult: Sendable {
 /// Token: refreshed first when `needsRefresh` and the process-wide `RefreshGate` allows (a transient failure of that
 /// early refresh is not fatal; the current token may still work). A 401 refreshes once more (gate permitting) and
 /// retries the batch once; a refresh answered 401 clears the registration. Events are kept on every other failure.
+/// An event the server leaves unacknowledged in two sent batches is dropped with a WARN (Android parity).
 final class EventSender: Sendable {
     static let batchSize = 50
     static let maxRetryAfter = 3600
@@ -61,12 +62,14 @@ final class EventSender: Sendable {
             switch await refresh(deviceId: deviceId, token: token.raw) {
             case .refreshed(let t): token = t
             case .failed(.notRegistered): return .notRegistered
+            case .rateLimited: return .retryLater
             case .failed: break
             }
         }
 
         var attempted = Set<String>()
         while true {
+            if Task.isCancelled { return .retryLater }
             if let deadline, now() >= deadline { return queue.count > 0 ? .retryLater : .done }
             let batch = queue.peek(max: Self.batchSize, excluding: attempted)
             if batch.isEmpty { break }
@@ -81,6 +84,7 @@ final class EventSender: Sendable {
                 switch await refresh(deviceId: deviceId, token: token.raw) {
                 case .refreshed(let t): token = t
                 case .failed(let r): return r
+                case .rateLimited: return .retryLater
                 }
                 result = await api.sendEvents(token: token.raw, events: batch)
                 if case .http(401, _) = result {
@@ -122,10 +126,15 @@ final class EventSender: Sendable {
                 done.insert(e.key)
                 SDKLog.warn("tracking.event_dropped", ["count": "1", "outcome": outcome, "trackingId": e.trackingId])
             default:
-                break // unmentioned or unknown outcome: keep for the next flush
+                break // unmentioned or unknown outcome: counted as a miss below
             }
         }
         queue.remove(keys: done)
+        let missed = Set(batch.map(\.key)).subtracting(done)
+        let gone = queue.noteUnacknowledged(keys: missed)
+        for e in batch where gone.contains(e.key) {
+            SDKLog.warn("tracking.event_dropped", ["count": "1", "reason": "unacknowledged", "trackingId": e.trackingId])
+        }
     }
 
     private func rateLimited(_ retryAfter: Int?) {
@@ -138,6 +147,7 @@ final class EventSender: Sendable {
     private enum RefreshOutcome {
         case refreshed(DeviceToken)
         case failed(FlushResult)
+        case rateLimited
     }
 
     private func refresh(deviceId: String, token: String) async -> RefreshOutcome {
@@ -154,7 +164,10 @@ final class EventSender: Sendable {
                 SDKLog.warn("auth.failed", ["status": "401", "refresh": "rejected"])
                 return .failed(.notRegistered)
             }
-            if status == 429 { rateLimited(retryAfter) }
+            if status == 429 {
+                rateLimited(retryAfter)
+                return .rateLimited
+            }
             return .failed(.retryLater)
         case .networkError:
             return .failed(.retryLater)

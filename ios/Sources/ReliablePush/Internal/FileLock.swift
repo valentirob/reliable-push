@@ -31,9 +31,13 @@ final class FileLock: Sendable {
     /// (an event path must not crash or stall); the in-process lock of the caller then remains the only guard.
     func withLock<T>(_ body: () throws -> T) rethrows -> T {
         let fd = openFile()
+        var locked = false
         if fd >= 0 {
-            while flock(fd, LOCK_EX) != 0 && errno == EINTR {}
+            var result: Int32
+            repeat { result = flock(fd, LOCK_EX) } while result != 0 && errno == EINTR
+            locked = result == 0
         }
+        if !locked { SDKLog.warn("lock.unavailable", ["file": url.lastPathComponent]) }
         defer {
             if fd >= 0 {
                 flock(fd, LOCK_UN)
@@ -46,7 +50,10 @@ final class FileLock: Sendable {
     /// Takes the lock without blocking; nil when somebody else holds it (or the file cannot be opened).
     func tryLock() -> Held? {
         let fd = openFile()
-        guard fd >= 0 else { return nil }
+        guard fd >= 0 else {
+            SDKLog.warn("lock.unavailable", ["file": url.lastPathComponent])
+            return nil
+        }
         var result: Int32
         repeat { result = flock(fd, LOCK_EX | LOCK_NB) } while result != 0 && errno == EINTR
         guard result == 0 else {

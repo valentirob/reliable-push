@@ -69,6 +69,34 @@ final class EventQueueTests: XCTestCase {
         XCTAssertEqual(EventQueue(directory: dir).count, 1)
     }
 
+    func testSingleBadElementDroppedRestKept() throws {
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let json = #"[{"trackingId":"a","type":"DELIVERED","occurredAt":"2023-11-14T22:13:20.000Z"},{"bogus":1},{"trackingId":"b","type":"READ","occurredAt":"2023-11-14T22:13:20.000Z"}]"#
+        try Data(json.utf8).write(to: dir.appendingPathComponent("events.json"))
+        let q = EventQueue(directory: dir)
+        XCTAssertEqual(q.peek(max: 10).map(\.trackingId), ["a", "b"])
+        XCTAssertEqual(q.count, 2)
+        XCTAssertEqual(warnings.messages.filter { $0.contains("queue_corrupt") }.count, 1)
+    }
+
+    func testCorruptFileWarnsOnceAndIsRewrittenEmpty() throws {
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try Data("{not json".utf8).write(to: dir.appendingPathComponent("events.json"))
+        let q = EventQueue(directory: dir)
+        XCTAssertEqual(q.count, 0)
+        XCTAssertEqual(q.count, 0)
+        _ = q.peek(max: 1)
+        XCTAssertEqual(warnings.messages.filter { $0.contains("queue_corrupt") }.count, 1)
+    }
+
+    func testNoteUnacknowledgedDropsOnSecondMiss() {
+        let q = EventQueue(directory: dir)
+        q.add(event("t1")); q.add(event("t2"))
+        XCTAssertEqual(q.noteUnacknowledged(keys: [event("t1").key]), [])
+        XCTAssertEqual(EventQueue(directory: dir).noteUnacknowledged(keys: [event("t1").key]), [event("t1").key])
+        XCTAssertEqual(q.peek(max: 10).map(\.trackingId), ["t2"])
+    }
+
     func testConcurrentEnqueueKeepsEveryEvent() async {
         let q = EventQueue(directory: dir)
         await withTaskGroup(of: Void.self) { group in

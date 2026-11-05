@@ -12,6 +12,8 @@ extension QueuedEvent {
 /// the change but never crashes.
 final class EventQueue: Sendable {
     static let cap = 500
+    /// An event the server did not acknowledge in this many sent batches is dropped (Android `MAX_MISSES`).
+    static let maxMisses = 2
 
     private let directory: URL
     private let fileURL: URL
@@ -24,13 +26,31 @@ final class EventQueue: Sendable {
         fileLock = FileLock(url: directory.appendingPathComponent("events.lock"))
     }
 
+    private struct Entry: Codable {
+        let trackingId: String
+        let type: EventType
+        let occurredAt: Date
+        var misses: Int?
+
+        init(_ e: QueuedEvent) {
+            trackingId = e.trackingId; type = e.type; occurredAt = e.occurredAt; misses = nil
+        }
+        var event: QueuedEvent { QueuedEvent(trackingId: trackingId, type: type, occurredAt: occurredAt) }
+    }
+
+    /// Decodes one array element without failing the whole array.
+    private struct Lossy: Decodable {
+        let entry: Entry?
+        init(from decoder: any Decoder) throws { entry = try? Entry(from: decoder) }
+    }
+
     func add(_ e: QueuedEvent) {
         var dropped = 0
         var queued = false
         locked {
             guard var items = read() else { return }
-            if items.contains(where: { $0.key == e.key }) { return }
-            items.append(e)
+            if items.contains(where: { $0.event.key == e.key }) { return }
+            items.append(Entry(e))
             while items.count > Self.cap {
                 items.removeFirst()
                 dropped += 1
@@ -43,15 +63,39 @@ final class EventQueue: Sendable {
 
     /// The oldest `max` events whose key is not in `excluding`.
     func peek(max: Int, excluding: Set<String> = []) -> [QueuedEvent] {
-        locked { Array((read() ?? []).lazy.filter { !excluding.contains($0.key) }.prefix(max)) }
+        locked { Array((read() ?? []).lazy.map(\.event).filter { !excluding.contains($0.key) }.prefix(max)) }
     }
 
     func remove(keys: Set<String>) {
         guard !keys.isEmpty else { return }
         locked {
             guard let items = read() else { return }
-            let kept = items.filter { !keys.contains($0.key) }
+            let kept = items.filter { !keys.contains($0.event.key) }
             if kept.count != items.count { _ = write(kept) }
+        }
+    }
+
+    /// Records that these events were sent but not acknowledged. An event reaching `maxMisses` is removed.
+    /// Returns the keys removed.
+    func noteUnacknowledged(keys: Set<String>) -> Set<String> {
+        guard !keys.isEmpty else { return [] }
+        return locked {
+            guard var items = read() else { return [] }
+            var gone = Set<String>()
+            var changed = false
+            items = items.compactMap { entry in
+                guard keys.contains(entry.event.key) else { return entry }
+                var e = entry
+                e.misses = (e.misses ?? 0) + 1
+                changed = true
+                if e.misses! >= Self.maxMisses {
+                    gone.insert(e.event.key)
+                    return nil
+                }
+                return e
+            }
+            if changed { _ = write(items) }
+            return gone
         }
     }
 
@@ -67,8 +111,10 @@ final class EventQueue: Sendable {
         return fileLock.withLock(body)
     }
 
-    /// The stored events: empty when there is no file or it is corrupt; nil on an I/O error (do not overwrite then).
-    private func read() -> [QueuedEvent]? {
+    /// The stored entries: empty when there is no file; nil on an I/O error (do not overwrite then). Undecodable
+    /// elements are dropped, an undecodable file counts as empty; either is rewritten at once so the WARN is not
+    /// repeated. Must be called under the lock.
+    private func read() -> [Entry]? {
         let data: Data
         do {
             data = try Data(contentsOf: fileURL)
@@ -79,15 +125,22 @@ final class EventQueue: Sendable {
             return nil
         }
         do {
-            return try ISO8601Coding.makeDecoder().decode([QueuedEvent].self, from: data)
+            let all = try ISO8601Coding.makeDecoder().decode([Lossy].self, from: data)
+            let entries = all.compactMap(\.entry)
+            if entries.count != all.count {
+                SDKLog.warn("tracking.event_dropped", ["count": "\(all.count - entries.count)", "reason": "queue_corrupt"])
+                _ = write(entries)
+            }
+            return entries
         } catch {
             let n = ((try? JSONSerialization.jsonObject(with: data)) as? [Any])?.count ?? 0
             SDKLog.warn("tracking.event_dropped", ["count": "\(n)", "reason": "queue_corrupt"])
+            _ = write([])
             return []
         }
     }
 
-    private func write(_ items: [QueuedEvent]) -> Bool {
+    private func write(_ items: [Entry]) -> Bool {
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             let data = try ISO8601Coding.makeEncoder().encode(items)

@@ -105,13 +105,79 @@ final class EventSenderTests: XCTestCase {
         XCTAssertFalse(log.messages.contains { $0.contains(goodToken) })
     }
 
-    func testUnknownOutcomeKeepsEvent() async {
-        add(2)
-        StubURLProtocol.reset { _ in Self.items([("t0", "ACCEPTED"), ("t1", "WEIRD")]) }
+    func testUnknownOutcomeOrMissingItemDroppedAfterSecondFlush() async {
+        add(3)
+        StubURLProtocol.reset { _ in Self.items([("t0", "ACCEPTED"), ("t1", "WEIRD")]) } // t2 not mentioned
+        var r = await makeSender().flush(deadline: nil)
+        XCTAssertEqual(r, .retryLater)
+        XCTAssertEqual(queue.peek(max: 10).map(\.trackingId), ["t1", "t2"])
+        XCTAssertEqual(eventRequests().count, 1)
+        XCTAssertFalse(log.messages.contains { $0.contains("unacknowledged") })
+
+        r = await makeSender().flush(deadline: nil)
+        XCTAssertEqual(r, .done)
+        XCTAssertEqual(queue.count, 0)
+        for id in ["t1", "t2"] {
+            XCTAssertTrue(log.messages.contains { $0.hasPrefix("warn") && $0.contains("reason=unacknowledged") && $0.contains("trackingId=\(id)") })
+        }
+    }
+
+    func testAcknowledgedEventResetsNothingButIsRemoved() async {
+        add(1)
+        StubURLProtocol.reset { _ in Self.items([]) }
+        _ = await makeSender().flush(deadline: nil)
+        StubURLProtocol.reset { _ in Self.items([("t0", "ACCEPTED")]) }
+        let r = await makeSender().flush(deadline: nil)
+        XCTAssertEqual(r, .done)
+        XCTAssertFalse(log.messages.contains { $0.contains("unacknowledged") })
+    }
+
+    func testRefreshAnswered429StoresRetryNotBeforeAndSendsNothing() async {
+        register(staleToken)
+        add(1)
+        StubURLProtocol.reset { _ in .response(status: 429, headers: ["Retry-After": "90"]) }
         let r = await makeSender().flush(deadline: nil)
         XCTAssertEqual(r, .retryLater)
-        XCTAssertEqual(queue.peek(max: 10).map(\.trackingId), ["t1"])
-        XCTAssertEqual(eventRequests().count, 1)
+        XCTAssertEqual(state.retryNotBefore, now.addingTimeInterval(90))
+        XCTAssertEqual(StubURLProtocol.requests.map(\.url.path), ["/v1/devices/token:refresh"])
+        XCTAssertEqual(queue.count, 1)
+    }
+
+    func testSaveFailureAfterRefreshKeepsEventsRetryLater() async {
+        add(1)
+        StubURLProtocol.reset { req in
+            req.url?.path == "/v1/devices/token:refresh"
+                ? .response(status: 200, body: Data(#"{"deviceToken":"not-a-jwt","expiresAt":"2023-11-14T23:13:20Z"}"#.utf8))
+                : .response(status: 401)
+        }
+        let r = await makeSender().flush(deadline: nil)
+        XCTAssertEqual(r, .retryLater)
+        XCTAssertEqual(queue.count, 1)
+        XCTAssertEqual(StubURLProtocol.requests.map(\.url.path), ["/v1/events", "/v1/devices/token:refresh"])
+        guard case .registered = tokens.load() else { return XCTFail() }
+    }
+
+    func testDeadlineAlreadyPassedSendsNothing() async {
+        add(2)
+        let r = await makeSender().flush(deadline: now.addingTimeInterval(-1))
+        XCTAssertEqual(r, .retryLater)
+        XCTAssertTrue(StubURLProtocol.requests.isEmpty)
+    }
+
+    func testEarlyRefreshConsumedGateThen401IsExhausted() async {
+        register(staleToken)
+        add(1)
+        let fresh = freshToken
+        StubURLProtocol.reset { req in
+            req.url?.path == "/v1/devices/token:refresh"
+                ? .response(status: 200, body: Data(#"{"deviceToken":"\#(fresh)","expiresAt":"2023-11-14T23:13:20Z"}"#.utf8))
+                : .response(status: 401)
+        }
+        let r = await makeSender().flush(deadline: nil)
+        XCTAssertEqual(r, .retryLater)
+        XCTAssertEqual(StubURLProtocol.requests.map(\.url.path), ["/v1/devices/token:refresh", "/v1/events"])
+        XCTAssertTrue(log.messages.contains { $0.hasPrefix("warn") && $0.contains("auth.failed") && $0.contains("exhausted") })
+        XCTAssertEqual(queue.count, 1)
     }
 
     func testFlushKeepsEventsOn429And5xxAndNetworkError() async {
@@ -144,7 +210,7 @@ final class EventSenderTests: XCTestCase {
         r = await makeSender().flush(deadline: nil)
         XCTAssertEqual(r, .retryLater)
 
-        // transport error: the stub hangs, the 2 s request timeout fires
+        // transport error: the stub hangs, the 0.2 s request timeout fires
         let api = DeviceAPI(baseURL: URL(string: "http://localhost:8080")!, appId: "app1", userAgent: "x",
                             configuration: StubURLProtocol.configuration(), timeout: 0.2)
         StubURLProtocol.reset { _ in .hang }
