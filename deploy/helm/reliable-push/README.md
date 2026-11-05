@@ -22,5 +22,18 @@ least one app under `config.apps`. A missing one fails `helm template` with a me
   concurrency; see docs/operations.md for how they relate.
 - **Security:** non-root, read-only root filesystem, no privilege escalation, all capabilities dropped, `RuntimeDefault`
   seccomp, `/tmp` as `emptyDir`. No `runAsUser`/`fsGroup` by default (platform values may add them).
+- **Exposure:** `ingress` (Kubernetes Ingress, `values-gke.yaml` enables it with class `gce`) or `route` (OpenShift,
+  `values-openshift.yaml`). Both route only the prefix `/v1` to `<fullname>-api:http`; `/actuator` and port 8081 are never
+  exposed (an Ingress path outside `/v1` fails the render).
+- **Autoscaling:** `autoscaling.api.enabled` adds a CPU HPA for the API only (worker scaling follows the backlog; set
+  `worker.replicas`). In `combined` mode the HPA targets the combined Deployment, so the workers scale with the API; use
+  `mode: split` to autoscale the API alone. While enabled, `api.replicas` is not rendered on the scaled Deployment.
+- **Monitoring:** `metrics.serviceMonitor.enabled` (Prometheus Operator, OpenShift user workload monitoring) or
+  `metrics.podMonitoring.enabled` (GKE Managed Prometheus) scrape `/actuator/prometheus` on the `management` port.
+- **Platforms:** `-f values-gke.yaml` (UID 1001, GID 0, Ingress, PodMonitoring, Cloud SQL Auth Proxy sidecar example) or
+  `-f values-openshift.yaml` (Route, ServiceMonitor, no fixed UID/GID/fsGroup so restricted-v2 applies). Both are
+  overlays: add your own values file for the required keys.
+- **helm test:** `helm test <release>` runs a pod (busybox, pinned by digest in `test.image`) that GETs
+  `/actuator/health/readiness` through `<fullname>-management`.
 
-Checks (Docker only, pinned images from `deploy/helm/tools.env`): `deploy/helm/scripts/validate.sh`.
+Checks (Docker only, pinned images from `deploy/helm/tools.env`): `deploy/helm/scripts/validate.sh` (lint, unit tests, kubeconform on four renders; the Route schema is vendored in `deploy/helm/schemas`, the other CRDs come from a pinned datreeio/CRDs-catalog commit).

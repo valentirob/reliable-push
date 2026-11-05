@@ -1,0 +1,17 @@
+{{- if .Values.metrics.podMonitoring.enabled }}
+{{- /* GKE Managed Service for Prometheus. */ -}}
+apiVersion: monitoring.googleapis.com/v1
+kind: PodMonitoring
+metadata:
+  name: {{ include "rp.fullname" . }}
+  labels:
+    {{- include "rp.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "rp.selectorLabels" . | nindent 6 }}
+  endpoints:
+    - port: management
+      path: /actuator/prometheus
+      interval: {{ .Values.metrics.podMonitoring.interval }}
+{{- end }}

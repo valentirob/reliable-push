@@ -21,6 +21,7 @@ metadata:
   name: {{ include "rp.fullname" . }}-management
   labels:
     {{- include "rp.labels" . | nindent 4 }}
+    app.kubernetes.io/component: management
 spec:
   type: ClusterIP
   selector:

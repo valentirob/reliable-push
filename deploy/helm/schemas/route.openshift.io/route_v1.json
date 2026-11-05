@@ -1,0 +1,70 @@
+{
+  "$comment": "Reduced JSON Schema of route.openshift.io/v1 Route for kubeconform -strict. Not in datreeio/CRDs-catalog, so vendored by hand from the Go types in github.com/openshift/api route/v1/types.go (commit cbba78217833ef82cbf6541e2be746d334ccfd54, 2026-10-28). Only the fields a Route may set are listed; status is not validated.",
+  "type": "object",
+  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "properties": {
+    "apiVersion": { "type": "string", "enum": ["route.openshift.io/v1"] },
+    "kind": { "type": "string", "enum": ["Route"] },
+    "metadata": { "type": "object" },
+    "status": { "type": "object" },
+    "spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["to"],
+      "properties": {
+        "host": { "type": "string", "maxLength": 253 },
+        "subdomain": { "type": "string" },
+        "path": { "type": "string", "pattern": "^/" },
+        "to": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "name"],
+          "properties": {
+            "kind": { "type": "string", "enum": ["Service"] },
+            "name": { "type": "string", "minLength": 1 },
+            "weight": { "type": "integer", "minimum": 0, "maximum": 256 }
+          }
+        },
+        "alternateBackends": {
+          "type": "array",
+          "maxItems": 3,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "name"],
+            "properties": {
+              "kind": { "type": "string", "enum": ["Service"] },
+              "name": { "type": "string", "minLength": 1 },
+              "weight": { "type": "integer", "minimum": 0, "maximum": 256 }
+            }
+          }
+        },
+        "port": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["targetPort"],
+          "properties": { "targetPort": { "type": ["integer", "string"] } }
+        },
+        "tls": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["termination"],
+          "properties": {
+            "termination": { "type": "string", "enum": ["edge", "reencrypt", "passthrough"] },
+            "insecureEdgeTerminationPolicy": { "type": "string", "enum": ["Allow", "Disable", "Redirect", "None", ""] },
+            "certificate": { "type": "string" },
+            "key": { "type": "string" },
+            "caCertificate": { "type": "string" },
+            "destinationCACertificate": { "type": "string" },
+            "externalCertificate": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": { "name": { "type": "string" } }
+            }
+          }
+        },
+        "wildcardPolicy": { "type": "string", "enum": ["None", "Subdomain"] }
+      }
+    }
+  }
+}

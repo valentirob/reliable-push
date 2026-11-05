@@ -1,0 +1,43 @@
+{{- if .Values.ingress.enabled }}
+{{- /* Only the public API prefix is routed, to the API Service; /actuator and port 8081 are never exposed. */ -}}
+{{- range $h := .Values.ingress.hosts }}
+{{- range $p := $h.paths }}
+{{- if not (or (eq $p "/v1") (hasPrefix "/v1/" $p)) }}
+{{- fail (printf "ingress.hosts: path %q is not allowed, only /v1 and its sub-paths are routed" $p) }}
+{{- end }}
+{{- end }}
+{{- end }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "rp.fullname" . }}
+  labels:
+    {{- include "rp.labels" . | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.ingress.className }}
+  ingressClassName: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.ingress.tls }}
+  tls:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    {{- range $h := .Values.ingress.hosts }}
+    - host: {{ $h.host | quote }}
+      http:
+        paths:
+          {{- range $p := $h.paths }}
+          - path: {{ $p | quote }}
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "rp.fullname" $ }}-api
+                port:
+                  name: http
+          {{- end }}
+    {{- end }}
+{{- end }}

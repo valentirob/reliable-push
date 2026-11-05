@@ -19,7 +19,9 @@ metadata:
     {{- include "rp.labels" $ | nindent 4 }}
     app.kubernetes.io/component: {{ $role.component }}
 spec:
+  {{- if not (and $api $.Values.autoscaling.api.enabled) }}
   replicas: {{ $role.cfg.replicas }}
+  {{- end }}
   {{- if eq $role.component "worker" }}
   strategy:
     type: {{ $.Values.worker.strategy }}

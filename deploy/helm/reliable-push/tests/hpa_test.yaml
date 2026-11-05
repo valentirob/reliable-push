@@ -1,0 +1,88 @@
+suite: hpa
+templates:
+  - hpa.yaml
+  - deployment.yaml
+  - configmap.yaml
+values:
+  - ../ci/default-values.yaml
+release:
+  name: rp
+tests:
+  - it: renders nothing by default
+    template: hpa.yaml
+    asserts:
+      - hasDocuments:
+          count: 0
+  - it: scales the combined Deployment on CPU in combined mode
+    template: hpa.yaml
+    set:
+      autoscaling.api.enabled: true
+    asserts:
+      - isKind:
+          of: HorizontalPodAutoscaler
+      - isAPIVersion:
+          of: autoscaling/v2
+      - equal:
+          path: spec.scaleTargetRef
+          value: { apiVersion: apps/v1, kind: Deployment, name: rp-reliable-push }
+      - equal:
+          path: spec.minReplicas
+          value: 2
+      - equal:
+          path: spec.maxReplicas
+          value: 10
+      - equal:
+          path: spec.metrics
+          value:
+            - type: Resource
+              resource:
+                name: cpu
+                target: { type: Utilization, averageUtilization: 70 }
+  - it: scales only the API Deployment in split mode
+    template: hpa.yaml
+    set:
+      mode: split
+      autoscaling.api.enabled: true
+      autoscaling.api.minReplicas: 3
+      autoscaling.api.maxReplicas: 6
+      autoscaling.api.targetCPUUtilizationPercentage: 60
+    asserts:
+      - hasDocuments:
+          count: 1
+      - equal:
+          path: spec.scaleTargetRef.name
+          value: rp-reliable-push-api
+      - equal:
+          path: spec.minReplicas
+          value: 3
+      - equal:
+          path: spec.maxReplicas
+          value: 6
+      - equal:
+          path: spec.metrics[0].resource.target.averageUtilization
+          value: 60
+  - it: leaves replicas to the HPA on the API Deployment
+    template: deployment.yaml
+    set:
+      mode: split
+      autoscaling.api.enabled: true
+    documentIndex: 0
+    asserts:
+      - notExists:
+          path: spec.replicas
+  - it: keeps the worker replicas fixed when the API autoscales
+    template: deployment.yaml
+    set:
+      mode: split
+      autoscaling.api.enabled: true
+    documentIndex: 1
+    asserts:
+      - equal:
+          path: spec.replicas
+          value: 2
+  - it: keeps replicas when autoscaling is off
+    template: deployment.yaml
+    asserts:
+      - equal:
+          path: spec.replicas
+          value: 2

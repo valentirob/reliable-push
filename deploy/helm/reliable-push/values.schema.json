@@ -56,6 +56,63 @@
         "annotations": { "type": "object" }
       }
     },
+    "ingress": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "className": { "type": "string" },
+        "annotations": { "type": "object" },
+        "hosts": { "type": "array" },
+        "tls": { "type": "array" }
+      }
+    },
+    "route": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "host": { "type": "string" },
+        "annotations": { "type": "object" },
+        "tls": { "type": "object" }
+      }
+    },
+    "autoscaling": {
+      "type": "object",
+      "properties": {
+        "api": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "minReplicas": { "type": "integer", "minimum": 1 },
+            "maxReplicas": { "type": "integer", "minimum": 1 },
+            "targetCPUUtilizationPercentage": { "type": "integer", "minimum": 1, "maximum": 100 }
+          }
+        }
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "properties": {
+        "serviceMonitor": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "interval": { "type": "string" },
+            "labels": { "type": "object" }
+          }
+        },
+        "podMonitoring": {
+          "type": "object",
+          "properties": { "enabled": { "type": "boolean" }, "interval": { "type": "string" } }
+        }
+      }
+    },
+    "test": {
+      "type": "object",
+      "properties": {
+        "image": { "type": "string" },
+        "runAsUser": { "type": ["integer", "null"] }
+      }
+    },
     "podAnnotations": { "type": "object" },
     "extraEnv": { "type": "array" },
     "extraVolumes": { "type": "array" },

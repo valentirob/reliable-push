@@ -89,6 +89,49 @@ serviceAccount:
   name: ""
   annotations: {}
 
+# Exposure. Only the public API prefix /v1 is ever routed, to <fullname>-api:http; /actuator and port 8081 are not.
+ingress:               # Kubernetes Ingress (GKE: className gce)
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: push.example.com
+      paths: [/v1]     # each path must be /v1 or below it
+  tls: []              # [{ secretName: rp-tls, hosts: [push.example.com] }]
+route:                 # OpenShift Route (route.openshift.io/v1), path /v1
+  enabled: false
+  host: ""             # empty: OpenShift generates one
+  annotations: {}
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+
+# CPU autoscaling of the API only; worker scaling follows the backlog, not CPU (set worker.replicas).
+# In combined mode the HPA targets the combined Deployment (API and worker in the same pods), so the workers scale
+# with it; prefer mode: split when you need to autoscale. While enabled, api.replicas is not rendered on that Deployment.
+autoscaling:
+  api:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+
+metrics:
+  serviceMonitor:      # Prometheus Operator / OpenShift user workload monitoring
+    enabled: false
+    interval: 30s
+    labels: {}         # extra labels, e.g. the release label your Prometheus selects on
+  podMonitoring:       # GKE Managed Service for Prometheus
+    enabled: false
+    interval: 30s
+
+# `helm test` pod: GETs /actuator/health/readiness through <fullname>-management. Runs with podSecurityContext and
+# securityContext; test.runAsUser is used only when podSecurityContext sets no runAsUser (busybox runs as root otherwise,
+# which runAsNonRoot refuses). OpenShift values set it to null (the SCC assigns the UID).
+test:
+  image: busybox:1.38.0@sha256:a46257e06c82ad85242d0d38077d0a52d9896389ca60a1a59d3463db586e5fa4
+  runAsUser: 65534
+
 podAnnotations: {}
 extraEnv: []
 extraVolumes: []

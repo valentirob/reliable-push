@@ -1,0 +1,65 @@
+suite: route
+templates:
+  - route.yaml
+values:
+  - ../ci/default-values.yaml
+release:
+  name: rp
+tests:
+  - it: renders nothing by default
+    asserts:
+      - hasDocuments:
+          count: 0
+  - it: exposes only /v1 of the API service with edge TLS
+    set:
+      route.enabled: true
+      route.host: push.apps.example.com
+    asserts:
+      - isKind:
+          of: Route
+      - isAPIVersion:
+          of: route.openshift.io/v1
+      - equal:
+          path: spec.host
+          value: push.apps.example.com
+      - equal:
+          path: spec.path
+          value: /v1
+      - equal:
+          path: spec.to
+          value: { kind: Service, name: rp-reliable-push-api, weight: 100 }
+      - equal:
+          path: spec.port.targetPort
+          value: http
+      - equal:
+          path: spec.tls
+          value:
+            termination: edge
+            insecureEdgeTerminationPolicy: Redirect
+      - equal:
+          path: spec.wildcardPolicy
+          value: None
+  - it: omits the host when empty so OpenShift generates one
+    set:
+      route.enabled: true
+    asserts:
+      - notExists:
+          path: spec.host
+  - it: never routes the management port or service
+    set:
+      route.enabled: true
+    asserts:
+      - notEqual:
+          path: spec.port.targetPort
+          value: management
+      - notEqual:
+          path: spec.to.name
+          value: rp-reliable-push-management
+  - it: targets the API service in split mode
+    set:
+      mode: split
+      route.enabled: true
+    asserts:
+      - equal:
+          path: spec.to.name
+          value: rp-reliable-push-api

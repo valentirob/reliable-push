@@ -1,0 +1,29 @@
+{{- if .Values.route.enabled }}
+{{- /* OpenShift Route: only /v1 of the API Service; the management port is never routed. */ -}}
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: {{ include "rp.fullname" . }}
+  labels:
+    {{- include "rp.labels" . | nindent 4 }}
+  {{- with .Values.route.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.route.host }}
+  host: {{ . | quote }}
+  {{- end }}
+  path: /v1
+  to:
+    kind: Service
+    name: {{ include "rp.fullname" . }}-api
+    weight: 100
+  port:
+    targetPort: http
+  {{- with .Values.route.tls }}
+  tls:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  wildcardPolicy: None
+{{- end }}
