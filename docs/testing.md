@@ -70,7 +70,7 @@ The default build never downloads Playwright. GitHub Actions runs the client, ha
 ## End-to-end tests (local only)
 
 `./scripts/e2e.sh [--scenario <name>] [--keep]` (Windows, PowerShell 7: `pwsh scripts/e2e.ps1 [-Scenario <name>] [-Keep]`; the
-PowerShell scripts have not been run on Windows). Needs Docker with the compose plugin, `curl`, and ports 8080 and 8090 free
+PowerShell scripts have not been run on Windows). Needs Docker with the compose plugin, `curl`, and ports 8080, 8090 and 8091 free
 on 127.0.0.1. The images build inside Docker, but `console-smoke` (so the full 17-entry run) calls the host `./mvnw`: it needs
 JDK 21 and network access (Maven artifacts, Playwright's Chromium). With Colima: `export DOCKER_HOST=unix://$HOME/.colima/default/docker.sock`.
 
@@ -91,7 +91,7 @@ JDK 21 and network access (Maven artifacts, Playwright's Chromium). With Colima:
   when scenarios fail (unless `--keep`).
 - **Failures:** `grep -B2 -A6 '"FAILED"' harness/build/e2e/summary.json`, then search the logs by `trace.id` or
   `rp.tracking_id`.
-- **Safety checks:** the script refuses to start if port 8080 or 8090 is taken (it names the port) and if a stack of an earlier
+- **Safety checks:** the script refuses to start if port 8080, 8090 or 8091 is taken (it names the port) and if a stack of an earlier
   `--keep` run exists it removes it first. If a service is not ready within `E2E_READY_TIMEOUT` seconds (default 120) it names
   the container and prints its last log lines.
 - The agent workflow is in [`.agents/skills/run-e2e/SKILL.md`](../.agents/skills/run-e2e/SKILL.md).
@@ -163,12 +163,19 @@ simulator's; the only endpoint that returns one, never logged) and `POST /consol
 platform, label}` (201; kept in memory, at most 50). Real devices show in the Devices list as `REAL` (the harness holds no
 token for them, so no refresh/offline buttons); `GET /console/api/devices` marks every entry `"kind": "REAL"` or
 `"SIMULATED"`. The push preview also shows the `adb shell am broadcast` line for the sample app's debug receiver; its values
-are single-quoted twice (host shell and device shell), so paste it into a POSIX host shell (not PowerShell or cmd).
+are single-quoted twice (host shell and device shell), so paste it into a POSIX host shell (not PowerShell or cmd). For the iOS
+sample app the preview also shows `xcrun simctl openurl booted 'rpsample://debug-push?...'` (percent-encoded, single-quoted).
+
+The iOS Simulator shares the Mac's network and has no airplane mode, so the iOS sample reaches the backend through a TCP proxy
+in the harness container, published on `127.0.0.1:8091` only (to `api:8080`; `HARNESS_DEVICEPROXYTARGET`, and port 8091 must be
+free on the host). `GET /console/api/device-network` returns `{online, enabled}` and `POST /console/api/device-network
+{"online": false}` switches it: offline closes every open connection and closes new ones at once, so clients see a transport
+error, not an HTTP status. The Devices screen has the same switch. Without the target (plain `mvn` runs) nothing listens.
 
 ## Load tests (local only)
 
 `./scripts/load.sh [--simulation ingest|burst|all] [--api-pool N] [--worker-concurrency N] [--worker-pool N] [--workers 1|2] [--keep]`
-(defaults: `all`, 10, 100, 10, 1). Never run in CI. Needs Docker with the compose plugin and ports 8080 and 8090 free on
+(defaults: `all`, 10, 100, 10, 1). Never run in CI. Needs Docker with the compose plugin and ports 8080, 8090 and 8091 free on
 127.0.0.1, so it cannot run next to the E2E or demo stack. `--simulation all` takes about 15 minutes.
 
 - **Stack:** the E2E compose file plus `loadtest/compose/load.override.yml` (project `reliable-push-load`, real clock, API

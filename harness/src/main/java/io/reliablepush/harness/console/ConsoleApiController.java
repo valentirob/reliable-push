@@ -9,6 +9,7 @@ import io.reliablepush.harness.devices.AndroidMode;
 import io.reliablepush.harness.fcm.FcmPusher;
 import io.reliablepush.harness.devices.BackendCallException;
 import io.reliablepush.harness.devices.DeviceBehaviour;
+import io.reliablepush.harness.devices.DeviceProxy;
 import io.reliablepush.harness.devices.DeviceSimulator;
 import io.reliablepush.harness.devices.GrantMinter;
 import io.reliablepush.harness.devices.Platform;
@@ -111,10 +112,11 @@ public class ConsoleApiController {
     private final GrantMinter grants;
     private final RealDeviceRegistry realDevices;
     private final FcmPusher fcm;
+    private final DeviceProxy deviceProxy;
 
     public ConsoleApiController(HarnessProperties properties, DeviceSimulator simulator, FakeSender sender,
                                 Timeline timeline, WebhookInbox inbox, BackendLogTail logs, GrantMinter grants,
-                                RealDeviceRegistry realDevices, FcmPusher fcm) {
+                                RealDeviceRegistry realDevices, FcmPusher fcm, DeviceProxy deviceProxy) {
         this.properties = properties;
         this.simulator = simulator;
         this.sender = sender;
@@ -124,6 +126,7 @@ public class ConsoleApiController {
         this.grants = grants;
         this.realDevices = realDevices;
         this.fcm = fcm;
+        this.deviceProxy = deviceProxy;
     }
 
     // ---- apps ------------------------------------------------------------------------------------------------
@@ -246,6 +249,22 @@ public class ConsoleApiController {
         return deviceJson(device(id));
     }
 
+    // ---- device traffic proxy -----------------------------------------------------------------------------
+
+    @GetMapping("/device-network")
+    public Map<String, Object> deviceNetwork() {
+        return Map.of("online", deviceProxy.online(), "enabled", deviceProxy.enabled());
+    }
+
+    @PostMapping("/device-network")
+    public Map<String, Object> setDeviceNetwork(@RequestBody OnlineRequest r) {
+        if (r.online() == null) {
+            throw new IllegalArgumentException("online is required");
+        }
+        deviceProxy.setOnline(r.online());
+        return deviceNetwork();
+    }
+
     // ---- push and notifications ------------------------------------------------------------------------------
 
     @PostMapping("/push")
@@ -314,6 +333,7 @@ public class ConsoleApiController {
         m.put("fcmV1", PayloadPreview.fcmV1(tid, t, b));
         m.put("fcmV2", PayloadPreview.fcmV2(tid, t, b));
         m.put("androidDebugBroadcast", PayloadPreview.androidDebugBroadcast(tid, t, b));
+        m.put("iosDebugOpenUrl", PayloadPreview.iosDebugOpenUrl(tid, t, b));
         return m;
     }
 

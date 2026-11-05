@@ -3,7 +3,7 @@
 #   docker compose -p reliable-push-e2e -f harness/compose/docker-compose.yml run --rm secrets
 #   docker compose -p reliable-push-e2e -f harness/compose/docker-compose.yml up -d --build
 # Per-run secrets live in harness/build/e2e/{secrets,db}.env (git-ignored), written by the one-shot `secrets` service.
-# Published ports bind 127.0.0.1 only: backend API 8080, harness/console 8090.
+# Published ports bind 127.0.0.1 only: backend API 8080, harness/console 8090, device-traffic proxy 8091.
 
 name: reliable-push-e2e
 
@@ -108,8 +108,11 @@ services:
       HARNESS_BACKENDLOGDIR: /tmp/rp-logs
       # the backend runs the fast clock (1 minute = 1 s): console countdowns use the same scale
       HARNESS_MINUTESECONDS: "${HARNESS_MINUTESECONDS:-1}"
+      # TCP proxy for the iOS Simulator (no airplane mode): 127.0.0.1:8091 -> api:8080, switched from the console
+      HARNESS_DEVICEPROXYTARGET: http://api:8080
     ports:
       - "127.0.0.1:8090:8090"
+      - "127.0.0.1:8091:8091"
     depends_on:
       - api
 

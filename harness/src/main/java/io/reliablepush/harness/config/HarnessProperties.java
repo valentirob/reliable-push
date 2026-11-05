@@ -18,7 +18,12 @@ public record HarnessProperties(
         @NotNull URI backendUrl,
         @NotNull Path backendLogDir,
         @NotEmpty Map<String, @NotNull @Valid HarnessApp> apps,
-        @Positive Integer minuteSeconds) {
+        @Positive Integer minuteSeconds,
+        URI deviceProxyTarget,
+        @Positive Integer deviceProxyPort) {
+
+    /** Port the device-traffic proxy listens on inside the container. */
+    public static final int DEFAULT_DEVICE_PROXY_PORT = 8091;
 
     /** One backend "minute" in seconds unless the fast clock is on ({@code harness.minute-seconds=1}). */
     public static final int DEFAULT_MINUTE_SECONDS = 60;
@@ -28,7 +33,15 @@ public record HarnessProperties(
     }
 
     public HarnessProperties(URI backendUrl, Path backendLogDir, Map<String, HarnessApp> apps) {
-        this(backendUrl, backendLogDir, apps, null);
+        this(backendUrl, backendLogDir, apps, null, null, null);
+    }
+
+    public HarnessProperties(URI backendUrl, Path backendLogDir, Map<String, HarnessApp> apps, Integer minuteSeconds) {
+        this(backendUrl, backendLogDir, apps, minuteSeconds, null, null);
+    }
+
+    public int proxyListenPort() {
+        return deviceProxyPort == null ? DEFAULT_DEVICE_PROXY_PORT : deviceProxyPort;
     }
 
     /** Seconds per backend minute, for the console countdowns (must match the backend's fast clock). */

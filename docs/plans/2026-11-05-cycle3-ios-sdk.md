@@ -391,16 +391,16 @@ Requirements: FR-4 to FR-8, FR-10, NFR-1, NFR-5, NFR-6, NFR-10. Rules: `.agents/
   - `POST /console/api/device-network {online: boolean}` → `200 {online}`; `GET /console/api/device-network` → `{online}`. The existing `ConsoleRequestGuard` applies.
   - `PayloadPreview.iosDebugOpenUrl(tid, title, body)`: `xcrun simctl openurl booted 'rpsample://debug-push?rp_tid=…&title=…&body=…'`, with percent-encoded values and the whole URL single-quoted for the shell. It is shown in the console preview next to the APNs JSON.
 
-- [ ] **Step 1: Failing tests:**
+- [x] **Step 1: Failing tests:**
   - `forwardsRequestAndResponse` (a JDK `HttpServer` as target)
   - `offlineRefusesAndClosesOpenConnections`
   - `backOnlineForwardsAgain`
   - `deviceNetworkEndpointTogglesProxy` (IT)
   - `iosDebugOpenUrlEncodesAndQuotes` (title with a quote, an ampersand and a space)
-- [ ] **Step 2: Run** `./mvnw -B -pl harness -am verify` → FAIL. **Step 3: Implement.** **Step 4: Run** → PASS.
+- [x] **Step 2: Run** `./mvnw -B -pl harness -am verify` → FAIL. **Step 3: Implement.** **Step 4: Run** → PASS.
   - `./scripts/e2e.sh` → `E2E: 17/17 passed`
   - `./scripts/android-e2e.sh` → `Android E2E: 8/8 passed, 1 skipped`
-- [ ] **Step 5: Commit** `feat(harness): device traffic proxy with offline switch and ios preview`
+- [x] **Step 5: Commit** `feat(harness): device traffic proxy with offline switch and ios preview`
 
 ### Task 6: Sample app and Simulator E2E
 

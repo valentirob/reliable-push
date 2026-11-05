@@ -91,4 +91,12 @@ class PayloadPreviewTest {
                 "broadcast", "-a", "io.reliablepush.sample.DEBUG_PUSH", "-n", "io.reliablepush.sample/.DebugPushReceiver",
                 "--es", "rp_tid", TID.toString(), "--es", "title", title, "--es", "body", body);
     }
+
+    @Test
+    void iosDebugOpenUrlEncodesAndQuotes() {
+        String cmd = PayloadPreview.iosDebugOpenUrl(TID, "It's a&b c", "B\u00e9 ?");
+
+        assertThat(cmd).isEqualTo("xcrun simctl openurl booted 'rpsample://debug-push?rp_tid=" + TID
+                + "&title=It%27s%20a%26b%20c&body=B%C3%A9%20%3F'");
+    }
 }

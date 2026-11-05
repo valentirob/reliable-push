@@ -10,7 +10,7 @@ class ConsoleApiErrorsTest {
 
     @Test
     void unknownIllegalStateIsAGeneric502() {
-        var controller = new ConsoleApiController(null, null, null, null, null, null, null, null, null);
+        var controller = new ConsoleApiController(null, null, null, null, null, null, null, null, null, null);
 
         var r = controller.unexpected(new IllegalStateException("internal detail zzsecretzz"));
 

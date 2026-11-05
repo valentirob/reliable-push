@@ -81,7 +81,7 @@ export function mount(root, ctx) {
 
   async function showPreviews(tid) {
     const p = await api('/payload-preview' + query({ trackingId: tid, title: title.value, body: text.value }));
-    previews.replaceChildren(...[['APNs', p.apns], ['FCM v1 (Android mode v1)', p.fcmV1], ['FCM v2 (Android mode v2)', p.fcmV2], ['adb debug broadcast (sample app on an emulator; paste into a host shell)', p.androidDebugBroadcast]].map(([name, payload]) => {
+    previews.replaceChildren(...[['APNs', p.apns], ['FCM v1 (Android mode v1)', p.fcmV1], ['FCM v2 (Android mode v2)', p.fcmV2], ['adb debug broadcast (sample app on an emulator; paste into a host shell)', p.androidDebugBroadcast], ['simctl debug open-url (iOS sample app on the Simulator; paste into a host shell)', p.iosDebugOpenUrl]].map(([name, payload]) => {
       const btn = el('button', { type: 'button', text: 'Copy' });
       btn.addEventListener('click', () => copyText(payload, btn));
       return el('div', { class: 'card' }, el('h3', { text: name }), btn, el('pre', { text: payload }));
