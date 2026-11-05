@@ -62,6 +62,12 @@ services:
       context: ../../loadtest
       dockerfile: Dockerfile
     cpus: "1"
+    # Each virtual user opens its own connections and closes them at its end, so the generator holds ~60 s of
+    # TIME_WAIT sockets: 500 users/s (ingest) or 1,500/s (burst) exhaust the default 28k ephemeral ports
+    # (connect: "Cannot assign requested address"). Wider range plus TIME_WAIT reuse for outgoing connections.
+    sysctls:
+      net.ipv4.ip_local_port_range: "1024 65535"
+      net.ipv4.tcp_tw_reuse: "1"
     user: "${E2E_UID:-1000}:${E2E_GID:-1000}"
     working_dir: /work
     command: ["sleep", "infinity"]
