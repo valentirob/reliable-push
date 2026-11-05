@@ -96,6 +96,27 @@ JDK 21 and network access (Maven artifacts, Playwright's Chromium). With Colima:
   the container and prints its last log lines.
 - The agent workflow is in [`.agents/skills/run-e2e/SKILL.md`](../.agents/skills/run-e2e/SKILL.md).
 
+## Real FCM pushes (optional, maintainer's Firebase project)
+
+`./scripts/android-e2e.sh` (emulator, needs the Android SDK) normally ends with `Android E2E: 8/8 passed, 1 skipped`: the
+ninth entry, `fcm-real-delivery`, sends a push through the real FCM HTTP v1 API and checks that Google Play services wakes
+the killed sample app, which reports `DELIVERED`. It runs only when both files below exist; without them it is `SKIPPED`
+(counted as neither passed nor failed, exit code 0) and every build and test passes as usual.
+
+1. In the Firebase console create a project and add an Android app with package `io.reliablepush.sample`.
+2. Download `google-services.json` into `android/sample/` (the Google Services Gradle plugin is applied only when it exists).
+3. Create a service-account key that may send FCM messages (role "Firebase Cloud Messaging API Admin") and save it as
+   `harness/build/fcm/service-account.json`; `chmod 600` it. Compose mounts `harness/build/fcm/` read-only at `/run/fcm`,
+   and the harness container runs as the invoking user so it can read the key.
+4. Run `./scripts/android-e2e.sh --test fcm-real-delivery`. The emulator needs Google Play services (the default AVD has
+   them) and internet access.
+
+Both files are git-ignored and never committed, logged or printed. The harness reports `fcmEnabled` in
+`GET /console/api/apps`, the console API shows only `hasFcmToken` for a device, and a push to a user with real devices that
+reported an FCM token adds an `fcm_push` entry (`SENT`, `UNREGISTERED` or `FAILED` with the HTTP status) to the
+notification's timeline; an `UNREGISTERED` answer drops the device's token. When you are done, delete the key in the Google
+Cloud console.
+
 ## Web console and demo
 
 `./scripts/demo.sh [--realtime]` (Windows: `scripts\demo.ps1`) starts the same stack as the compose project

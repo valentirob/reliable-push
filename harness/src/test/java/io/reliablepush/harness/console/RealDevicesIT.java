@@ -138,4 +138,41 @@ class RealDevicesIT {
         assertThat(list).hasSize(50);
         assertThat(list.get(0).get("label").asString()).isEqualTo("d5");
     }
+
+    @Test
+    void fcmTokenIsValidatedStoredAndNeverReturned() throws Exception {
+        String token = "fcm-token-SENSITIVE-" + "x".repeat(40);
+        String id = UUID.randomUUID().toString();
+        String head = "{\"appId\":\"shop\",\"userId\":\"fcm-user\",\"deviceId\":\"" + id
+                + "\",\"platform\":\"ANDROID\",\"label\":\"l\",\"fcmToken\":";
+        assertThat(post("/console/api/real-devices", head + "\"\"}").statusCode()).isEqualTo(400);
+        assertThat(post("/console/api/real-devices", head + "\"   \"}").statusCode()).isEqualTo(400);
+        HttpResponse<String> tooLong = post("/console/api/real-devices", head + "\"" + "t".repeat(4097) + "\"}");
+        assertThat(tooLong.statusCode()).isEqualTo(400);
+        assertThat(tooLong.body()).doesNotContain("tttt");
+
+        HttpResponse<String> created = post("/console/api/real-devices", head + "\"" + token + "\"}");
+        assertThat(created.statusCode()).isEqualTo(201);
+        assertThat(created.body()).doesNotContain(token).contains("\"hasFcmToken\":true");
+        assertThat(get("/console/api/devices?appId=shop&userId=fcm-user").body()).doesNotContain(token)
+                .contains("\"hasFcmToken\":true");
+
+        String next = "fcm-token-NEXT-" + "y".repeat(40);
+        HttpResponse<String> updated = post("/console/api/real-devices/" + id + "/fcm-token",
+                "{\"fcmToken\":\"" + next + "\"}");
+        assertThat(updated.statusCode()).isEqualTo(200);
+        assertThat(updated.body()).doesNotContain(next);
+        assertThat(post("/console/api/real-devices/" + UUID.randomUUID() + "/fcm-token",
+                "{\"fcmToken\":\"" + next + "\"}").statusCode()).isEqualTo(404);
+        assertThat(post("/console/api/real-devices/" + id + "/fcm-token", "{\"fcmToken\":\" \"}").statusCode())
+                .isEqualTo(400);
+        assertThat(post("/console/api/real-devices/nope/fcm-token", "{\"fcmToken\":\"a\"}").statusCode())
+                .isEqualTo(400);
+    }
+
+    @Test
+    void appsReportRealFcmModeOffWithoutCredentials() throws Exception {
+        JsonNode apps = json.readTree(get("/console/api/apps").body());
+        assertThat(apps.get(0).get("fcmEnabled").asBoolean()).isFalse();
+    }
 }

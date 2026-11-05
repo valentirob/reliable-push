@@ -112,7 +112,9 @@ class MainActivity : Activity() {
                 showDeviceId()
                 Thread({
                     try {
-                        backend.deviceRegistered(BuildConfig.RP_APP_ID, userId, result.deviceId)
+                        // without google-services.json there is no FCM token: the device is reported without one
+                        val fcmToken = FcmTokens.currentBlocking(applicationContext)
+                        backend.deviceRegistered(BuildConfig.RP_APP_ID, userId, result.deviceId, fcmToken)
                     } catch (e: Exception) {
                         Log.w(TAG, "real-device report failed: ${e.javaClass.simpleName}")
                     }

@@ -29,8 +29,14 @@ interface SampleBackend {
     /** A short-lived identity credential (signed grant or ID token) for [userId]. Blocking: call off the main thread. */
     fun grant(appId: String, userId: String): String
 
-    /** Tells the backend which device id the user's installation got. Blocking: call off the main thread. */
-    fun deviceRegistered(appId: String, userId: String, deviceId: String)
+    /**
+     * Tells the backend which device id the user's installation got, and the FCM registration token when Firebase is
+     * configured. Blocking: call off the main thread.
+     */
+    fun deviceRegistered(appId: String, userId: String, deviceId: String, fcmToken: String? = null)
+
+    /** The FCM registration token changed. Blocking: call off the main thread. */
+    fun fcmTokenChanged(deviceId: String, fcmToken: String)
 
     companion object {
         /** The debug build's harness client, or null in a release build (it is compiled only into debug). */

@@ -21,6 +21,8 @@ rp_die() {
 rp_compose() {
     local files=(-f "$RP_COMPOSE_FILE") f
     for f in ${RP_COMPOSE_OVERRIDES[@]+"${RP_COMPOSE_OVERRIDES[@]}"}; do files+=(-f "$f"); done
+    # bind source of the harness's optional real-FCM key (harness/build/fcm/service-account.json, placed by the maintainer)
+    mkdir -p "$RP_ROOT/harness/build/fcm"
     E2E_UID="$(id -u)" E2E_GID="$(id -g)" docker compose -p "$RP_PROJECT" "${files[@]}" "$@"
 }
 

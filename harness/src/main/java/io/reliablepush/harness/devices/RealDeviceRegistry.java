@@ -18,9 +18,19 @@ public class RealDeviceRegistry {
 
     static final int MAX_DEVICES = 50;
 
-    /** A device the harness only knows about; never carries a device token. */
+    /**
+     * A device the harness only knows about; never carries a backend device token. {@code fcmToken} (nullable) is the
+     * device's FCM registration token, used only to send real pushes: it is never returned by an endpoint and is
+     * redacted from {@link #toString()}.
+     */
     public record RealDevice(String appId, String userId, UUID deviceId, Platform platform, String label,
-                             Instant registeredAt) {}
+                             Instant registeredAt, String fcmToken) {
+        @Override
+        public String toString() {
+            return "RealDevice[appId=" + appId + ", deviceId=" + deviceId + ", platform=" + platform
+                    + ", fcmToken=" + (fcmToken == null ? "none" : "<redacted>") + "]";
+        }
+    }
 
     private final Clock clock;
     private final ArrayDeque<RealDevice> devices = new ArrayDeque<>();
@@ -35,7 +45,11 @@ public class RealDeviceRegistry {
     }
 
     public RealDevice add(String appId, String userId, UUID deviceId, Platform platform, String label) {
-        RealDevice d = new RealDevice(appId, userId, deviceId, platform, label, clock.instant());
+        return add(appId, userId, deviceId, platform, label, null);
+    }
+
+    public RealDevice add(String appId, String userId, UUID deviceId, Platform platform, String label, String fcmToken) {
+        RealDevice d = new RealDevice(appId, userId, deviceId, platform, label, clock.instant(), fcmToken);
         synchronized (devices) {
             devices.removeIf(e -> e.deviceId().equals(deviceId));
             devices.addLast(d);
@@ -50,6 +64,28 @@ public class RealDeviceRegistry {
     public List<RealDevice> all(String appId) {
         synchronized (devices) {
             return devices.stream().filter(d -> appId == null || d.appId().equals(appId)).toList();
+        }
+    }
+
+    /** Replaces (or, with null, drops) the FCM token of a device; false when the device is unknown. */
+    public boolean setFcmToken(UUID deviceId, String fcmToken) {
+        synchronized (devices) {
+            List<RealDevice> all = List.copyOf(devices);
+            boolean found = false;
+            devices.clear();
+            for (RealDevice d : all) {
+                found |= d.deviceId().equals(deviceId);
+                devices.addLast(d.deviceId().equals(deviceId) ? new RealDevice(d.appId(), d.userId(), d.deviceId(),
+                        d.platform(), d.label(), d.registeredAt(), fcmToken) : d);
+            }
+            return found;
+        }
+    }
+
+    /** The devices of one user of an app, oldest first. */
+    public List<RealDevice> forUser(String appId, String userId) {
+        synchronized (devices) {
+            return devices.stream().filter(d -> d.appId().equals(appId) && d.userId().equals(userId)).toList();
         }
     }
 }

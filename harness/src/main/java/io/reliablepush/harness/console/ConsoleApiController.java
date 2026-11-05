@@ -6,6 +6,7 @@ import io.reliablepush.client.ReliablePushException;
 import io.reliablepush.harness.config.HarnessApp;
 import io.reliablepush.harness.config.HarnessProperties;
 import io.reliablepush.harness.devices.AndroidMode;
+import io.reliablepush.harness.fcm.FcmPusher;
 import io.reliablepush.harness.devices.BackendCallException;
 import io.reliablepush.harness.devices.DeviceBehaviour;
 import io.reliablepush.harness.devices.DeviceSimulator;
@@ -65,13 +66,17 @@ public class ConsoleApiController {
     static final int INBOX_LIMIT = 500;
     static final int MAX_TEXT = 1_000;
     static final int MAX_LABEL = 100;
+    static final int MAX_FCM_TOKEN = 4096;
     static final long MAX_HANG_MS = 120_000;
 
     public record DeviceRequest(String appId, String userId, Platform platform, AndroidMode androidMode) {}
 
     public record GrantRequest(String appId, String userId) {}
 
-    public record RealDeviceRequest(String appId, String userId, String deviceId, String platform, String label) {}
+    public record RealDeviceRequest(String appId, String userId, String deviceId, String platform, String label,
+                                    String fcmToken) {}
+
+    public record FcmTokenRequest(String fcmToken) {}
 
     public record OnlineRequest(Boolean online) {}
 
@@ -105,10 +110,11 @@ public class ConsoleApiController {
     private final BackendLogTail logs;
     private final GrantMinter grants;
     private final RealDeviceRegistry realDevices;
+    private final FcmPusher fcm;
 
     public ConsoleApiController(HarnessProperties properties, DeviceSimulator simulator, FakeSender sender,
                                 Timeline timeline, WebhookInbox inbox, BackendLogTail logs, GrantMinter grants,
-                                RealDeviceRegistry realDevices) {
+                                RealDeviceRegistry realDevices, FcmPusher fcm) {
         this.properties = properties;
         this.simulator = simulator;
         this.sender = sender;
@@ -117,6 +123,7 @@ public class ConsoleApiController {
         this.logs = logs;
         this.grants = grants;
         this.realDevices = realDevices;
+        this.fcm = fcm;
     }
 
     // ---- apps ------------------------------------------------------------------------------------------------
@@ -130,6 +137,7 @@ public class ConsoleApiController {
             m.put("appId", id);
             m.put("windowMinutes", app.windowMinutes());
             m.put("timeScaleSeconds", properties.timeScaleSeconds());
+            m.put("fcmEnabled", fcm.enabled());
             return m;
         }).toList();
     }
@@ -187,8 +195,20 @@ public class ConsoleApiController {
         if (label.length() > MAX_LABEL) {
             throw new IllegalArgumentException("label is too long (at most " + MAX_LABEL + " characters)");
         }
+        String fcmToken = r.fcmToken() == null ? null : validFcmToken(r.fcmToken());
         return ResponseEntity.status(HttpStatus.CREATED)
-                .body(realDeviceJson(realDevices.add(r.appId(), r.userId(), deviceId, platform, label)));
+                .body(realDeviceJson(realDevices.add(r.appId(), r.userId(), deviceId, platform, label, fcmToken)));
+    }
+
+    /** The device's FCM token changed (onNewToken). The token is never echoed back. */
+    @PostMapping("/real-devices/{id}/fcm-token")
+    public Map<String, Object> setFcmToken(@PathVariable String id, @RequestBody FcmTokenRequest r) {
+        UUID deviceId = uuid(id, "device id");
+        String token = validFcmToken(r.fcmToken());
+        if (!realDevices.setFcmToken(deviceId, token)) {
+            throw new NotFoundException("unknown device");
+        }
+        return Map.of("deviceId", deviceId.toString(), "hasFcmToken", true);
     }
 
     @PostMapping("/devices")
@@ -243,6 +263,11 @@ public class ConsoleApiController {
         }
         Notification n = sender.send(new SendPushCommand(r.appId(), r.userId(), title, body, r.policy(),
                 r.timeoutMinutes(), r.fallback(), perDevice));
+        for (FcmPusher.DevicePush p : fcm.push(r.appId(), r.userId(), n.trackingId(), title, body)) {
+            timeline.append(n.trackingId(), r.appId(), new TimelineEntry(Instant.now(), "fcm_push", Map.of(
+                    "deviceId", p.deviceId().toString(), "result", p.result().outcome().name(),
+                    "status", p.result().status())));
+        }
         return Map.of("trackingId", n.trackingId().toString());
     }
 
@@ -444,6 +469,14 @@ public class ConsoleApiController {
         }
     }
 
+    /** Never echoes the token in the error. */
+    private static String validFcmToken(String token) {
+        if (token == null || token.isBlank() || token.length() > MAX_FCM_TOKEN) {
+            throw new IllegalArgumentException("fcmToken must not be blank and at most " + MAX_FCM_TOKEN + " characters");
+        }
+        return token;
+    }
+
     private static String limited(String s, String what) {
         String v = s == null ? "" : s;
         if (v.length() > MAX_TEXT) {
@@ -485,6 +518,7 @@ public class ConsoleApiController {
         m.put("online", true);
         m.put("label", d.label());
         m.put("registeredAt", iso(d.registeredAt()));
+        m.put("hasFcmToken", d.fcmToken() != null);
         return m;
     }
 

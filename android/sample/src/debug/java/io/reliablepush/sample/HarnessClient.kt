@@ -19,13 +19,16 @@ class HarnessClient(private val harnessUrl: String = BuildConfig.RP_HARNESS_URL)
     override fun grant(appId: String, userId: String): String =
         post("/console/api/grants", JSONObject().put("appId", appId).put("userId", userId), 201).getString("grant")
 
-    override fun deviceRegistered(appId: String, userId: String, deviceId: String) {
-        post(
-            "/console/api/real-devices",
-            JSONObject().put("appId", appId).put("userId", userId).put("deviceId", deviceId)
-                .put("platform", "ANDROID").put("label", "${Build.MODEL} (sample)"),
-            201,
-        )
+    override fun deviceRegistered(appId: String, userId: String, deviceId: String, fcmToken: String?) {
+        val body = JSONObject().put("appId", appId).put("userId", userId).put("deviceId", deviceId)
+            .put("platform", "ANDROID").put("label", "${Build.MODEL} (sample)")
+        // the FCM registration token is a credential for the harness's real-FCM mode: sent, never logged
+        if (fcmToken != null) body.put("fcmToken", fcmToken)
+        post("/console/api/real-devices", body, 201)
+    }
+
+    override fun fcmTokenChanged(deviceId: String, fcmToken: String) {
+        post("/console/api/real-devices/$deviceId/fcm-token", JSONObject().put("fcmToken", fcmToken), 200)
     }
 
     /** Sends a tracked push to the user (the harness registers it at the backend); returns the tracking id. */

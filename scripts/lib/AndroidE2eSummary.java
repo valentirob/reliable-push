@@ -6,9 +6,13 @@
 // Scenario names: a test of the sample app (package io.reliablepush.sample) is one entry per method, its name in
 // kebab case (deliveredIsReported -> delivered-is-reported); any other test class (the SDK's instrumented tests) is one
 // entry per class (KeystoreTokenCipherTest -> keystore-token-cipher), FAILED when one of its methods failed.
-// --entry: "scenario|STATUS|durationMs|expected|actual|hint|log" (expected/actual/hint only matter for FAILED).
+// --entry: "scenario|STATUS|durationMs|expected|actual|hint|log" (expected/actual/hint only matter for FAILED; for
+// SKIPPED the hint says what is missing and is printed and kept in summary.json as "hint").
+// STATUS is PASSED, FAILED or SKIPPED. SKIPPED (optional real-FCM entry, a skipped JUnit test) counts in neither
+// <passed> nor <total>.
 // --expect: a scenario that must be there; a missing one becomes FAILED ("did not run").
-// Same entry shape as harness/build/e2e/summary.json. Prints one line per entry, then "<passed>/<total>", on stdout.
+// Same entry shape as harness/build/e2e/summary.json (SKIPPED entries add "hint"). Prints one line per entry, then
+// "<passed>/<total> <skipped>" (for example "8/8 1"), on stdout.
 import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -86,6 +90,7 @@ public class AndroidE2eSummary {
         }
         StringBuilder sb = new StringBuilder("[ ");
         int passed = 0;
+        int skipped = 0;
         int n = 0;
         for (Entry en : entries.values()) {
             if (n++ > 0) {
@@ -93,8 +98,11 @@ public class AndroidE2eSummary {
             }
             if (en.status.equals("PASSED")) {
                 passed++;
+            } else if (en.status.equals("SKIPPED")) {
+                skipped++;
             }
-            System.out.println("  " + en.status + "  " + en.scenario + " (" + en.durationMs + " ms)");
+            System.out.println("  " + en.status + "  " + en.scenario + " (" + en.durationMs + " ms)"
+                    + (en.status.equals("SKIPPED") && en.hint != null && !en.hint.isEmpty() ? ": " + en.hint : ""));
             sb.append("{\n  \"scenario\" : ").append(str(en.scenario))
                     .append(",\n  \"status\" : ").append(str(en.status))
                     .append(",\n  \"durationMs\" : ").append(en.durationMs)
@@ -106,6 +114,9 @@ public class AndroidE2eSummary {
             } else {
                 sb.append("null");
             }
+            if (en.status.equals("SKIPPED") && en.hint != null && !en.hint.isEmpty()) {
+                sb.append(",\n  \"hint\" : ").append(str(en.hint));
+            }
             sb.append(",\n  \"logs\" : [ ");
             for (int i = 0; i < en.logs.size(); i++) {
                 sb.append(i > 0 ? ", " : "").append(str(en.logs.get(i)));
@@ -114,7 +125,7 @@ public class AndroidE2eSummary {
         }
         sb.append(entries.isEmpty() ? "]\n" : " ]\n");
         Files.writeString(out, sb.toString(), StandardCharsets.UTF_8);
-        System.out.println(passed + "/" + entries.size());
+        System.out.println(passed + "/" + (entries.size() - skipped) + " " + skipped);
     }
 
     static void readJunit(File xml, Map<String, Entry> entries) throws Exception {

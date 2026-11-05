@@ -27,8 +27,13 @@ public final class PayloadPreview {
 
     /** Android mode v1: data-only, high priority, no {@code notification} key. */
     public static String fcmV1(UUID tid, String title, String body) {
+        return fcmV1(tid, title, body, DEVICE_TOKEN);
+    }
+
+    /** The same message addressed to a real FCM registration token (what the harness sends to the FCM HTTP v1 API). */
+    public static String fcmV1(UUID tid, String title, String body, String fcmToken) {
         return render(map("message", map(
-                "token", DEVICE_TOKEN,
+                "token", fcmToken,
                 "android", map("priority", "HIGH"),
                 "data", map("rp_tid", tid.toString(), "title", title, "body", body))));
     }

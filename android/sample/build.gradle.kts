@@ -10,6 +10,13 @@ val rpReleaseBaseUrl = providers.gradleProperty("rp.releaseBaseUrl").getOrElse("
 val rpAppId = providers.gradleProperty("rp.appId").getOrElse("shop")
 val rpHarnessUrl = providers.gradleProperty("rp.harnessUrl").getOrElse("http://10.0.2.2:8090")
 
+// Real FCM (optional, Task 7): the Google Services plugin is applied only when the maintainer placed
+// android/sample/google-services.json (git-ignored). Without it the build, the tests and the E2E run as before and the
+// app has no default FirebaseApp (every Firebase call in the sample is guarded).
+if (file("google-services.json").exists()) {
+    apply(plugin = "com.google.gms.google-services")
+}
+
 fun quoted(value: String) = "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 
 android {

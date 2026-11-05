@@ -6,7 +6,7 @@ import java.util.Map;
 
 /**
  * One line of a notification's history. {@code kind}: registered | push_simulated | event_sent | state_changed |
- * webhook_in_flight | webhook_received | cancelled. {@code details} never carries secrets, API keys or device tokens.
+ * webhook_in_flight | webhook_received | cancelled | fcm_push (real FCM send per device). {@code details} never carries secrets, API keys or device tokens.
  */
 public record TimelineEntry(Instant at, String kind, Map<String, Object> details) {
 

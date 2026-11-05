@@ -41,6 +41,11 @@ DerivedData/
 # Harness E2E outputs and per-run secrets (secrets.env, db.env)
 harness/build/
 
+# Firebase files placed by the maintainer for the optional real-FCM path (the service-account key is under
+# harness/build/fcm/, covered by harness/build/ above)
+android/sample/google-services.json
+**/google-services.json
+
 # Secrets / local env
 .env
 .env.*
