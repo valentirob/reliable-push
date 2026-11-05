@@ -9,10 +9,15 @@
 # the Gatling simulations (EventIngestSimulation, FallbackBurstSimulation + BurstDrainProbe) and writes, in
 # harness/build/load/: gatling/<simulation>/ (HTML report), burst.json (probe), summary.json (one entry per simulation:
 # status PASSED|FAILED|INVALID, metrics, config, generatorCpuAvgPercent). Exit 0 only if every simulation PASSED.
-# A run whose Gatling container averages more than 90 % CPU is INVALID (the generator was saturated).
+# A run whose Gatling container averages more than 90 % CPU during injection is INVALID (the generator was saturated):
+# CPU is sampled (docker stats, every 5 s) from the start of the injection to the end of the simulation; for ingest the
+# ramp is excluded (steady phase only). A simulation is PASSED only if Gatling exited 0 and every expected assertion
+# result line was parsed and true; otherwise FAILED with a "reason" in summary.json.
 # Simulation settings come from the environment: LOAD_DEVICES, LOAD_NOTIFICATIONS_PER_SECOND, LOAD_RAMP, LOAD_STEADY,
 # LOAD_BURST_SIZE (multiple of LOAD_BURST_PER_SECOND), LOAD_BURST_PER_SECOND, LOAD_READY_TIMEOUT (seconds, default 120).
-# Without --keep the stack is removed at the end (down -v); with --keep it keeps running.
+# Without --keep the stack is removed at the end (down -v); with --keep it keeps running. The Maven cache of the Gatling
+# runner is the external volume reliable-push-gatling-m2 and survives `down -v`; purge it with
+#   docker volume rm reliable-push-gatling-m2
 set -euo pipefail
 
 RP_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -24,8 +29,50 @@ RP_COMPOSE_OVERRIDES=("$RP_ROOT/loadtest/compose/load.override.yml")
 . "$RP_ROOT/scripts/lib/common.sh"
 export COMPOSE_PROFILES=load
 
+# --- pure helpers (unit-checkable: LOAD_SH_SOURCE_ONLY=1 . scripts/load.sh) ---------------------------------------
+# stdin: Gatling console output; stdout: {"assertions":[{"name","passed","actual"}]}. A non-numeric actual is passed:false.
+parse_assertions() {
+    { grep -E ' : (true|false) \(actual : ' || true; } | awk 'BEGIN { printf "{\"assertions\":[" }
+        { line = $0; sub(/ : (true|false) \(actual : .*$/, "", line); gsub(/["\\]/, "", line)
+          ok = ($0 ~ / : true \(actual/) ? "true" : "false"
+          act = $0; sub(/^.*actual : /, "", act); sub(/\).*$/, "", act)
+          if (act !~ /^-?[0-9]+(\.[0-9]+)?$/) { act = "null"; ok = "false" }
+          printf "%s{\"name\":\"%s\",\"passed\":%s,\"actual\":%s}", (n++ ? "," : ""), line, ok, act }
+        END { printf "]}" }'
+}
+# gatling_reason <exit code> <expected assertion count> <assertions json> -> empty when fine, else the failure reason
+gatling_reason() {
+    local n f
+    n="$(printf '%s' "$3" | grep -o '"passed":' | wc -l | tr -d ' ')"
+    f="$(printf '%s' "$3" | grep -o '"passed":false' | wc -l | tr -d ' ')"
+    if [ "$1" != 0 ]; then printf 'gatling exited with code %s' "$1"
+    elif [ "$n" -lt "$2" ]; then printf 'expected %s assertion results, parsed %s' "$2" "$n"
+    elif [ "$f" -gt 0 ]; then printf '%s assertion(s) failed' "$f"
+    fi
+}
+# top-level "status" of the probe JSON (the last field of the flat object)
+probe_status() { printf '%s' "$1" | sed -n 's/.*"status":"\([A-Z]*\)"}[[:space:]]*$/\1/p'; }
+# whole seconds of 90s | 5m | 1h | 500ms | 90 | PT90S | PT5M (empty when unsupported)
+duration_seconds() {
+    case "$1" in
+        *ms) [ -n "${1%ms}" ] && printf '%s' $((${1%ms} / 1000 + 1)) ;;
+        *s) printf '%s' "${1%s}" ;;
+        *m) printf '%s' $((${1%m} * 60)) ;;
+        *h) printf '%s' $((${1%h} * 3600)) ;;
+        PT*S) printf '%s' "${1#PT}" | tr -d 'S' ;;
+        PT*M) printf '%s' $(($(printf '%s' "${1#PT}" | tr -d 'M') * 60)) ;;
+        '' | *[!0-9]*) ;;
+        *) printf '%s' "$1" ;;
+    esac
+}
+# average of the second column of a "<epoch> <percent>" sample file for lines with epoch >= $2 (empty without samples)
+avg_cpu() {
+    awk -v from="$2" '$1 ~ /^[0-9]+$/ && $1 >= from && $2 != "" { gsub(/%/, "", $2); s += $2; n++ } END { if (n) printf "%.1f", s / n }' "$1"
+}
+[ "${LOAD_SH_SOURCE_ONLY:-0}" = 1 ] && return 0
+
 usage() {
-    sed -n '2,15p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    sed -n '2,20p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
 }
 
 SIMULATION=all API_POOL=10 WORKER_CONCURRENCY=100 WORKER_POOL=10 WORKERS=1 KEEP=0
@@ -56,7 +103,11 @@ export LOAD_API_POOL="$API_POOL" LOAD_WORKER_CONCURRENCY="$WORKER_CONCURRENCY" L
 BURST_SIZE="${LOAD_BURST_SIZE:-30000}"
 BURST_PER_SECOND="${LOAD_BURST_PER_SECOND:-1500}"
 case "$BURST_SIZE$BURST_PER_SECOND" in '' | *[!0-9]*) rp_die "LOAD_BURST_SIZE and LOAD_BURST_PER_SECOND must be whole numbers" ;; esac
+[ "$BURST_PER_SECOND" -gt 0 ] && [ "$BURST_SIZE" -gt 0 ] || rp_die "LOAD_BURST_SIZE and LOAD_BURST_PER_SECOND must be greater than 0"
 [ $((BURST_SIZE % BURST_PER_SECOND)) -eq 0 ] || rp_die "LOAD_BURST_SIZE must be a multiple of LOAD_BURST_PER_SECOND"
+
+RAMP_SECONDS="$(duration_seconds "${LOAD_RAMP:-60s}")"
+[ -n "$RAMP_SECONDS" ] || rp_die "LOAD_RAMP must be like 90s, 5m, 1h, 90 or PT90S (needed to exclude the ramp from the CPU average)"
 
 rp_require_tools
 if [ -n "$(rp_compose ps -a -q 2>/dev/null)" ]; then
@@ -74,7 +125,10 @@ rm -rf "$RP_OUT"
 mkdir -p "$RP_OUT/logs" "$RP_OUT/gatling"
 SAMPLER_PID=""
 cleanup() {
-    [ -n "$SAMPLER_PID" ] && kill "$SAMPLER_PID" >/dev/null 2>&1 || true
+    if [ -n "$SAMPLER_PID" ]; then
+        pkill -P "$SAMPLER_PID" >/dev/null 2>&1 || true
+        kill "$SAMPLER_PID" >/dev/null 2>&1 || true
+    fi
     if [ "$KEEP" = 1 ]; then
         rp_log "stack kept running; stop it with: docker compose -p $RP_PROJECT -f harness/compose/docker-compose.yml -f loadtest/compose/load.override.yml --profile load down -v"
     else
@@ -82,11 +136,15 @@ cleanup() {
     fi
 }
 trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 failed() {
     rp_compose logs --no-color --tail 40 >&2 2>/dev/null || true
     rp_die "$1"
 }
 
+# Maven cache of the Gatling runner: external volume, kept across runs (down -v does not remove it)
+docker volume inspect reliable-push-gatling-m2 >/dev/null 2>&1 || docker volume create reliable-push-gatling-m2 >/dev/null
 rp_log "building images (backend, harness, gatling runner); output in harness/build/load/logs/build.log"
 if ! rp_compose build >"$RP_OUT/logs/build.log" 2>&1; then
     tail -n 40 "$RP_OUT/logs/build.log" >&2
@@ -125,105 +183,146 @@ done
 rp_log "stack ready"
 
 # --- Gatling container helpers ---------------------------------------------------------------------------------
+# only the three keys the simulations need are passed (as names: the values stay out of argv)
 GATLING_ENV=()
+for k in HARNESS_APPS_SHOP_SENDERAPIKEY HARNESS_APPS_SHOP_GRANTSECRET HARNESS_APPS_SHOP_GRANTISSUER; do
+    val="$(sed -n "s/^$k=//p" "$RP_OUT/secrets.env" | head -n 1)"
+    [ -n "$val" ] || rp_die "$k missing in harness/build/load/secrets.env"
+    export "$k=$val"
+    GATLING_ENV+=(-e "$k")
+done
 for v in LOAD_DEVICES LOAD_NOTIFICATIONS_PER_SECOND LOAD_RAMP LOAD_STEADY LOAD_BURST_SIZE LOAD_BURST_PER_SECOND LOAD_APP_ID; do
     [ -n "${!v:-}" ] && GATLING_ENV+=(-e "$v=${!v}")
 done
 gexec() { rp_compose exec -T ${GATLING_ENV[@]+"${GATLING_ENV[@]}"} gatling "$@"; }
 GATLING_CID="$(rp_compose ps -q gatling)"
 
-rp_log "compiling loadtest and downloading dependencies (first run only); output in harness/build/load/logs/prepare.log"
-gexec ./mvnw -B -pl loadtest test-compile >"$RP_OUT/logs/prepare.log" 2>&1 \
+rp_log "compiling loadtest and resolving the Gatling plugin (downloads on the first run only); output in harness/build/load/logs/prepare.log"
+gexec ./mvnw -B -pl loadtest test-compile gatling:help >"$RP_OUT/logs/prepare.log" 2>&1 \
     || { tail -n 40 "$RP_OUT/logs/prepare.log" >&2; failed "loadtest compile failed"; }
 
-# CPU of the Gatling container every 5 s into $1 (docker stats percent: 100 % = one core = the container's limit)
-start_sampler() {
-    : >"$1"
-    (while :; do
-        docker stats --no-stream --format '{{.CPUPerc}}' "$GATLING_CID" >>"$1" 2>/dev/null || true
-        sleep 5
-    done) &
-    SAMPLER_PID=$!
-}
-stop_sampler() {
-    kill "$SAMPLER_PID" >/dev/null 2>&1 || true
-    wait "$SAMPLER_PID" 2>/dev/null || true
-    SAMPLER_PID=""
-}
-avg_cpu() { # file -> average percent with one decimal ("0.0" without samples)
-    tr -d '%' <"$1" | awk 'NF { s += $1; n++ } END { printf "%.1f", n ? s / n : 0 }'
+# CPU of the Gatling container: from the start of the injection (simulation.log exists; for ingest also the devices are
+# provisioned) until Gatling starts generating the report, a sample at once and then every 5 s.
+# Lines: "S <start epoch>", then "<epoch> <percent>" (docker stats: 100 % = one core = the container's limit).
+# $1 samples file, $2 gatling log, $3 1 when the log prints "Provisioned" before the injection, $4 done-flag file
+cpu_sampler() {
+    local out="$1" log="$2" prov="$3" doneflag="$4" i t
+    sample() { printf '%s %s\n' "$(date +%s)" "$(docker stats --no-stream --format '{{.CPUPerc}}' "$GATLING_CID" 2>/dev/null | head -n 1)" >>"$out"; }
+    until { ls "$RP_ROOT"/loadtest/target/gatling/*/simulation.log >/dev/null 2>&1 \
+        && { [ "$prov" = 0 ] || grep -q '^Provisioned ' "$log" 2>/dev/null; }; }; do
+        [ -f "$doneflag" ] && return 0
+        sleep 1
+    done
+    printf 'S %s\n' "$(date +%s)" >"$out"
+    while :; do
+        sample
+        for t in 1 2 3 4 5; do
+            if [ -f "$doneflag" ] || grep -q '^Generating reports' "$log" 2>/dev/null; then return 0; fi
+            sleep 1
+        done
+    done
 }
 
 ENTRIES=()
 ALL_PASSED=1
 CONFIG_JSON="{\"apiCpus\":2,\"apiMemory\":\"1g\",\"apiPool\":$API_POOL,\"workers\":$WORKERS,\"workerConcurrency\":$WORKER_CONCURRENCY,\"workerPool\":$WORKER_POOL}"
 
-# run_simulation <name> <simulation class> <metrics json file or ''> <extra pass condition: 0|1>
-# Sets SIM_STATUS and SIM_CPU; appends to ENTRIES.
+# run_gatling <name> <simulation class> <expected assertion count> <skip ramp seconds>
+# Sets SIM_RC, SIM_REASON, SIM_ASSERTIONS, SIM_CPU (used for INVALID), SIM_CPU_INJECTION, SIM_CPU_STEADY
 run_gatling() {
-    local name="$1" class="$2" samples="$RP_OUT/logs/cpu-$1.txt" rc=0 report
-    rm -rf "$RP_ROOT/loadtest/target/gatling"
+    local name="$1" class="$2" expected="$3" skip="$4" samples="$RP_OUT/logs/cpu-$1.txt" glog="$RP_OUT/logs/gatling-$1.log"
+    local doneflag="$RP_OUT/logs/cpu-$1.done" prov=0 report start
+    [ "$name" = ingest ] && prov=1
+    rm -rf "$RP_ROOT/loadtest/target/gatling" "$doneflag"
+    : >"$samples"
+    : >"$glog"
     rp_log "running $class (log: harness/build/load/logs/gatling-$name.log)"
-    start_sampler "$samples"
+    cpu_sampler "$samples" "$glog" "$prov" "$doneflag" &
+    SAMPLER_PID=$!
+    SIM_RC=0
     gexec ./mvnw -B -pl loadtest gatling:test "-Dgatling.simulationClass=io.reliablepush.loadtest.$class" \
-        >"$RP_OUT/logs/gatling-$name.log" 2>&1 || rc=$?
-    stop_sampler
-    SIM_CPU="$(avg_cpu "$samples")"
+        >"$glog" 2>&1 || SIM_RC=$?
+    touch "$doneflag"
+    wait "$SAMPLER_PID" 2>/dev/null || true
+    SAMPLER_PID=""
+    start="$(sed -n 's/^S //p' "$samples" | head -n 1)"
+    SIM_CPU_INJECTION=""
+    SIM_CPU_STEADY=""
+    if [ -n "$start" ]; then
+        SIM_CPU_INJECTION="$(avg_cpu "$samples" "$start")"
+        SIM_CPU_STEADY="$(avg_cpu "$samples" $((start + skip)))"
+    fi
+    if [ "$skip" -gt 0 ]; then SIM_CPU="$SIM_CPU_STEADY"; else SIM_CPU="$SIM_CPU_INJECTION"; fi
     report="$(ls -dt "$RP_ROOT"/loadtest/target/gatling/*/ 2>/dev/null | head -n 1 || true)"
-    # Gatling 3.16 writes no assertions file: the result lines of the console summary are the source
-    SIM_ASSERTIONS="$(grep -E ' : (true|false) \(actual : ' "$RP_OUT/logs/gatling-$name.log" \
-        | awk 'BEGIN { printf "{\"assertions\":[" }
-            { line = $0; sub(/ : (true|false) \(actual : .*$/, "", line); gsub(/["\\]/, "", line)
-              ok = ($0 ~ / : true \(actual/) ? "true" : "false"; act = $0; sub(/^.*actual : /, "", act); sub(/\).*$/, "", act)
-              printf "%s{\"name\":\"%s\",\"passed\":%s,\"actual\":%s}", (n++ ? "," : ""), line, ok, act }
-            END { printf "]}" }')"
     if [ -n "$report" ]; then
         rm -rf "$RP_OUT/gatling/$name"
         cp -R "$report" "$RP_OUT/gatling/$name"
     fi
-    tail -n 25 "$RP_OUT/logs/gatling-$name.log"
-    return "$rc"
+    # Gatling 3.16 writes no assertions file: the result lines of the console summary are the source
+    SIM_ASSERTIONS="$(parse_assertions <"$glog")"
+    SIM_REASON="$(gatling_reason "$SIM_RC" "$expected" "$SIM_ASSERTIONS")"
+    tail -n 25 "$glog"
 }
 
-finish() { # <name> <ok 0|1> <metrics json>
-    local status
-    if awk -v c="$SIM_CPU" 'BEGIN { exit !(c > 90) }'; then
+jnum() { if [ -n "$1" ]; then printf '%s' "$1"; else printf 'null'; fi; }
+
+# finish <name> <reason or ''> <metrics json>   (uses SIM_CPU*)
+finish() {
+    local status=PASSED reason="$2"
+    [ -z "$reason" ] || status=FAILED
+    if [ -z "$SIM_CPU" ]; then
         status=INVALID
-    elif [ "$2" = 1 ]; then status=PASSED
-    else status=FAILED; fi
+        reason="${reason:+$reason; }no CPU samples during the injection"
+    elif awk -v c="$SIM_CPU" 'BEGIN { exit !(c > 90) }'; then
+        status=INVALID
+        reason="${reason:+$reason; }generator CPU average above 90 %"
+    fi
     [ "$status" = PASSED ] || ALL_PASSED=0
-    rp_log "$1: $status (generator CPU average $SIM_CPU %)"
-    ENTRIES+=("{\"simulation\":\"$1\",\"status\":\"$status\",\"metrics\":$3,\"config\":$CONFIG_JSON,\"generatorCpuAvgPercent\":$SIM_CPU}")
+    rp_log "$1: $status (generator CPU average ${SIM_CPU:-n/a} %${reason:+; $reason})"
+    ENTRIES+=("{\"simulation\":\"$1\",\"status\":\"$status\",\"reason\":$([ -n "$reason" ] && printf '"%s"' "$reason" || printf null),\"metrics\":$3,\"config\":$CONFIG_JSON,\"generatorCpuAvgPercent\":$(jnum "$SIM_CPU"),\"generatorCpuInjectionAvgPercent\":$(jnum "$SIM_CPU_INJECTION"),\"generatorCpuSteadyAvgPercent\":$(jnum "$SIM_CPU_STEADY")}")
 }
 
 if [ "$SIMULATION" = ingest ] || [ "$SIMULATION" = all ]; then
-    ok=1
-    run_gatling ingest EventIngestSimulation || ok=0
-    finish ingest "$ok" "$SIM_ASSERTIONS"
+    run_gatling ingest EventIngestSimulation 7 "$RAMP_SECONDS"
+    finish ingest "$SIM_REASON" "$SIM_ASSERTIONS"
 fi
 
 if [ "$SIMULATION" = burst ] || [ "$SIMULATION" = all ]; then
-    ok=1
     METRICS_URLS="http://worker-a:8081/actuator/prometheus"
     [ "$WORKERS" = 2 ] && METRICS_URLS="$METRICS_URLS http://worker-b:8081/actuator/prometheus"
-    rm -f "$RP_OUT/burst.json"
+    rm -f "$RP_OUT/burst.json" "$RP_OUT/probe.pid"
+    probe_alive() { gexec sh -c 'kill -0 "$(cat /work/harness/build/load/probe.pid)"' >/dev/null 2>&1; }
     rp_log "starting BurstDrainProbe (expected $BURST_SIZE rows, timeout 20m) before the burst"
     # shellcheck disable=SC2086
-    rp_compose exec -T -d gatling java -cp loadtest/target/classes io.reliablepush.loadtest.BurstDrainProbe \
-        --metrics $METRICS_URLS --expected "$BURST_SIZE" --timeout 20m --out /work/harness/build/load/burst.json
+    rp_compose exec -T -d gatling sh -c 'echo $$ >/work/harness/build/load/probe.pid; exec java -cp loadtest/target/classes io.reliablepush.loadtest.BurstDrainProbe "$@"' \
+        probe --metrics $METRICS_URLS --expected "$BURST_SIZE" --timeout 20m --out /work/harness/build/load/burst.json
     sleep 3 # baseline sample before the first notification
-    run_gatling burst FallbackBurstSimulation || ok=0
-    rp_log "waiting for the backlog to drain (probe timeout 20m)"
-    probe_deadline=$(($(date +%s) + 20 * 60 + 90))
-    while [ ! -s "$RP_OUT/burst.json" ] && [ "$(date +%s)" -lt "$probe_deadline" ]; do sleep 2; done
-    if [ -s "$RP_OUT/burst.json" ]; then
-        PROBE_JSON="$(tr -d '\n' <"$RP_OUT/burst.json")"
-        case "$PROBE_JSON" in *'"status":"PASSED"'*) ;; *) ok=0 ;; esac
+    probe_alive || rp_warn "the drain probe is not running"
+    run_gatling burst FallbackBurstSimulation 2 0
+    reason="$SIM_REASON"
+    PROBE_JSON="null"
+    if [ -n "$reason" ]; then
+        gexec sh -c 'kill "$(cat /work/harness/build/load/probe.pid)"' >/dev/null 2>&1 || true
     else
-        PROBE_JSON="null"
-        ok=0
+        rp_log "waiting for the backlog to drain (probe timeout 20m)"
+        probe_deadline=$(($(date +%s) + 20 * 60 + 90))
+        n=0
+        while [ ! -s "$RP_OUT/burst.json" ] && [ "$(date +%s)" -lt "$probe_deadline" ]; do
+            sleep 2
+            n=$((n + 1))
+            if [ $((n % 5)) -eq 0 ] && ! probe_alive; then
+                sleep 1
+                break
+            fi
+        done
+        if [ -s "$RP_OUT/burst.json" ]; then
+            PROBE_JSON="$(tr -d '\n' <"$RP_OUT/burst.json")"
+            [ "$(probe_status "$PROBE_JSON")" = PASSED ] || reason="${reason:+$reason; }drain probe did not report PASSED"
+        else
+            reason="${reason:+$reason; }no drain result (probe not running or timed out)"
+        fi
     fi
-    finish burst "$ok" "$PROBE_JSON"
+    finish burst "$reason" "$PROBE_JSON"
 fi
 
 SUMMARY="["

@@ -53,7 +53,7 @@ services:
         required: false
 
   # Gatling runner: toolchain only; the repository is mounted at /work (Maven output lands in loadtest/target on the host).
-  # Run as the invoking user (E2E_UID/E2E_GID exported by rp_compose); dependencies cached in the named volume.
+  # Run as the invoking user (E2E_UID/E2E_GID exported by rp_compose); dependencies cached in the external named volume.
   gatling:
     profiles: ["load"]
     image: reliable-push-gatling:load
@@ -65,9 +65,7 @@ services:
     user: "${E2E_UID:-1000}:${E2E_GID:-1000}"
     working_dir: /work
     command: ["sleep", "infinity"]
-    env_file:
-      - path: ../build/load/secrets.env
-        required: false
+    # no env_file: load.sh passes only the three HARNESS_APPS_SHOP_* keys the simulations need (docker compose exec -e)
     environment:
       LOAD_API_URL: http://api:8080
       HOME: /home/load
@@ -78,4 +76,7 @@ services:
       - api
 
 volumes:
+  # external, so `down -v` keeps the Maven cache (created by scripts/load.sh); purge: docker volume rm reliable-push-gatling-m2
   gatling-m2:
+    external: true
+    name: reliable-push-gatling-m2
