@@ -253,7 +253,7 @@ Requirements: FR-4 to FR-8, FR-10, NFR-1, NFR-5, NFR-6, NFR-10. Rules: `.agents/
     - `func clear()`
   - `enum RefreshGate { static func tryAcquire() -> Bool }`: true once per process. `resetForTesting()` is `internal`.
 
-- [ ] **Step 1: Failing tests:**
+- [x] **Step 1: Failing tests:**
   - `testNeedsRefreshBelowTwentyPercent`: iat 0, exp 100 s → false at 80 s, true at 81 s; expired → true.
   - `testParseRejectsMalformedToken`
   - `testStoreRoundTripsAndKeepsTokenOutOfDefaults`: an in-memory `SecretStore` fake; no defaults value contains the token.
@@ -263,8 +263,8 @@ Requirements: FR-4 to FR-8, FR-10, NFR-1, NFR-5, NFR-6, NFR-10. Rules: `.agents/
   - `testKeychainRoundTripWithoutAccessGroup`: the real `KeychainStore(accessGroup: nil)` in the package test host (write, read, update, delete).
 
   The shared access-group variant needs the sample's entitlements and runs in Task 6 as a hosted test.
-- [ ] **Step 2: Run** → FAIL. **Step 3: Implement.** **Step 4: Run** → PASS.
-- [ ] **Step 5: Commit** `feat(ios): keychain token store, shared state and refresh rule`
+- [x] **Step 2: Run** → FAIL. **Step 3: Implement.** **Step 4: Run** → PASS.
+- [x] **Step 5: Commit** `feat(ios): keychain token store, shared state and refresh rule`
 
 ### Task 3: Event queue and sender
 
