@@ -6,6 +6,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import io.reliablepush.android.ReliablePushOptions
 
 /**
@@ -13,8 +14,9 @@ import io.reliablepush.android.ReliablePushOptions
  *
  * It never requests permissions: it only checks that the app may show notifications
  * ([NotificationManager.areNotificationsEnabled], false also when `POST_NOTIFICATIONS` is denied on Android 13+) and
- * that the notification's channel exists and is not set to [NotificationManager.IMPORTANCE_NONE]. The SDK channel
- * ([ReliablePushOptions.channelId]) is created on first post with [NotificationManager.IMPORTANCE_DEFAULT]; a host that
+ * that notifications are not paused for the app (API 29+, e.g. a suspended app) and that the notification's channel
+ * exists, is not set to [NotificationManager.IMPORTANCE_NONE] and does not belong to a blocked channel group
+ * (API 28+). The SDK channel ([ReliablePushOptions.channelId]) is created on first post with [NotificationManager.IMPORTANCE_DEFAULT]; a host that
  * creates it first keeps its own settings. If the host's customizer moves the notification to another channel, that
  * channel is the one checked.
  *
@@ -22,7 +24,12 @@ import io.reliablepush.android.ReliablePushOptions
  * [PendingIntent] on [ReliablePushOptions.launchActivity] (or the launcher activity) with extra [EXTRA_TRACKING_ID],
  * whose request code is also `rp_tid.hashCode()` so two notifications do not share (and overwrite) one intent.
  */
-internal class NotificationPoster(context: Context, private val options: ReliablePushOptions) {
+internal class NotificationPoster(
+    context: Context,
+    private val options: ReliablePushOptions,
+    /** Seam over [NotificationManager.areNotificationsPaused] (API 29+), which Robolectric cannot shadow. */
+    private val paused: (NotificationManager) -> Boolean = { notificationsPaused(it) },
+) {
     private val context: Context = context.applicationContext
 
     /** True only when the notification was handed to the system; any failure is logged (WARN) and returns false. */
@@ -30,6 +37,7 @@ internal class NotificationPoster(context: Context, private val options: Reliabl
         val nm = context.getSystemService(NotificationManager::class.java) ?: return notPosted(trackingId, "no_manager")
         return try {
             if (!nm.areNotificationsEnabled()) return notPosted(trackingId, "notifications_disabled")
+            if (paused(nm)) return notPosted(trackingId, "notifications_paused")
             if (nm.getNotificationChannel(options.channelId) == null) {
                 nm.createNotificationChannel(
                     NotificationChannel(options.channelId, options.channelName, NotificationManager.IMPORTANCE_DEFAULT),
@@ -39,11 +47,18 @@ internal class NotificationPoster(context: Context, private val options: Reliabl
             val channel = nm.getNotificationChannel(notification.channelId)
                 ?: return notPosted(trackingId, "channel_missing") // the system would drop it silently
             if (channel.importance == NotificationManager.IMPORTANCE_NONE) return notPosted(trackingId, "channel_blocked")
+            if (groupBlocked(nm, channel)) return notPosted(trackingId, "channel_group_blocked")
             nm.notify(TAG, trackingId.hashCode(), notification)
             true
         } catch (e: RuntimeException) { // e.g. SecurityException if the permission is revoked meanwhile
             notPosted(trackingId, "error")
         }
+    }
+
+    private fun groupBlocked(nm: NotificationManager, channel: NotificationChannel): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return false
+        val group = channel.group ?: return false
+        return nm.getNotificationChannelGroup(group)?.isBlocked == true
     }
 
     private fun build(trackingId: String, title: String, body: String): Notification {
@@ -93,6 +108,9 @@ internal class NotificationPoster(context: Context, private val options: Reliabl
     }
 
     companion object {
+        fun notificationsPaused(nm: NotificationManager): Boolean =
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && nm.areNotificationsPaused()
+
         const val TAG = "rp"
         const val EXTRA_TRACKING_ID = "rp_tid"
     }

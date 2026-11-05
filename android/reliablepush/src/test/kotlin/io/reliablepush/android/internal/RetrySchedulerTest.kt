@@ -45,6 +45,15 @@ class RetrySchedulerTest {
     }
 
     @Test
+    fun hugeLatencyIsClampedToOneHourWithoutOverflow() {
+        val s = RetryScheduler(context, id)
+        s.schedule(Long.MAX_VALUE)
+        assertEquals(3_600_000L, js.getPendingJob(id)!!.minLatencyMillis)
+        s.schedule(86_400)
+        assertEquals(3_600_000L, js.getPendingJob(id)!!.minLatencyMillis)
+    }
+
+    @Test
     fun cancelRemovesJob() {
         val s = RetryScheduler(context, id)
         s.schedule()

@@ -17,12 +17,12 @@ internal sealed interface Reschedule {
     data class After(val seconds: Long) : Reschedule
 }
 
-/** A `Retry-After` above the backoff start ([RetryScheduler.DEFAULT_LATENCY_SECONDS]) is honoured by [Reschedule.After]. */
+/** A `Retry-After` above the backoff start ([RetryScheduler.DEFAULT_LATENCY_SECONDS]) is honoured by [Reschedule.After], up to one hour. */
 internal fun rescheduleDecision(result: FlushResult): Reschedule = when (result) {
     FlushResult.Done, FlushResult.NotRegistered -> Reschedule.None
     is FlushResult.RetryLater -> {
         val s = result.delaySeconds
-        if (s != null && s > RetryScheduler.DEFAULT_LATENCY_SECONDS) Reschedule.After(s) else Reschedule.Backoff
+        if (s != null && s > RetryScheduler.DEFAULT_LATENCY_SECONDS) Reschedule.After(s.coerceAtMost(RetryScheduler.MAX_LATENCY_SECONDS)) else Reschedule.Backoff
     }
 }
 

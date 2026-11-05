@@ -76,7 +76,7 @@ public object ReliablePush {
         Sdk.execute {
             val result = try {
                 sdk.register(idToken)
-            } catch (e: RuntimeException) {
+            } catch (e: Exception) {
                 SdkLog.error("device.register_failed", "error" to e.javaClass.simpleName)
                 RegisterResult.Failed(null)
             }
@@ -162,7 +162,7 @@ public object ReliablePush {
         Sdk.execute {
             val confirmed = try {
                 sdk.logout()
-            } catch (e: RuntimeException) {
+            } catch (e: Exception) {
                 SdkLog.error("device.revoke_failed", "error" to e.javaClass.simpleName)
                 false
             }

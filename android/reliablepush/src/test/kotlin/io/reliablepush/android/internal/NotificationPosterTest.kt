@@ -3,6 +3,7 @@ package io.reliablepush.android.internal
 import android.app.Activity
 import android.app.Notification
 import android.app.NotificationChannel
+import android.app.NotificationChannelGroup
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.ComponentName
@@ -166,5 +167,33 @@ class NotificationPosterTest {
         nm.createNotificationChannel(NotificationChannel("reliablepush_default", "Off", NotificationManager.IMPORTANCE_NONE))
         assertFalse(NotificationPoster(context, ReliablePushOptions()).post(tid, "t", "b"))
         assertNull(posted())
+    }
+
+    @Test
+    fun blockedChannelGroupPostsNothing() {
+        val group = NotificationChannelGroup("g", "Group")
+        NotificationChannelGroup::class.java.getMethod("setBlocked", Boolean::class.javaPrimitiveType).invoke(group, true)
+        nm.createNotificationChannelGroup(group)
+        val channel = NotificationChannel("reliablepush_default", "Notifications", NotificationManager.IMPORTANCE_DEFAULT)
+        channel.group = "g"
+        nm.createNotificationChannel(channel)
+        assertFalse(NotificationPoster(context, ReliablePushOptions()).post(tid, "t", "b"))
+        assertNull(posted())
+    }
+
+    @Test
+    fun unblockedChannelGroupStillPosts() {
+        nm.createNotificationChannelGroup(NotificationChannelGroup("g", "Group"))
+        val channel = NotificationChannel("reliablepush_default", "Notifications", NotificationManager.IMPORTANCE_DEFAULT)
+        channel.group = "g"
+        nm.createNotificationChannel(channel)
+        assertTrue(NotificationPoster(context, ReliablePushOptions()).post(tid, "t", "b"))
+    }
+
+    @Test
+    fun pausedNotificationsPostNothing() {
+        assertFalse(NotificationPoster(context, ReliablePushOptions(), paused = { true }).post(tid, "t", "b"))
+        assertNull(posted())
+        assertTrue(NotificationPoster(context, ReliablePushOptions(), paused = { false }).post(tid, "t", "b"))
     }
 }

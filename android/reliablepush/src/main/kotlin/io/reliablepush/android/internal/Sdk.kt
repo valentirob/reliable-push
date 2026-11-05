@@ -118,13 +118,13 @@ internal class Sdk private constructor(context: Context, val baseUrl: String, va
      */
     fun flush() {
         if (queue.size() == 0) return
-        scheduler.schedule()
+        if (!scheduler.isPending()) scheduler.schedule() // persist() just did: do not reset the backoff on every burst event
         when (val r = sender().flush()) {
             FlushResult.Done -> if (queue.size() == 0) scheduler.cancel()
             FlushResult.NotRegistered -> scheduler.cancel()
             is FlushResult.RetryLater -> {
                 val delay = r.delaySeconds
-                if (delay != null && delay > RetryScheduler.DEFAULT_LATENCY_SECONDS) scheduler.schedule(delay)
+                if (delay != null && delay > RetryScheduler.DEFAULT_LATENCY_SECONDS) scheduler.schedule(delay.coerceAtMost(RetryScheduler.MAX_LATENCY_SECONDS))
             }
         }
     }
@@ -154,7 +154,11 @@ internal class Sdk private constructor(context: Context, val baseUrl: String, va
 
         fun create(context: Context, baseUrl: String, appId: String, jobId: Int) = Sdk(context, baseUrl, appId, jobId)
 
-        /** The configuration `configure` persisted, for the retry job; null when there is none (or it is invalid). Executor only. */
+        /**
+         * The configuration `configure` persisted, for the retry job; null when there is none (or it is invalid).
+         * Called on the SDK thread by [RetryJobService] and on the caller's thread by `ReliablePush.stateFor` (lazy
+         * path of `handle` before `configure`): it only reads the preferences and builds the object, no network.
+         */
         fun fromStoredConfig(context: Context, jobId: Int): Sdk? {
             val (baseUrl, appId) = TokenStore(context, cipherFactory()).loadConfig() ?: return null
             return try {

@@ -24,6 +24,8 @@ class RetryJobTest {
         assertEquals(Reschedule.Backoff, rescheduleDecision(FlushResult.RetryLater(30)))
         assertEquals(Reschedule.Backoff, rescheduleDecision(FlushResult.RetryLater(5)))
         assertEquals(Reschedule.After(31), rescheduleDecision(FlushResult.RetryLater(31)))
+        assertEquals(Reschedule.After(3600), rescheduleDecision(FlushResult.RetryLater(86_400)))
+        assertEquals(Reschedule.After(3600), rescheduleDecision(FlushResult.RetryLater(Long.MAX_VALUE)))
     }
 
     @Test

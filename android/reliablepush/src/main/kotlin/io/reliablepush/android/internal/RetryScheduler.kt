@@ -18,7 +18,7 @@ internal class RetryScheduler(private val context: Context, private val jobId: I
         try {
             val job = JobInfo.Builder(jobId, ComponentName(context, RetryJobService::class.java))
                 .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY)
-                .setMinimumLatency(minLatencySeconds.coerceAtLeast(0) * 1000)
+                .setMinimumLatency(minLatencySeconds.coerceIn(0, MAX_LATENCY_SECONDS) * 1000) // clamped: no overflow
                 .setBackoffCriteria(BACKOFF_MILLIS, JobInfo.BACKOFF_POLICY_EXPONENTIAL)
                 .setPersisted(false)
                 .build()
@@ -30,12 +30,17 @@ internal class RetryScheduler(private val context: Context, private val jobId: I
         }
     }
 
+    fun isPending(): Boolean = scheduler?.getPendingJob(jobId) != null
+
     fun cancel() {
         scheduler?.cancel(jobId)
     }
 
     companion object {
         const val DEFAULT_LATENCY_SECONDS = 30L
+
+        /** Longest minimum latency ever scheduled (also caps a server `Retry-After`): one hour. */
+        const val MAX_LATENCY_SECONDS = 3600L
         const val BACKOFF_MILLIS = 30_000L
     }
 }

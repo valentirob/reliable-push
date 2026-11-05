@@ -136,4 +136,15 @@ class TokenStoreTest {
         assertNotNull(store.loadConfig())
         assertEquals("https://x.example" to "news", TokenStore(context, XorCipher()).loadConfig())
     }
+
+    @Test
+    fun saveNeverThrowsWhenTheCipherCannotEvenBeReset() {
+        val cipher = object : TokenCipher {
+            override fun encrypt(plain: ByteArray): ByteArray = throw java.security.GeneralSecurityException("key invalidated")
+            override fun decrypt(blob: ByteArray): ByteArray = throw java.security.GeneralSecurityException("gone")
+            override fun reset() = throw java.io.IOException("keystore load failed")
+        }
+        assertFalse(TokenStore(context, cipher).save(Registration("dev-1", fakeJwt(0, 100), 100_000)))
+        assertNull(TokenStore(context, XorCipher()).load())
+    }
 }

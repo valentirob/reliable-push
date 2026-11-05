@@ -17,6 +17,7 @@ import io.reliablepush.android.internal.ScriptedResponse
 import io.reliablepush.android.internal.Sdk
 import io.reliablepush.android.internal.TestBackend
 import io.reliablepush.android.internal.TestLaunchActivity
+import io.reliablepush.android.internal.TokenCipher
 import io.reliablepush.android.internal.fakeJwt
 import org.json.JSONObject
 import org.junit.After
@@ -191,6 +192,20 @@ class ReliablePushTest {
     }
 
     @Test
+    fun flushDoesNotRescheduleAJobThatIsAlreadyPending() {
+        registered()
+        eventsStatus = 503
+        val sdk = Sdk.create(context, backend.baseUrl, "news", jobId)
+        sdk.queue.add(io.reliablepush.android.internal.QueuedEvent(tid, "DELIVERED", 1L))
+        sdk.scheduler.schedule(120) // as persist() just did for this event
+        sdk.flush()
+        assertEquals(120_000L, js.getPendingJob(jobId)!!.minLatencyMillis) // untouched: backoff/quota not reset
+        js.cancel(jobId)
+        sdk.flush() // nothing pending: flush schedules it
+        assertEquals(30_000L, js.getPendingJob(jobId)!!.minLatencyMillis)
+    }
+
+    @Test
     fun notificationsDisabledMeansNoDelivered() {
         registered()
         shadowOf(nm).setNotificationsEnabled(false)
@@ -338,6 +353,23 @@ class ReliablePushTest {
         ReliablePush.register(idToken) { result = it }
         settle()
         assertEquals(RegisterResult.Failed(null), result)
+    }
+
+    @Test
+    fun registerAlwaysCallsBackEvenOnCheckedExceptions() {
+        Sdk.cipherFactory = {
+            object : TokenCipher {
+                override fun encrypt(plain: ByteArray): ByteArray = throw java.security.GeneralSecurityException("x")
+                override fun decrypt(blob: ByteArray): ByteArray = throw java.security.GeneralSecurityException("x")
+                override fun reset() = throw java.io.IOException("keystore load failed")
+            }
+        }
+        configure()
+        var result: RegisterResult? = null
+        ReliablePush.register(idToken) { result = it }
+        settle()
+        assertEquals(RegisterResult.Failed(null), result)
+        assertNull(ReliablePush.deviceId)
     }
 
     @Test

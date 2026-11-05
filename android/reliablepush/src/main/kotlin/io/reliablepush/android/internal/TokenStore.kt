@@ -24,8 +24,8 @@ internal class TokenStore(context: Context, private val cipher: TokenCipher) {
         val encrypted = try {
             cipher.encrypt(bytes)
         } catch (e: Exception) {
-            cipher.reset()
             try {
+                cipher.reset() // may throw too (KeyStore.load: IOException); a failed save must never throw
                 cipher.encrypt(bytes)
             } catch (e2: Exception) {
                 clear()
