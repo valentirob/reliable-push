@@ -107,22 +107,22 @@ The SDK posts the visible notification first, persists the event, schedules the 
   - `android/README.md`, `android/.gitignore`
 - Modify: root `.gitignore` (add `!android/gradle/wrapper/gradle-wrapper.jar`: the root ignores `*.jar`)
 
-- [ ] **Step 1: Pick the versions** (each the latest stable release at least two weeks old; record each with its release date in the report):
+- [x] **Step 1: Pick the versions** (each the latest stable release at least two weeks old; record each with its release date in the report):
   - The Gradle wrapper (with `distributionSha256Sum`).
   - An AGP that supports `compileSdk 37`. If it has built-in Kotlin support, use it; otherwise pin `org.jetbrains.kotlin.android`.
   - GA `firebase-messaging`, JUnit 4, Robolectric (supporting SDK 37, or the highest it supports, used through `@Config(sdk = …)`), `androidx.test` runner/rules/ext-junit/orchestrator, `androidx.test.uiautomator`, the Google Services Gradle plugin (used only by Task 7).
-- [ ] **Step 2: Configure.**
+- [x] **Step 2: Configure.**
   - Library namespace `io.reliablepush.android`, `explicitApi()`, `buildFeatures.buildConfig = false`.
   - The SDK version string comes from `gradle.properties` `VERSION_NAME=0.1.0-SNAPSHOT`.
   - `firebase-messaging` is `compileOnly`, with `testImplementation` for Robolectric tests.
   - `minSdk 26`, Java/Kotlin target 17, unit tests `isIncludeAndroidResources = true`.
   - The library manifest declares `android.permission.INTERNET` and `RetryJobService` (`android.permission.BIND_JOB_SERVICE`, `exported=false`). The class follows in Task 3; until then keep the manifest entry out or the build fails.
-- [ ] **Step 3: Smoke test.**
+- [x] **Step 3: Smoke test.**
   - `VersionTest.versionMatchesGradleProperty()` (Robolectric): `ReliablePush.VERSION == "0.1.0-SNAPSHOT"`. A `public const val` on the object is the only code in this task.
   - Run: `cd android && ./gradlew build` → BUILD SUCCESSFUL (lint, unit tests, debug and release AAR).
   - `./gradlew :reliablepush:dependencies --configuration releaseRuntimeClasspath` lists only `org.jetbrains.kotlin:kotlin-stdlib` (and its annotations).
-- [ ] **Step 4: Docs.** `android/README.md`: layout, prerequisites (JDK 21, Android SDK, `ANDROID_HOME`), commands. `AGENTS.md` rows follow in Task 8.
-- [ ] **Step 5: Commit** `build(android): gradle project and pinned versions`
+- [x] **Step 4: Docs.** `android/README.md`: layout, prerequisites (JDK 21, Android SDK, `ANDROID_HOME`), commands. `AGENTS.md` rows follow in Task 8.
+- [x] **Step 5: Commit** `build(android): gradle project and pinned versions`
 
 ### Task 1: Device API client
 

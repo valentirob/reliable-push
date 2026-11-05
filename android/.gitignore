@@ -1,0 +1,8 @@
+.gradle/
+build/
+local.properties
+*.apk
+*.aab
+.kotlin/
+# Firebase files are placed by the maintainer, never committed
+sample/google-services.json
