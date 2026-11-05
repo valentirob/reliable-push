@@ -2,6 +2,13 @@
 
 Newest entry first. Updated at the end of every work session (see `.agents/skills/session-handoff/SKILL.md`).
 
+## 2026-11-05 (2) — Claude Code — `develop`
+
+- **Done:** `feature/cycle1b-harness` merged into `develop` (`--no-ff`, `fad89f9`) and pushed; branch deleted. Plans 1A and 1B are both on `develop`.
+- **State:** on the merged tree: `./mvnw -B -pl harness -am verify` 34 client + 106 harness unit + 73 harness integration tests, 0 failures; `cd backend && ./mvnw -B verify` 229 unit + 212 integration tests, 0 failures. GitHub Actions on `develop` (`fad89f9`): Backend CI (incl. Trivy from its pinned image) ✅, Client and harness CI (first run) ✅, CodeQL ✅. `main` is still the initial commit (no release yet).
+- **Next:** plan 1C: Helm chart for GKE/OpenShift (`deploy/helm/reliable-push`), Gatling load test, API/worker pool sizing. Then the Android SDK cycle, then iOS.
+- **Open:** (a) `scripts/e2e.ps1` / `scripts/demo.ps1` untested on Windows. (b) Console write guard: harden with a Host allowlist (127.0.0.1/localhost/[::1], `/hooks/` exempt) against DNS rebinding and match on the normalized path. (c) Backend follow-ups from the 2026-11-04 entry (graceful worker shutdown, claim coalescing, client-abort logging, management port, stale JWKS cap, `api` profile gating).
+
 ## 2026-11-05 — Claude Code — `feature/cycle1b-harness`
 
 - **Done:** final whole-branch review of plan 1B and its fix wave. The `console-smoke` flake was root-caused: a stale device-list response in the console's Send push screen could reset a chosen behaviour (e.g. `never` silently sent as `deliver:1s`); fixed with request-sequence guards in all console views and pinned by a deterministic Playwright regression test (held route) plus failure diagnostics. Also: inbox mode select no longer overwritten by the 3 s poll; console defaults to app `shop`; backend errors carry their real status (429 + Retry-After); cross-site guard on console writes (same-origin, JSON bodies); log-hygiene scans the signing private key and DB password; serialized log-tail polls.
