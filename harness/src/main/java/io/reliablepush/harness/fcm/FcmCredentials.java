@@ -21,6 +21,9 @@ public final class FcmCredentials {
 
     private static final JsonMapper JSON = JsonMapper.builder().build();
 
+    /** A Google Cloud project id: it goes into the FCM URL path, so nothing else is accepted. */
+    private static final java.util.regex.Pattern PROJECT_ID = java.util.regex.Pattern.compile("^[a-z][a-z0-9-]{4,28}[a-z0-9]$");
+
     private final String projectId;
     private final String clientEmail;
     private final PrivateKey privateKey;
@@ -50,6 +53,9 @@ public final class FcmCredentials {
             throw new IllegalArgumentException("the service-account file is not readable JSON");
         }
         String project = text(json, "project_id");
+        if (!PROJECT_ID.matcher(project).matches()) {
+            throw new IllegalArgumentException("the service-account project_id is not a valid Google project id");
+        }
         String email = text(json, "client_email");
         String pem = text(json, "private_key");
         String tokenUri = text(json, "token_uri");

@@ -40,7 +40,17 @@ public final class FcmSender {
         return credentials.projectId();
     }
 
+    /** Never throws: any failure is {@code FAILED(0)}, so the caller keeps its tracking id. */
     public FcmResult send(String fcmToken, UUID trackingId, String title, String body) {
+        try {
+            return doSend(fcmToken, trackingId, title, body);
+        } catch (RuntimeException e) {
+            LOG.warn("fcm.send failed trackingId={} reason=error type={}", trackingId, e.getClass().getSimpleName());
+            return FcmResult.failed(0);
+        }
+    }
+
+    private FcmResult doSend(String fcmToken, UUID trackingId, String title, String body) {
         String accessToken;
         try {
             accessToken = tokens.accessToken();

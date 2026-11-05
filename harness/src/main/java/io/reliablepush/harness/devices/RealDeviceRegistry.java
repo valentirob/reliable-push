@@ -82,6 +82,22 @@ public class RealDeviceRegistry {
         }
     }
 
+    /** Drops the FCM token of a device only if it still equals {@code expected}; true when it was dropped. */
+    public boolean clearFcmToken(UUID deviceId, String expected) {
+        synchronized (devices) {
+            List<RealDevice> all = List.copyOf(devices);
+            boolean cleared = false;
+            devices.clear();
+            for (RealDevice d : all) {
+                boolean match = d.deviceId().equals(deviceId) && expected != null && expected.equals(d.fcmToken());
+                cleared |= match;
+                devices.addLast(match ? new RealDevice(d.appId(), d.userId(), d.deviceId(), d.platform(), d.label(),
+                        d.registeredAt(), null) : d);
+            }
+            return cleared;
+        }
+    }
+
     /** The devices of one user of an app, oldest first. */
     public List<RealDevice> forUser(String appId, String userId) {
         synchronized (devices) {

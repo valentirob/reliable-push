@@ -167,4 +167,49 @@ class FcmSenderTest {
         assertThat(new FcmPusher(good.toString(), new io.reliablepush.harness.devices.RealDeviceRegistry()).enabled())
                 .isTrue();
     }
+
+    @Test
+    void invalidProjectIdIsRejectedWithoutEchoingIt() throws Exception {
+        KeyPair key = FcmTestSupport.newKey();
+        for (String bad : List.of("Bad_Project", "Zq9", "has space", "x/../y", "UPPER-case-id", "-leading-dash", "trailing-dash-",
+                "a".repeat(31))) {
+            Path file = dir.resolve("bad.json");
+            Files.writeString(file, Files.readString(FcmTestSupport.writeCredentials(dir, key))
+                    .replace("\"project_id\":\"example-project\"", "\"project_id\":\"" + bad + "\""));
+            org.assertj.core.api.Assertions.assertThatThrownBy(() -> FcmCredentials.load(file))
+                    .isInstanceOf(IllegalArgumentException.class).hasMessageNotContaining(bad);
+        }
+        assertThat(FcmCredentials.load(FcmTestSupport.writeCredentials(dir, key))).isPresent();
+    }
+
+    @Test
+    void anyRuntimeFailureBecomesStatusZero() throws Exception {
+        KeyPair key = FcmTestSupport.newKey();
+        try (Stub stub = stub(200, "{}")) {
+            FcmCredentials creds = FcmCredentials.load(FcmTestSupport.writeCredentials(dir, key)).orElseThrow();
+            GoogleAccessTokens tokens = new GoogleAccessTokens(creds, new MutableClock(T0), URI.create(stub.url() + "/token"));
+            // an unsupported scheme makes the JDK client throw IllegalArgumentException from send()
+            FcmSender s = new FcmSender(creds, tokens, URI.create("ftp://127.0.0.1"));
+            assertThat(s.send(FCM_TOKEN, UUID.randomUUID(), "t", "b")).isEqualTo(FcmResult.failed(0));
+        }
+    }
+
+    @Test
+    void unregisteredKeepsATokenThatWasReplacedMeanwhile() throws Exception {
+        KeyPair key = FcmTestSupport.newKey();
+        io.reliablepush.harness.devices.RealDeviceRegistry registry =
+                new io.reliablepush.harness.devices.RealDeviceRegistry();
+        UUID device = UUID.randomUUID();
+        registry.add("shop", "u", device, io.reliablepush.harness.devices.Platform.ANDROID, "l", FCM_TOKEN);
+        try (Stub stub = new Stub(s -> {
+            if (s.path().equals("/token")) {
+                return new Object[] {200, "{\"access_token\":\"" + ACCESS_TOKEN + "\",\"expires_in\":3600}"};
+            }
+            registry.setFcmToken(device, "newer-token"); // the app reported a fresh token while the send was in flight
+            return new Object[] {404, "{\"error\":{\"details\":[{\"errorCode\":\"UNREGISTERED\"}]}}"};
+        })) {
+            new FcmPusher(java.util.Optional.of(sender(stub, key)), registry).push("shop", "u", UUID.randomUUID(), "t", "b");
+            assertThat(registry.all("shop").get(0).fcmToken()).isEqualTo("newer-token");
+        }
+    }
 }

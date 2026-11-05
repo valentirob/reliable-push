@@ -61,7 +61,7 @@ public class FcmPusher {
         return registry.forUser(appId, userId).stream().filter(d -> d.fcmToken() != null).map(d -> {
             FcmResult r = sender.get().send(d.fcmToken(), trackingId, title, body);
             if (r.outcome() == FcmResult.Outcome.UNREGISTERED) {
-                registry.setFcmToken(d.deviceId(), null);
+                registry.clearFcmToken(d.deviceId(), d.fcmToken()); // not if the app reported a new one meanwhile
             }
             return new DevicePush(d.deviceId(), r);
         }).toList();
