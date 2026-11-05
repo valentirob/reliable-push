@@ -4,20 +4,19 @@
 
 **Goal:** Ship the Android SDK (`android/`) that registers the device, reports `DELIVERED` from the FCM entry point (also with the app not running) and `READ` on tap, queues and retries failed events, and revokes on logout. Prove it with JVM tests in CI and with instrumented tests on a local emulator against the existing harness.
 
-**Architecture:** A Gradle project in `android/` (separate from the Maven reactor) with three modules:
+**Architecture:** A Gradle project in `android/` (separate from the Maven reactor) with two modules:
 - `reliablepush`: the library, platform APIs only. The public object `ReliablePush` sits on small internal units: `DeviceApi` (HttpURLConnection + org.json), `TokenStore` (Keystore AES-GCM + private SharedPreferences), `EventQueue` (AtomicFile in `noBackupFilesDir`), `EventSender` (batch flush, 401 → one refresh), `RetryJobService` (one-off JobScheduler job with a network constraint) and `NotificationPoster`.
-- `reliablepush-fcm-v2` (optional): the `AndroidConfigV2` entry point, compiled against the early-access firebase-messaging.
 - `sample`: a demo app.
 
-The SDK posts the visible notification first, persists the event, schedules the retry job, then flushes on its own executor, so the push entry point returns in milliseconds. The harness gains a grant endpoint and a "real devices" list so the sample app on an emulator registers like a simulated device. `scripts/android-e2e.sh` boots the emulator, starts the harness stack and runs the instrumented tests.
+The SDK posts the visible notification first, persists the event, schedules the retry job, then flushes on its own executor, so the push entry point returns in milliseconds. The harness gains a grant endpoint and a "real devices" list so the sample app on an emulator registers like a simulated device. `scripts/android-e2e.sh` boots the emulator, starts the harness stack and runs the instrumented tests. Pushes are simulated by calling the SDK entry point (in-process or by a debug-only broadcast). An optional real-FCM mode (Task 7, needs the maintainer's own Firebase project, credentials only in git-ignored local files) sends through FCM so Google Play services wakes the real `FirebaseMessagingService`.
 
-**Tech Stack:** Kotlin, Android Gradle Plugin (version pinned in Task 0, supporting compileSdk 37), Gradle wrapper, minSdk 26, compileSdk/targetSdk 37. Tests: JUnit 4, Robolectric, AndroidX Test and UiAutomator (test scope only). Push library: `com.google.firebase:firebase-messaging` (GA, `compileOnly` in the library). Mode v2: `firebase-messaging:26.1.0-eap01` from Google's local-Maven zip.
+**Tech Stack:** Kotlin, Android Gradle Plugin (version pinned in Task 0, supporting compileSdk 37), Gradle wrapper, minSdk 26, compileSdk/targetSdk 37. Tests: JUnit 4, Robolectric, AndroidX Test and UiAutomator (test scope only). Push library: `com.google.firebase:firebase-messaging` (GA, `compileOnly` in the library, `implementation` in the sample). Real FCM: the Google Services Gradle plugin in the sample, applied only when `android/sample/google-services.json` exists; the harness calls the FCM HTTP v1 API with JDK only.
 
 **Spec:** `docs/specs/2026-11-03-reliable-push-design.md` (§4.2 device API, §5 device JWT and rate limits, §6 payload contract, §7.1, §7.2, §9.2 budget and AAR < 100 KB, §10 mobile row, §10.1 mobile E2E, §10.2 "real devices", §11 mobile CI). Requirements: FR-4 to FR-8, FR-10, NFR-1, NFR-5, NFR-6, NFR-10. Rules: `.agents/rules/mobile-sdk.md`.
 
 **Follow-up (not in this plan):**
 - Release to Maven Central: needs a Sonatype namespace and a signing key. This plan only prepares the publication and verifies it with `publishToMavenLocal`.
-- A "real sender" harness mode through FCM: needs a Firebase project and its credentials.
+- Mode v2 (`AndroidConfigV2`, `onNotificationReceived`): deferred by the maintainer (2026-11-05) until Google ships it as GA. Today it exists only as `firebase-messaging 26.1.0-eap01` (local-Maven zip, API may change). Mode v1 stays the default and is what this plan builds. FCM also delivers v2-shaped messages to v1 apps through `onMessageReceived`.
 - The iOS SDK (cycle 3).
 
 ## Global Constraints
@@ -30,7 +29,7 @@ The SDK posts the visible notification first, persists the event, schedules the 
   - Test-only dependencies (JUnit, Robolectric, AndroidX Test, UiAutomator) are allowed.
   - Task 8 checks the release AAR at **< 100 KB** in CI.
 - Public API: package `io.reliablepush.android`, Kotlin `explicitApi()`. Everything else is `internal`.
-- Maven coordinates: `io.reliablepush:reliable-push-android:0.1.0-SNAPSHOT` (v2 module: `reliable-push-android-fcm-v2`). Gradle module names: `reliablepush`, `reliablepush-fcm-v2`, `sample`.
+- Maven coordinates: `io.reliablepush:reliable-push-android:0.1.0-SNAPSHOT`. Gradle module names: `reliablepush`, `sample`.
 - Payload contract (spec §6), mode v1: data keys `rp_tid` (UUID string), `title`, `body`. A message without `rp_tid` is not the SDK's (`handle` returns `false` and does nothing). A malformed `rp_tid` returns `false` and logs WARN.
 - `DELIVERED` is reported **only if the notification was actually posted**: `NotificationManager.areNotificationsEnabled()`, and the channel importance is not `IMPORTANCE_NONE`. Otherwise there is no event and the backend's fallback decides (spec §7, known limits).
 - Token rules (spec §7.1):
@@ -56,8 +55,7 @@ The SDK posts the visible notification first, persists the event, schedules the 
   - Below WARN only when the host app is debuggable (`ApplicationInfo.FLAG_DEBUGGABLE`).
   - Never log tokens, ID tokens, user ids or notification title/body. `rp_tid` and the device id are allowed.
 - Store policy (NFR-5, rule `mobile-sdk.md`):
-  - No hidden notifications in mode v1.
-  - `NotificationResponse.suppress()` is never used in mode v2.
+  - No hidden notifications: every tracked push is shown.
   - Data sent: `deviceId`, `trackingId`, event type, timestamp, app id. This is documented for Play Data Safety (Task 8).
 - E2E is local only, never in CI:
   - `scripts/e2e.sh` stays at `E2E: 17/17 passed`.
@@ -66,8 +64,8 @@ The SDK posts the visible notification first, persists the event, schedules the 
   - Never restart or resize Colima without the maintainer's OK.
 - Versions:
   - Pinned once in Task 0 (`android/gradle/libs.versions.toml` and the Gradle wrapper with `distributionSha256Sum`), each the latest release at least two weeks old.
-  - Exception, documented: the v2 EAP artifact, pinned by its zip SHA-256.
   - Nothing dynamic (`+`, `latest`).
+- Credentials (Task 7): the Firebase files (`android/sample/google-services.json`, the service-account key under `harness/build/fcm/`) are created and placed by the maintainer, are git-ignored, and are never committed, logged, printed or entered by an agent. Without them every build, test and E2E run passes and the real-FCM entries report `SKIPPED`.
 - Gitflow:
   - All tasks commit to `feature/cycle2-android-sdk`, cut from `feature/plan-cycle2`.
   - Conventional Commits with scope `android` / `harness` / `ci` / `docs`.
@@ -107,11 +105,12 @@ The SDK posts the visible notification first, persists the event, schedules the 
   - `android/reliablepush/build.gradle.kts`, `android/reliablepush/src/main/AndroidManifest.xml`, `android/reliablepush/consumer-rules.pro`
   - `android/sample/build.gradle.kts` (an empty app for now)
   - `android/README.md`, `android/.gitignore`
+- Modify: root `.gitignore` (add `!android/gradle/wrapper/gradle-wrapper.jar`: the root ignores `*.jar`)
 
 - [ ] **Step 1: Pick the versions** (each the latest stable release at least two weeks old; record each with its release date in the report):
   - The Gradle wrapper (with `distributionSha256Sum`).
   - An AGP that supports `compileSdk 37`. If it has built-in Kotlin support, use it; otherwise pin `org.jetbrains.kotlin.android`.
-  - GA `firebase-messaging`, JUnit 4, Robolectric (supporting SDK 37, or the highest it supports, used through `@Config(sdk = …)`), `androidx.test` runner/rules/ext-junit/orchestrator, `androidx.test.uiautomator`.
+  - GA `firebase-messaging`, JUnit 4, Robolectric (supporting SDK 37, or the highest it supports, used through `@Config(sdk = …)`), `androidx.test` runner/rules/ext-junit/orchestrator, `androidx.test.uiautomator`, the Google Services Gradle plugin (used only by Task 7).
 - [ ] **Step 2: Configure.**
   - Library namespace `io.reliablepush.android`, `explicitApi()`, `buildFeatures.buildConfig = false`.
   - The SDK version string comes from `gradle.properties` `VERSION_NAME=0.1.0-SNAPSHOT`.
@@ -250,10 +249,6 @@ The SDK posts the visible notification first, persists the event, schedules the 
   - `public data class ReliablePushOptions(val channelId: String = "reliablepush_default", val channelName: String = "Notifications", val smallIcon: Int = 0 /* 0 → app icon */, val launchActivity: Class<out Activity>? = null /* null → launcher activity */, val jobId: Int = 0x52500001, val customizer: ((Notification.Builder, String /* rp_tid */) -> Unit)? = null)`
   - `public sealed interface RegisterResult`: `Success(deviceId: String)` | `Failed(httpStatus: Int?)`
   - `public object ReliablePushMessaging { fun onMessageReceived(context: Context, message: RemoteMessage): Boolean }`: delegates to `handle(context, message.data, message.notification?.title, message.notification?.body)`. Hosts call it from their `FirebaseMessagingService.onMessageReceived`; if it returns `false` the message is the host's.
-  - For other entry points (the v2 module in Task 7 cannot use the library's `internal` classes): public but opt-in (`@RequiresOptIn` annotation `@ReliablePushEntryPointApi`, not meant for app code):
-    - `ReliablePush.prepare(context, data, fallbackTitle, fallbackBody): PreparedNotification?` — null when `rp_tid` is missing or malformed; `PreparedNotification(trackingId: String, tag: String, id: Int, notification: Notification, canBeShown: Boolean)`.
-    - `ReliablePush.confirmShown(prepared)` — enqueue `DELIVERED`, schedule the job, flush.
-    - `handle` is `prepare`, then post, then `confirmShown` when `canBeShown`.
   - Notification: channel created on first post. Notification id = `rp_tid.hashCode()`, tag `rp`. Content intent is `PendingIntent.getActivity` (immutable) on the launch activity, with extra `rp_tid`, `autoCancel`. Title falls back to `data.title`, then `fallbackTitle`, then the app label; body falls back to `data.body`, then `fallbackBody`, then `""`.
 
 - [ ] **Step 1: Failing tests** (Robolectric, `TestBackend` from Task 1):
@@ -341,35 +336,30 @@ The SDK posts the visible notification first, persists the event, schedules the 
 - [ ] **Step 2: Run** `./scripts/android-e2e.sh` before the sample code exists → FAIL (compile or test). **Step 3: Implement** the sample and the script. **Step 4: Run** → `Android E2E: 8/8 passed` (6 instrumented + the Keystore test + cold start). Feedback loop as in `run-e2e`: at most 3 rounds, then stop and record.
 - [ ] **Step 5: Commit** `feat(android): sample app and emulator e2e against the harness`
 
-### Task 7: Mode v2 (`AndroidConfigV2`, early access)
+### Task 7: Real FCM pushes (optional, maintainer's Firebase project)
+
+Why: the simulated path (Task 6) proves the SDK logic but not the real entry: Google Play services waking a killed app
+and calling the `FirebaseMessagingService` declared in the manifest, with Firebase configured. This task adds that path
+without making any build or test depend on credentials.
 
 **Files:**
-- Create:
-  - `android/reliablepush-fcm-v2/{build.gradle.kts,src/main/java/io/reliablepush/android/fcmv2/ReliablePushV2.kt,src/test/...}`
-  - `android/scripts/fetch-fcm-eap.sh`
-- Modify:
-  - `android/settings.gradle.kts`: include the module only when `android/build/fcm-eap/m2repository` exists or `-PfcmEap=true`, so the default build and CI never depend on the EAP zip.
-  - `harness/.../sender/PayloadPreview.java` (`fcmV2`), `docs/integration-guide.md` (mode v2)
+- Create: `harness/src/main/java/io/reliablepush/harness/fcm/{FcmCredentials.java,GoogleAccessTokens.java,FcmSender.java}`; `harness/src/test/java/io/reliablepush/harness/fcm/{GoogleAccessTokensTest.java,FcmSenderTest.java}` (stub endpoints with the JDK `HttpServer`, a test RSA key generated in the test)
+- Modify: `RealDeviceRegistry` / console push (Task 5) to accept an optional `fcmToken` per real device and send through FCM; `harness/compose/docker-compose.yml` (mount `../build/fcm` read-only at `/run/fcm`, created empty by the scripts); `android/sample/build.gradle.kts` (apply `com.google.gms.google-services`, version pinned in Task 0, only when `android/sample/google-services.json` exists); `SampleMessagingService` (`onNewToken` → report to the harness, debug only); `MainActivity` (send the FCM token with the real-device entry when Firebase is configured); `scripts/android-e2e.sh`; `.gitignore` (`android/sample/google-services.json`); `docs/testing.md`
 
 **Interfaces:**
-- Consumes: `ReliablePush.prepare` / `confirmShown` (Task 4, opt-in API).
-- Produces: `public object ReliablePushV2 { fun onNotificationReceived(context: Context, message: RemoteMessage): NotificationResponse }`.
-  - It calls `prepare(...)` and returns `NotificationResponse` posting `prepared.notification` with its tag and id (the factory name is taken from the EAP sources: `create(tag, id, notification)` per the FCM migration guide).
-  - It calls `confirmShown` (so `DELIVERED` is queued) only when `canBeShown`.
-  - A message without `rp_tid` is posted unchanged from its `notification` fields.
-  - It never uses `suppress()`.
-  - It returns well under 20 s: no network call on the calling thread.
-  - `fetch-fcm-eap.sh` downloads `FirebaseMessaging_26.1.0-eap01.zip` from `dl.google.com` into `android/build/fcm-eap/`, verifies the SHA-256 pinned in the script, and unzips it.
+- Consumes: `PayloadPreview.fcmV1` (the exact message shape, spec §6), `RealDeviceRegistry` (Task 5).
+- Produces:
+  - `FcmCredentials.load(Path)` — reads a Google service-account JSON (`project_id`, `client_email`, `private_key` PKCS#8 PEM, `token_uri`); `toString()` redacts everything but `project_id`; absent file → `Optional.empty()` and real mode off.
+  - `GoogleAccessTokens` — OAuth 2.0 JWT bearer grant with JDK only: RS256 JWT (`iss` = `client_email`, `scope` = `https://www.googleapis.com/auth/firebase.messaging`, `aud` = `token_uri`, `iat`, `exp = iat + 3600`) posted as `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer`; caches the access token until 60 s before `expires_in`. Endpoints fixed (`https://oauth2.googleapis.com/token`, `https://fcm.googleapis.com/v1/projects/{project}/messages:send`); a base-URL override exists only as a package-private constructor for tests.
+  - `FcmSender.send(fcmToken, trackingId, title, body): FcmResult` (`SENT` | `UNREGISTERED` (404 / `UNREGISTERED`, the device's FCM token is dropped) | `FAILED(status)`), body = `PayloadPreview.fcmV1` with the real token.
+  - Console: `GET /console/api/apps` reports `fcmEnabled`; a push to a user with real devices that have an `fcmToken` sends to each and shows the `FcmResult` in the timeline. FCM tokens, the access token and the key are never logged or returned by any endpoint (only "token present").
+  - `android-e2e.sh`: when both `android/sample/google-services.json` and `harness/build/fcm/service-account.json` exist, adds entry `fcm-real-delivery`: register (`autoRegisterUser`), `HOME`, `am kill`, console push to that user → `DELIVERED` within 60 s through the real `SampleMessagingService`. Otherwise the entry is `SKIPPED` and the line reads `Android E2E: 8/8 passed, 1 skipped`.
 
-- [ ] **Step 1:** Run `fetch-fcm-eap.sh`, then read the EAP API: the `onNotificationReceived` signature, the `NotificationResponse` factories, and where `rp_tid` arrives (top-level `message.data`, per the FCM `AndroidConfigV2` guide).
-  - The payload shape and factory names are taken from the artifact. Where they differ from spec §6 or the harness preview (data inside `remote_notification`), the artifact and the FCM guide win: update the preview to top-level `data` plus `android_v2.remote_notification {mutable_content: true, use_as_v1_data_message: true, notification}`, and record the change for the spec in Task 8.
-- [ ] **Step 2: Failing tests** (Robolectric, EAP classpath):
-  - `v2PostsAndQueuesDelivered()`
-  - `v2WithoutRpTidPostsUnchanged()`
-  - `v2NotificationsDisabledReturnsFallbackWithoutDelivered()`
-  - `v2NeverSuppresses()`
-- [ ] **Step 3: Implement. Step 4: Run** `./gradlew -PfcmEap=true build` → PASS, and `./gradlew build` without the zip → PASS (module excluded).
-- [ ] **Step 5: Commit** `feat(android): optional fcm android config v2 entry point (early access)`
+- [ ] **Step 1: Failing tests:** `jwtAssertionIsSignedAndHasClaims()` (verify with the test public key; claims as above); `accessTokenIsCachedUntilNearExpiry()`; `sendPostsV1DataMessageWithBearer()` (body equals the preview with the token); `unregisteredDropsTheToken()`; `credentialsNeverInToStringOrLogs()`; `missingCredentialsDisableRealMode()`.
+- [ ] **Step 2: Run** `./mvnw -B -pl harness -am verify` → FAIL. **Step 3: Implement.** **Step 4: Run** → PASS; `cd android && ./gradlew build` (no `google-services.json`) → PASS; `./scripts/e2e.sh` → `E2E: 17/17 passed`; `./scripts/android-e2e.sh` → `8/8 passed, 1 skipped`.
+- [ ] **Step 5: Docs** (`docs/testing.md`, "Real FCM pushes"): the maintainer creates a Firebase project, adds an Android app with package `io.reliablepush.sample`, downloads `google-services.json` into `android/sample/`, creates a service-account key allowed to send FCM messages and saves it as `harness/build/fcm/service-account.json` (`chmod 600`); both stay git-ignored; delete the key in the Google Cloud console when done.
+- [ ] **Step 6: Commit** `feat(harness): optional real fcm sender for the sample app`
+- [ ] **Step 7 (maintainer, optional):** when the maintainer has placed both files, run `./scripts/android-e2e.sh --test fcm-real-delivery` → PASSED; record the result (or "not run, no credentials") in `docs/STATUS.md`. The agent never creates the project, downloads keys or enters credentials.
 
 ### Task 8: CI, publication, docs and final verification
 
@@ -387,7 +377,7 @@ The SDK posts the visible notification first, persists the event, schedules the 
   - JDK 21; `./gradlew build` in `android/`.
   - AAR size check: `reliablepush-release.aar` < 102400 bytes, else fail with the size.
   - Upload the unit test reports on failure.
-  - No emulator, no v2 module.
+  - No emulator, no Firebase credentials.
 - [ ] **Step 2: Security and updates.**
   - CodeQL gains an Android job (java-kotlin, manual build `./gradlew :reliablepush:assembleRelease`, paths `android/**`).
   - Dependabot `gradle` for `/android`.
@@ -402,7 +392,7 @@ The SDK posts the visible notification first, persists the event, schedules the 
     - setup;
     - host `FirebaseMessagingService` snippet and `trackOpen` in the launch activity;
     - `POST_NOTIFICATIONS`;
-    - mode v2 (early access);
+    - mode v2 not supported yet (waiting for Google's GA; FCM delivers v2-shaped messages to v1 apps through `onMessageReceived`);
     - logging names;
     - Play Data Safety entries (device id, trackingId, event type, timestamp; sent over TLS; not shared; deleted by retention);
     - backup advice (exclude `io.reliablepush.store.xml` via `dataExtractionRules`);
@@ -410,13 +400,12 @@ The SDK posts the visible notification first, persists the event, schedules the 
   - Integration guide §4 points to it.
   - README components table; `AGENTS.md` commands (`cd android && ./gradlew build`, `./scripts/android-e2e.sh`).
   - `docs/testing.md` Android section; the run-e2e skill mentions the Android suite.
-  - Spec changes block for plan 2: v2 payload shape, harness grants and real devices, the SDK units, the one-refresh-per-process rule, DELIVERED only when posted.
+  - Spec changes block for plan 2: mode v2 deferred until GA, harness grants and real devices, optional real FCM sender, the SDK units, the one-refresh-per-process rule, DELIVERED only when posted.
 - [ ] **Step 5: Final verification**, each command run once:
   - `cd android && ./gradlew build`
-  - `./gradlew -PfcmEap=true build` (if the EAP zip is fetched)
   - `./mvnw -B -pl harness -am verify`
   - `cd backend && ./mvnw -B verify` (unchanged; a regression guard)
   - `./scripts/e2e.sh` → `E2E: 17/17 passed`
-  - `./scripts/android-e2e.sh` → `Android E2E: 8/8 passed`
+  - `./scripts/android-e2e.sh` → `Android E2E: 8/8 passed` (plus `fcm-real-delivery`: PASSED, or SKIPPED without the maintainer's Firebase files)
   - Record the counts and both lines in `docs/STATUS.md`.
 - [ ] **Step 6: Commit** `ci(android): build, size check and codeql; docs: android sdk`, then run the `session-handoff` skill.
