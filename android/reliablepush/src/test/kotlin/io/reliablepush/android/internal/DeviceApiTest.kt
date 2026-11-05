@@ -82,6 +82,12 @@ class DeviceApiTest {
     }
 
     @Test
+    fun sendEvents200WithoutItemsIsOkEmpty() {
+        backend.enqueue(json("""{"accepted":0,"ignored":0}"""))
+        assertEquals(ApiResult.Ok(emptyList<EventOutcome>()), api().sendEvents("tok", listOf(QueuedEvent("a", "DELIVERED", 1L))))
+    }
+
+    @Test
     fun sendEventsParsesPerItemOutcomes() {
         backend.enqueue(
             json("""{"accepted":1,"ignored":1,"items":[{"trackingId":"a","outcome":"ACCEPTED"},{"trackingId":"b","outcome":"LATE"}]}"""),

@@ -5,6 +5,7 @@ import org.json.JSONArray
 import org.json.JSONException
 import org.json.JSONObject
 import java.io.File
+import java.io.FileNotFoundException
 import java.io.IOException
 
 /**
@@ -21,7 +22,7 @@ internal class EventQueue(dir: File, private val debugLogging: Boolean = false) 
     private val dir = dir
 
     fun add(event: QueuedEvent) = synchronized(LOCK) {
-        val items = read()
+        val items = read() ?: return@synchronized
         if (items.any { it.event.key() == event.key() }) return@synchronized
         items.add(Entry(event, 0))
         var dropped = 0
@@ -37,14 +38,14 @@ internal class EventQueue(dir: File, private val debugLogging: Boolean = false) 
 
     /** The oldest [max] events whose key is not in [exclude]. */
     fun peek(max: Int, exclude: Set<String> = emptySet()): List<QueuedEvent> = synchronized(LOCK) {
-        read().asSequence().map { it.event }.filter { it.key() !in exclude }.take(max).toList()
+        (read() ?: mutableListOf()).asSequence().map { it.event }.filter { it.key() !in exclude }.take(max).toList()
     }
 
     /** Removes events by key (`trackingId + type`, see [keyOf]). */
     fun remove(ids: Collection<String>) = synchronized(LOCK) {
         if (ids.isEmpty()) return@synchronized
         val set = ids.toHashSet()
-        val items = read()
+        val items = read() ?: return@synchronized
         if (items.removeAll { it.event.key() in set }) write(items)
     }
 
@@ -54,7 +55,7 @@ internal class EventQueue(dir: File, private val debugLogging: Boolean = false) 
      */
     fun noteUnacknowledged(ids: Collection<String>): List<String> = synchronized(LOCK) {
         val set = ids.toHashSet()
-        val items = read()
+        val items = read() ?: return@synchronized emptyList()
         val gone = ArrayList<String>()
         val it = items.iterator()
         while (it.hasNext()) {
@@ -72,15 +73,19 @@ internal class EventQueue(dir: File, private val debugLogging: Boolean = false) 
 
     fun clear() = synchronized(LOCK) { file.delete() }
 
-    fun size(): Int = synchronized(LOCK) { read().size }
+    fun size(): Int = synchronized(LOCK) { read()?.size ?: 0 }
 
     private class Entry(val event: QueuedEvent, var misses: Int)
 
-    private fun read(): MutableList<Entry> {
+    /** The stored entries; empty when there is no file or it is corrupt; null on an I/O error (do not overwrite then). */
+    private fun read(): MutableList<Entry>? {
         val bytes = try {
             file.openRead().use { it.readBytes() }
-        } catch (e: IOException) {
+        } catch (e: FileNotFoundException) {
             return ArrayList() // no file yet
+        } catch (e: IOException) {
+            RpLog.warn("event=tracking.event_dropped reason=queue_read_failed")
+            return null
         }
         return try {
             val arr = JSONArray(String(bytes, Charsets.UTF_8))

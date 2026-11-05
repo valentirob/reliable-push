@@ -15,14 +15,16 @@ internal class RetryScheduler(private val context: Context, private val jobId: I
         get() = context.getSystemService(JobScheduler::class.java)
 
     fun schedule(minLatencySeconds: Long = DEFAULT_LATENCY_SECONDS) {
-        val job = JobInfo.Builder(jobId, ComponentName(context, RetryJobService::class.java))
-            .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY)
-            .setMinimumLatency(minLatencySeconds.coerceAtLeast(0) * 1000)
-            .setBackoffCriteria(BACKOFF_MILLIS, JobInfo.BACKOFF_POLICY_EXPONENTIAL)
-            .setPersisted(false)
-            .build()
         try {
-            scheduler?.schedule(job)
+            val job = JobInfo.Builder(jobId, ComponentName(context, RetryJobService::class.java))
+                .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY)
+                .setMinimumLatency(minLatencySeconds.coerceAtLeast(0) * 1000)
+                .setBackoffCriteria(BACKOFF_MILLIS, JobInfo.BACKOFF_POLICY_EXPONENTIAL)
+                .setPersisted(false)
+                .build()
+            if (scheduler?.schedule(job) == JobScheduler.RESULT_FAILURE) {
+                RpLog.warn("event=retry.schedule_failed")
+            }
         } catch (e: RuntimeException) { // e.g. the OS refuses (too many jobs); never crash a push path
             RpLog.warn("event=retry.schedule_failed")
         }

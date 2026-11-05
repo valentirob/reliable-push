@@ -18,7 +18,11 @@ import org.robolectric.annotation.Config
 import org.robolectric.shadows.ShadowLog
 
 private class PlainCipher : TokenCipher {
-    override fun encrypt(plain: ByteArray) = plain.copyOf()
+    var failEncrypt = false
+    override fun encrypt(plain: ByteArray): ByteArray {
+        if (failEncrypt) throw java.security.GeneralSecurityException("no key")
+        return plain.copyOf()
+    }
     override fun decrypt(blob: ByteArray) = blob.copyOf()
     override fun reset() {}
 }
@@ -31,6 +35,7 @@ class EventSenderTest {
 
     private val context: Context = ApplicationProvider.getApplicationContext()
     private val backend = TestBackend()
+    private val cipher = PlainCipher()
     private lateinit var store: TokenStore
     private lateinit var queue: EventQueue
     private lateinit var sender: EventSender
@@ -44,7 +49,7 @@ class EventSenderTest {
         context.getSharedPreferences("io.reliablepush.store", Context.MODE_PRIVATE).edit().clear().commit()
         RefreshGate.reset()
         ShadowLog.clear()
-        store = TokenStore(context, PlainCipher())
+        store = TokenStore(context, cipher)
         store.save(Registration("dev-1", freshJwt, 100_000_000L))
         queue = EventQueue(tmp.newFolder())
         sender = newSender()
@@ -164,6 +169,44 @@ class EventSenderTest {
         assertEquals(listOf("/v1/events", "/v1/devices/token:refresh", "/v1/events"), backend.requests.map { it.path })
         assertEquals(newJwt, store.load()!!.token.raw)
         assertEquals("dev-1", store.load()!!.deviceId)
+        val prefs = context.getSharedPreferences("io.reliablepush.store", Context.MODE_PRIVATE)
+        assertEquals(200_000_000L, prefs.getLong("expires_at", -1))
+    }
+
+    private fun refreshFailsOn401Path(refresh: ScriptedResponse) {
+        fill(2)
+        backend.handler = { req -> if (req.path.endsWith("refresh")) refresh else ScriptedResponse(401) }
+        assertEquals(FlushResult.RetryLater(null), sender.flush())
+        assertEquals(2, queue.size())
+        assertNotNull(store.load())
+    }
+
+    @Test
+    fun refreshIoErrorOn401PathKeepsEvents() = refreshFailsOn401Path(ScriptedResponse(200, "garbage"))
+
+    @Test
+    fun refresh5xxOn401PathKeepsEvents() = refreshFailsOn401Path(ScriptedResponse(503))
+
+    @Test
+    fun earlyRefreshAnswered401ClearsRegistration() {
+        fill(1)
+        now = 95_000_000L
+        backend.handler = { ScriptedResponse(401) }
+        assertEquals(FlushResult.NotRegistered, sender.flush())
+        assertNull(store.load())
+        assertEquals(listOf("/v1/devices/token:refresh"), backend.requests.map { it.path })
+    }
+
+    @Test
+    fun saveFailingAfterRefreshMeansNotRegistered() {
+        fill(1)
+        now = 95_000_000L
+        val newJwt = fakeJwt(90_000, 190_000)
+        backend.handler = { ScriptedResponse(200, """{"deviceToken":"$newJwt","expiresAt":"1970-01-03T04:46:40Z"}""") }
+        cipher.failEncrypt = true
+        assertEquals(FlushResult.NotRegistered, sender.flush())
+        assertNull(store.load())
+        assertEquals(1, backend.requests.size)
     }
 
     @Test
@@ -182,7 +225,7 @@ class EventSenderTest {
     @Test
     fun refreshAnswered401ClearsRegistration() {
         fill(2)
-        backend.handler = { req -> if (req.path.endsWith("refresh")) ScriptedResponse(401) else ScriptedResponse(401) }
+        backend.handler = { req -> ScriptedResponse(401) }
         assertEquals(FlushResult.NotRegistered, sender.flush())
         assertNull(store.load())
         assertEquals(2, queue.size())

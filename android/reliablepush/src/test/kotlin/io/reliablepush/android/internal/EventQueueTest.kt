@@ -71,9 +71,11 @@ class EventQueueTest {
 
     @Test
     fun corruptFileCountsAsEmpty() {
+        ShadowLog.clear()
         File(tmp.root, "events.json").writeText("{not json")
         val q = EventQueue(tmp.root)
         assertEquals(0, q.size())
+        assertTrue(ShadowLog.getLogs().any { it.type == android.util.Log.WARN && it.msg.contains("queue_corrupt") })
         q.add(ev(1))
         assertEquals(1, q.size())
     }
