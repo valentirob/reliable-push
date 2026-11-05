@@ -18,6 +18,9 @@ struct SampleConfig: Sendable {
     let userId: String
     /// Debug only: `RP_RESET=1` clears the SDK's Keychain item, App Group state and queue before `configure`.
     let reset: Bool
+    /// Debug only: `RP_APNS=1` (a real APNs run, see docs/testing.md): register for remote notifications and report the
+    /// APNs device token to the harness.
+    let apns: Bool
 
     static func load(bundle: Bundle = .main,
                      environment: [String: String] = ProcessInfo.processInfo.environment) -> SampleConfig {
@@ -29,10 +32,11 @@ struct SampleConfig: Sendable {
         }
         return SampleConfig(baseURL: env("RP_BASE_URL", info("RPBaseURL")), appId: env("RP_APP_ID", info("RPAppId")),
                             appGroup: info("RPAppGroup"), harnessURL: env("RP_HARNESS_URL", info("RPHarnessURL")),
-                            userId: env("RP_USER_ID", "ios-sample-user"), reset: environment["RP_RESET"] == "1")
+                            userId: env("RP_USER_ID", "ios-sample-user"), reset: environment["RP_RESET"] == "1",
+                            apns: info("RPApns") == "1")
         #else
         return SampleConfig(baseURL: info("RPBaseURL"), appId: info("RPAppId"), appGroup: info("RPAppGroup"),
-                            harnessURL: "", userId: "", reset: false)
+                            harnessURL: "", userId: "", reset: false, apns: false)
         #endif
     }
 }
@@ -56,8 +60,23 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
             model.status = "configure failed: \(error)"
         }
         UNUserNotificationCenter.current().delegate = self
+        #if DEBUG
+        if config.apns { application.registerForRemoteNotifications() }
+        #endif
         return true
     }
+
+    #if DEBUG
+    /// RP_APNS=1 only: the hex token goes to the harness (never logged), which sends the real pushes with it.
+    func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+        guard config.apns else { return }
+        model.apnsTokenReceived(deviceToken.map { String(format: "%02x", $0) }.joined())
+    }
+
+    func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
+        sampleLog.error("event=sample.apns_registration_failed")
+    }
+    #endif
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
                                             withCompletionHandler completionHandler: @escaping () -> Void) {

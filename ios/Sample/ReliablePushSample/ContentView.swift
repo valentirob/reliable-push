@@ -7,6 +7,8 @@ import UserNotifications
 protocol SampleBackend: Sendable {
     func idToken(appId: String, userId: String) async throws -> String
     func deviceRegistered(appId: String, userId: String, deviceId: String) async throws
+    /// RP_APNS=1 only: the hex APNs device token of this device, for the harness's real pushes.
+    func apnsToken(deviceId: String, token: String) async throws
 }
 
 struct SampleError: Error, CustomStringConvertible {
@@ -40,6 +42,28 @@ final class SampleModel: ObservableObject {
         status = deviceId == nil ? "configured" : "registered"
     }
 
+    #if DEBUG
+    private var apnsToken: String?
+
+    /// RP_APNS=1: the token may arrive before or after the registration; it is reported once both exist.
+    func apnsTokenReceived(_ token: String) {
+        apnsToken = token
+        reportApnsToken()
+    }
+
+    private func reportApnsToken() {
+        guard config.apns, let backend, let token = apnsToken, let deviceId else { return }
+        Task {
+            do {
+                try await backend.apnsToken(deviceId: deviceId, token: token)
+                sampleLog.info("event=sample.apns_token_reported")
+            } catch {
+                sampleLog.error("event=sample.apns_token_report_failed")
+            }
+        }
+    }
+    #endif
+
     /// Grant from the backend -> `ReliablePush.register` -> the device announced to the backend.
     func register() {
         guard let backend, !busy else { return }
@@ -55,6 +79,9 @@ final class SampleModel: ObservableObject {
                     try await backend.deviceRegistered(appId: config.appId, userId: config.userId, deviceId: deviceId)
                     self.deviceId = deviceId
                     status = "registered"
+                    #if DEBUG
+                    reportApnsToken()
+                    #endif
                 case let .failed(httpStatus):
                     status = "register failed (\(httpStatus.map(String.init) ?? "no HTTP status"))"
                 }

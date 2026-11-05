@@ -112,6 +112,23 @@ final class IOSE2ETests: XCTestCase {
         XCTAssertFalse(delivered, "no DELIVERED in the timeline")
     }
 
+    /// Optional (maintainer's Apple Developer team, `RP_APNS=1`, see docs/testing.md "Real APNs pushes"): with the app
+    /// terminated, a console push goes through the real APNs, the OS starts the Notification Service Extension, and the
+    /// extension reports DELIVERED. `scripts/ios-e2e.sh` runs it in its own phase only when the APNs files exist; it
+    /// skips itself when the harness has no APNs credentials.
+    func testApnsRealDelivery() async throws {
+        let enabled = try await Harness().apnsEnabled()
+        try XCTSkipUnless(enabled, "the harness has no APNs credentials (harness/build/apns/)")
+        let sample = try await registeredSample()
+        try await awaitUntil(30, "the device APNs token reported to the harness (RP_APNS=1 build, Push Notifications)") {
+            try await sample.harness.hasApnsToken(appId: sample.appId, userId: sample.userId)
+        }
+        sample.app.terminate() // the extension, not the app, must report DELIVERED
+        let tid = try await sample.harness.push(appId: sample.appId, userId: sample.userId, title: "Real APNs",
+                                                body: "iOS E2E real APNs", policy: "NOT_DELIVERED", timeoutMinutes: 120)
+        try await sample.awaitState(tid, "DELIVERED", 60)
+    }
+
     // MARK: Helpers
 
     /// A fresh launch (`RP_RESET=1`), notifications allowed (the prompt shows once per install), a new user registered.

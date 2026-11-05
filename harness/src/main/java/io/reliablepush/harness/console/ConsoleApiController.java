@@ -6,6 +6,7 @@ import io.reliablepush.client.ReliablePushException;
 import io.reliablepush.harness.config.HarnessApp;
 import io.reliablepush.harness.config.HarnessProperties;
 import io.reliablepush.harness.devices.AndroidMode;
+import io.reliablepush.harness.apns.ApnsPusher;
 import io.reliablepush.harness.fcm.FcmPusher;
 import io.reliablepush.harness.devices.BackendCallException;
 import io.reliablepush.harness.devices.DeviceBehaviour;
@@ -68,6 +69,7 @@ public class ConsoleApiController {
     static final int MAX_TEXT = 1_000;
     static final int MAX_LABEL = 100;
     static final int MAX_FCM_TOKEN = 4096;
+    static final int MAX_APNS_TOKEN = 200;
     static final long MAX_HANG_MS = 120_000;
 
     public record DeviceRequest(String appId, String userId, Platform platform, AndroidMode androidMode) {}
@@ -78,6 +80,8 @@ public class ConsoleApiController {
                                     String fcmToken) {}
 
     public record FcmTokenRequest(String fcmToken) {}
+
+    public record ApnsTokenRequest(String apnsToken) {}
 
     public record OnlineRequest(Boolean online) {}
 
@@ -112,11 +116,12 @@ public class ConsoleApiController {
     private final GrantMinter grants;
     private final RealDeviceRegistry realDevices;
     private final FcmPusher fcm;
+    private final ApnsPusher apns;
     private final DeviceProxy deviceProxy;
 
     public ConsoleApiController(HarnessProperties properties, DeviceSimulator simulator, FakeSender sender,
                                 Timeline timeline, WebhookInbox inbox, BackendLogTail logs, GrantMinter grants,
-                                RealDeviceRegistry realDevices, FcmPusher fcm, DeviceProxy deviceProxy) {
+                                RealDeviceRegistry realDevices, FcmPusher fcm, DeviceProxy deviceProxy, ApnsPusher apns) {
         this.properties = properties;
         this.simulator = simulator;
         this.sender = sender;
@@ -126,6 +131,7 @@ public class ConsoleApiController {
         this.grants = grants;
         this.realDevices = realDevices;
         this.fcm = fcm;
+        this.apns = apns;
         this.deviceProxy = deviceProxy;
     }
 
@@ -141,6 +147,7 @@ public class ConsoleApiController {
             m.put("windowMinutes", app.windowMinutes());
             m.put("timeScaleSeconds", properties.timeScaleSeconds());
             m.put("fcmEnabled", fcm.enabled());
+            m.put("apnsEnabled", apns.enabled());
             return m;
         }).toList();
     }
@@ -212,6 +219,17 @@ public class ConsoleApiController {
             throw new NotFoundException("unknown device");
         }
         return Map.of("deviceId", deviceId.toString(), "hasFcmToken", true);
+    }
+
+    /** The iOS sample reports its hex APNs device token (Debug, RP_APNS=1). The token is never echoed back. */
+    @PostMapping("/real-devices/{id}/apns-token")
+    public Map<String, Object> setApnsToken(@PathVariable String id, @RequestBody ApnsTokenRequest r) {
+        UUID deviceId = uuid(id, "device id");
+        String token = validApnsToken(r.apnsToken());
+        if (!realDevices.setApnsToken(deviceId, token)) {
+            throw new NotFoundException("unknown device");
+        }
+        return Map.of("deviceId", deviceId.toString(), "hasApnsToken", true);
     }
 
     @PostMapping("/devices")
@@ -286,6 +304,16 @@ public class ConsoleApiController {
             timeline.append(n.trackingId(), r.appId(), new TimelineEntry(Instant.now(), "fcm_push", Map.of(
                     "deviceId", p.deviceId().toString(), "result", p.result().outcome().name(),
                     "status", p.result().status())));
+        }
+        for (ApnsPusher.DevicePush p : apns.push(r.appId(), r.userId(), n.trackingId(), title, body)) {
+            Map<String, Object> details = new LinkedHashMap<>();
+            details.put("deviceId", p.deviceId().toString());
+            details.put("result", p.result().outcome().name());
+            details.put("status", p.result().status());
+            if (p.result().reason() != null) {
+                details.put("reason", p.result().reason());
+            }
+            timeline.append(n.trackingId(), r.appId(), new TimelineEntry(Instant.now(), "apns_push", details));
         }
         return Map.of("trackingId", n.trackingId().toString());
     }
@@ -497,6 +525,14 @@ public class ConsoleApiController {
         return token;
     }
 
+    /** A hex token (it goes into the APNs URL path); never echoes the token in the error. */
+    private static String validApnsToken(String token) {
+        if (token == null || !token.matches("^[0-9a-fA-F]{8," + MAX_APNS_TOKEN + "}$")) {
+            throw new IllegalArgumentException("apnsToken must be 8 to " + MAX_APNS_TOKEN + " hex characters");
+        }
+        return token;
+    }
+
     private static String limited(String s, String what) {
         String v = s == null ? "" : s;
         if (v.length() > MAX_TEXT) {
@@ -539,6 +575,7 @@ public class ConsoleApiController {
         m.put("label", d.label());
         m.put("registeredAt", iso(d.registeredAt()));
         m.put("hasFcmToken", d.fcmToken() != null);
+        m.put("hasApnsToken", d.apnsToken() != null);
         return m;
     }
 

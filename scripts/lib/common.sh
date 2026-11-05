@@ -24,6 +24,8 @@ rp_compose() {
     for f in ${RP_COMPOSE_OVERRIDES[@]+"${RP_COMPOSE_OVERRIDES[@]}"}; do files+=(-f "$f"); done
     # bind source of the harness's optional real-FCM key (harness/build/fcm/service-account.json, placed by the maintainer)
     mkdir -p "$RP_ROOT/harness/build/fcm"
+    # bind source of the harness's optional real-APNs files (harness/build/apns/AuthKey.p8 + apns.properties)
+    mkdir -p "$RP_ROOT/harness/build/apns"
     E2E_UID="$(id -u)" E2E_GID="$(id -g)" docker compose -p "$RP_PROJECT" "${files[@]}" "$@"
 }
 

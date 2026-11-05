@@ -11,6 +11,9 @@
 	<string>$(RP_APP_GROUP)</string>
 	<key>RPHarnessURL</key>
 	<string>$(RP_HARNESS_URL)</string>
+	<!-- 1 only for a real APNs run (RP_APNS=1 on the xcodebuild command line or in the environment). -->
+	<key>RPApns</key>
+	<string>$(RP_APNS)</string>
 	<!-- Cleartext only to the local harness stack (127.0.0.1); Release has no exception. -->
 	<key>NSAppTransportSecurity</key>
 	<dict>

@@ -18,7 +18,13 @@
 #   main:    scheme ReliablePushSampleE2E (SharedStorageTests hosted in the app, then IOSE2ETests), answers "Allow"
 # Outputs in harness/build/ios-e2e/: summary.json (same shape as e2e.sh), junit/ios-e2e.xml, <phase>.xcresult,
 # logs/ (xcodebuild, the Simulator's io.reliablepush log, containers). DerivedData/ is kept between runs.
-# Prints "iOS E2E: 8/8 passed"; exit code 0 only if no entry FAILED and at least one PASSED.
+# Optional ninth entry apns-real-delivery (phase "apns"): a push through the real APNs sandbox starts the Notification
+# Service Extension of the terminated app. It runs only when the maintainer placed harness/build/apns/AuthKey.p8 and
+# harness/build/apns/apns.properties and exported IOS_DEVELOPMENT_TEAM (a paid team with Push Notifications; the app is
+# then built with RP_APNS=1); otherwise it is SKIPPED, which counts as neither passed nor failed. Never created by a
+# script. See docs/testing.md, "Real APNs pushes".
+# Prints "iOS E2E: 8/8 passed, 1 skipped" (without the APNs files); exit code 0 only if no entry FAILED and at least one
+# PASSED.
 # Environment: IOS_SIMULATOR, E2E_READY_TIMEOUT (stack readiness, default 120 s), RP_BUNDLE_ID (sample bundle id,
 # default io.reliablepush.sample).
 set -euo pipefail
@@ -48,6 +54,16 @@ token-refresh-near-expiry main ReliablePushSampleUITests/IOSE2ETests/testTokenRe
 logout-revokes-device main ReliablePushSampleUITests/IOSE2ETests/testLogoutRevokesDevice
 notifications-blocked-means-fallback blocked ReliablePushSampleUITests/NotificationsBlockedUITests/testNotificationsBlockedMeansFallback"
 
+# optional real APNs entry
+APNS_LINE="apns-real-delivery apns ReliablePushSampleUITests/IOSE2ETests/testApnsRealDelivery"
+APNS_MISSING=""
+[ -f "$RP_ROOT/harness/build/apns/AuthKey.p8" ] || APNS_MISSING="harness/build/apns/AuthKey.p8"
+[ -f "$RP_ROOT/harness/build/apns/apns.properties" ] || APNS_MISSING="${APNS_MISSING:+$APNS_MISSING, }harness/build/apns/apns.properties"
+[ -n "${IOS_DEVELOPMENT_TEAM:-}" ] || APNS_MISSING="${APNS_MISSING:+$APNS_MISSING, }IOS_DEVELOPMENT_TEAM"
+APNS_HINT="needs harness/build/apns/AuthKey.p8, harness/build/apns/apns.properties and IOS_DEVELOPMENT_TEAM (not found: $APNS_MISSING); see docs/testing.md, Real APNs pushes"
+[ -z "$APNS_MISSING" ] && CATALOGUE="$CATALOGUE
+$APNS_LINE"
+
 TEST=""
 KEEP=0
 while [ $# -gt 0 ]; do
@@ -76,6 +92,19 @@ while [ $# -gt 0 ]; do
     esac
 done
 
+if [ "$TEST" = "apns-real-delivery" ] || [ "$TEST" = "testApnsRealDelivery" ]; then
+    if [ -n "$APNS_MISSING" ]; then
+        # nothing to run: skip before the preflight, the Simulator and the stack
+        rm -rf "$RP_OUT/summary.json"
+        mkdir -p "$RP_OUT/junit"
+        rp_log "apns-real-delivery: SKIPPED (missing: $APNS_MISSING)"
+        "${JAVA_HOME:+$JAVA_HOME/bin/}java" "$RP_ROOT/scripts/lib/IosE2eSummary.java" "$RP_OUT/summary.json" \
+            "$RP_OUT/junit/ios-e2e.xml" --entry "apns-real-delivery|SKIPPED|0|||$APNS_HINT|" | sed '$d'
+        rp_log "iOS E2E: 0/0 passed, 1 skipped"
+        exit 0
+    fi
+fi
+
 # --test: a scenario name or a test method name (testDeliveredIsReported) -> one catalogue line
 SELECTED="$CATALOGUE"
 if [ -n "$TEST" ]; then
@@ -85,6 +114,7 @@ fi
 PHASES=""
 printf '%s\n' "$SELECTED" | grep -q ' blocked ' && PHASES="blocked"
 printf '%s\n' "$SELECTED" | grep -q ' main ' && PHASES="${PHASES:+$PHASES }main"
+printf '%s\n' "$SELECTED" | grep -q ' apns ' && PHASES="${PHASES:+$PHASES }apns"
 
 READY_TIMEOUT="${E2E_READY_TIMEOUT:-120}"
 case "$READY_TIMEOUT" in '' | *[!0-9]*) rp_die "E2E_READY_TIMEOUT must be whole seconds, got '$READY_TIMEOUT'" ;; esac
@@ -178,17 +208,25 @@ fi
 
 # ---- phases ----------------------------------------------------------------------------------------------------
 XCODE_ARGS=(-project "$XCODEPROJ" -destination "platform=iOS Simulator,id=$UDID"
-    -derivedDataPath "$RP_OUT/DerivedData" -parallel-testing-enabled NO
+    -parallel-testing-enabled NO
     -test-timeouts-enabled YES -maximum-test-execution-time-allowance 300)
 [ -n "${RP_BUNDLE_ID:-}" ] && XCODE_ARGS+=("RP_BUNDLE_ID=$RP_BUNDLE_ID")
 PHASE_ARGS=()
 for phase in $PHASES; do
+    derived="$RP_OUT/DerivedData"
+    extra=()
     if [ "$phase" = blocked ]; then
         scheme=ReliablePushSample
         only=(-only-testing:ReliablePushSampleUITests/NotificationsBlockedUITests)
+    elif [ "$phase" = apns ]; then
+        # signed by the maintainer's team, with the aps-environment entitlement; the app reports its APNs token
+        scheme=ReliablePushSampleE2E
+        only=("-only-testing:$(printf '%s\n' "$APNS_LINE" | awk '{ print $3 }')")
+        derived="$RP_OUT/DerivedData-apns"
+        extra=(-allowProvisioningUpdates RP_APNS=1 "IOS_DEVELOPMENT_TEAM=$IOS_DEVELOPMENT_TEAM")
     else
         scheme=ReliablePushSampleE2E
-        only=()
+        only=(-skip-testing:ReliablePushSampleUITests/IOSE2ETests/testApnsRealDelivery)
     fi
     if [ -n "$TEST" ]; then
         only=("-only-testing:$(printf '%s\n' "$SELECTED" | awk '{ print $3 }')")
@@ -199,7 +237,7 @@ for phase in $PHASES; do
     rp_log "phase $phase: xcodebuild test -scheme $scheme ${only[*]:-}; output in harness/build/ios-e2e/logs/xcodebuild-$phase.log"
     rc=0
     # in the background, so INT/TERM reach the exit trap at once (it stops xcodebuild, then tears down)
-    xcodebuild test "${XCODE_ARGS[@]}" -scheme "$scheme" ${only[@]+"${only[@]}"} \
+    xcodebuild test "${XCODE_ARGS[@]}" -derivedDataPath "$derived" ${extra[@]+"${extra[@]}"} -scheme "$scheme" ${only[@]+"${only[@]}"} \
         -resultBundlePath "$RP_OUT/$phase.xcresult" >"$RP_OUT/logs/xcodebuild-$phase.log" 2>&1 &
     XCB_PID=$!
     wait "$XCB_PID" || rc=$?
@@ -220,9 +258,14 @@ done
 
 # ---- summary and verdict ---------------------------------------------------------------------------------------
 EXPECT=()
+ENTRIES=()
+if [ -z "$TEST" ] && [ -n "$APNS_MISSING" ]; then
+    rp_log "apns-real-delivery: SKIPPED (missing: $APNS_MISSING)"
+    ENTRIES+=(--entry "apns-real-delivery|SKIPPED|0|||$APNS_HINT|")
+fi
 for name in $(printf '%s\n' "$SELECTED" | awk '{ print $1 }'); do EXPECT+=(--expect "$name"); done
 result="$("${JAVA_HOME:+$JAVA_HOME/bin/}java" "$RP_ROOT/scripts/lib/IosE2eSummary.java" "$RP_OUT/summary.json" \
-    "$RP_OUT/junit/ios-e2e.xml" ${PHASE_ARGS[@]+"${PHASE_ARGS[@]}"} "${EXPECT[@]}")" \
+    "$RP_OUT/junit/ios-e2e.xml" ${PHASE_ARGS[@]+"${PHASE_ARGS[@]}"} ${ENTRIES[@]+"${ENTRIES[@]}"} "${EXPECT[@]}")" \
     || rp_die "could not build summary.json"
 printf '%s\n' "$result" | sed '$d'
 if ! rp_summary_verdict "iOS E2E" "$(printf '%s\n' "$result" | tail -n 1)"; then

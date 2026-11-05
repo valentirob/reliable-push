@@ -142,6 +142,45 @@ reported an FCM token adds an `fcm_push` entry (`SENT`, `UNREGISTERED` or `FAILE
 notification's timeline; an `UNREGISTERED` answer drops the device's token. When you are done, delete the key in the Google
 Cloud console.
 
+## Real APNs pushes (optional, maintainer's Apple Developer team)
+
+`./scripts/ios-e2e.sh` normally ends with `iOS E2E: 8/8 passed, 1 skipped`: the ninth entry, `apns-real-delivery`, sends a
+push through the real APNs sandbox and checks that the OS starts the Notification Service Extension of the terminated
+sample app, which reports `DELIVERED` (the extension reads the device token from the shared Keychain group and App Group).
+On Apple-silicon Macs the Simulator receives real APNs sandbox pushes. It needs an app signed by a paid Apple Developer
+Program team with Push Notifications, so it runs only when all three pieces below exist; without any of them it is `SKIPPED`
+(neither passed nor failed, exit code 0, the hint names the missing piece) and every build and test works as usual, with
+ad hoc signing and no team. This is a maintainer step; scripts and agents never create keys, sign in or enter credentials.
+
+1. In the Apple Developer portal register the bundle id `io.reliablepush.sample` (or your own, then set `RP_BUNDLE_ID` when
+   running the script and `RP_APP_GROUP` to match) and the App Group `group.io.reliablepush.sample` for it and for the
+   `.NSE` extension, with the Push Notifications capability on the app.
+2. Create an APNs authentication key (Keys, "Apple Push Notifications service") and save it as
+   `harness/build/apns/AuthKey.p8`; `chmod 600` it. Compose mounts `harness/build/apns/` read-only at `/run/apns` (the
+   scripts create it empty), and the harness container runs as the invoking user so it can read the key.
+3. Write `harness/build/apns/apns.properties`:
+
+   ```
+   keyId=ABC123DEFG
+   teamId=TEAM123456
+   topic=io.reliablepush.sample
+   environment=sandbox
+   ```
+
+4. `export IOS_DEVELOPMENT_TEAM=<your 10-character team id>`.
+5. Run `./scripts/ios-e2e.sh --test apns-real-delivery`. Phase `apns` builds the sample with `RP_APNS=1` (Debug.xcconfig then
+   uses `ReliablePushSample-APNs.entitlements` with `aps-environment` and signs with your team; the app registers for remote
+   notifications and reports its APNs token to the harness), registers, waits for the token, terminates the app and sends a
+   console push; `DELIVERED` must follow within 60 s. Without `RP_APNS` the sample never asks for an APNs token.
+6. When you are done, revoke the key in the Apple Developer portal.
+
+Everything under `harness/build/apns/` is git-ignored and never committed, logged or printed. The harness reports
+`apnsEnabled` in `GET /console/api/apps`; the console API shows only `hasApnsToken` for a device. A push to a user with
+real devices that reported an APNs token adds an `apns_push` entry (`SENT`, `UNREGISTERED` or `FAILED` with the HTTP status
+and Apple's reason code) to the notification's timeline; `UNREGISTERED` (HTTP 410, or 400 `BadDeviceToken`) drops the device's
+token. The provider JWT (ES256, cached 50 minutes) and the token never reach a log line. Unit tests use a test EC key
+generated in the test and a local stub; they never contact Apple.
+
 ## Web console and demo
 
 `./scripts/demo.sh [--realtime]` (Windows: `scripts\demo.ps1`) starts the same stack as the compose project

@@ -67,6 +67,7 @@
 				"Info-Debug.plist",
 				"Info-Release.plist",
 				ReliablePushSample.entitlements,
+				"ReliablePushSample-APNs.entitlements",
 			);
 			target = 0E5A0000000000000000A101 /* ReliablePushSample */;
 		};
@@ -444,7 +445,7 @@
 		0E5A0000000000000000A221 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CODE_SIGN_ENTITLEMENTS = ReliablePushSample/ReliablePushSample.entitlements;
+				CODE_SIGN_ENTITLEMENTS = "$(RP_ENTITLEMENTS)";
 				ENABLE_PREVIEWS = NO;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "ReliablePushSample/Info-Debug.plist";
@@ -465,7 +466,7 @@
 		0E5A0000000000000000A222 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CODE_SIGN_ENTITLEMENTS = ReliablePushSample/ReliablePushSample.entitlements;
+				CODE_SIGN_ENTITLEMENTS = "$(RP_ENTITLEMENTS)";
 				ENABLE_PREVIEWS = NO;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "ReliablePushSample/Info-Release.plist";

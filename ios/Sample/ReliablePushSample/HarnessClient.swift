@@ -23,6 +23,10 @@ struct HarnessClient: SampleBackend {
         ], expect: 201)
     }
 
+    func apnsToken(deviceId: String, token: String) async throws {
+        _ = try await post("/console/api/real-devices/\(deviceId)/apns-token", ["apnsToken": token], expect: 200)
+    }
+
     private func post(_ path: String, _ body: [String: String], expect: Int) async throws -> [String: Any] {
         guard let url = URL(string: baseURL + path) else { throw SampleError("bad harness URL") }
         var request = URLRequest(url: url, timeoutInterval: 10)

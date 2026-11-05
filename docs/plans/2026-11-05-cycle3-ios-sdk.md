@@ -490,17 +490,17 @@ Why: Task 6 proves the SDK logic but not the real entry, where APNs makes the OS
 
     Otherwise the entry is `SKIPPED` and the line reads `iOS E2E: 8/8 passed, 1 skipped` (R18).
 
-- [ ] **Step 1: Failing tests:**
+- [x] **Step 1: Failing tests:**
   - `providerTokenIsEs256WithRawSignature` (verify with the test public key after converting back to DER; header and claims as above)
   - `providerTokenIsCachedFor50Minutes`
   - `sendPostsAlertPushWithHeaders` (the body equals the preview)
   - `goneOrBadTokenDropsTheToken`
   - `credentialsNeverInToStringOrLogs`
   - `missingCredentialsDisableRealMode`
-- [ ] **Step 2: Run** `./mvnw -B -pl harness -am verify` → FAIL. **Step 3: Implement.** **Step 4: Run** → PASS.
+- [x] **Step 2: Run** `./mvnw -B -pl harness -am verify` → FAIL. **Step 3: Implement.** **Step 4: Run** → PASS.
   - The sample builds without a team: `xcodebuild build` (Debug, Simulator, `RP_APNS` unset) → OK.
   - `./scripts/ios-e2e.sh` → `8/8 passed, 1 skipped` (R18).
-- [ ] **Step 5: Docs** (`docs/testing.md`, "Real APNs pushes"). The maintainer:
+- [x] **Step 5: Docs** (`docs/testing.md`, "Real APNs pushes"). The maintainer:
   1. registers the bundle id (or a variant set through `RP_BUNDLE_ID`) and the App Group with Push Notifications;
   2. creates an APNs auth key and saves it as `harness/build/apns/AuthKey.p8` (`chmod 600`);
   3. writes `apns.properties`;
@@ -508,7 +508,7 @@ Why: Task 6 proves the SDK logic but not the real entry, where APNs makes the OS
   5. revokes the key when done.
 
   Everything stays git-ignored.
-- [ ] **Step 6: Commit** `feat(harness): optional real apns sender for the sample app`
+- [x] **Step 6: Commit** `feat(harness): optional real apns sender for the sample app`
 - [ ] **Step 7 (maintainer, optional):** with the files in place, run `./scripts/ios-e2e.sh --test apns-real-delivery` → PASSED. Record the result (or "not run, no credentials") in `docs/STATUS.md`. The agent never creates keys, signs in or enters credentials.
 
 ### Task 8: CI, docs and final verification

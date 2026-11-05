@@ -43,6 +43,17 @@ struct Harness: Sendable {
         return list.first { ($0["kind"] as? String) == "REAL" }?["deviceId"] as? String
     }
 
+    /// Whether the harness has APNs credentials (real APNs mode); never carries a token.
+    func apnsEnabled() async throws -> Bool {
+        (try await getArray("/console/api/apps")).contains { ($0["apnsEnabled"] as? Bool) == true }
+    }
+
+    /// Whether the user's REAL device reported its APNs token (the harness shows only this flag).
+    func hasApnsToken(appId: String, userId: String) async throws -> Bool {
+        let list = try await getArray("/console/api/devices?appId=\(enc(appId))&userId=\(enc(userId))")
+        return list.contains { ($0["kind"] as? String) == "REAL" && ($0["hasApnsToken"] as? Bool) == true }
+    }
+
     /// `{notification: {state, …}, timeline: […], webhooks: […]}`
     func notification(_ tid: String) async throws -> [String: Any] {
         try await getObject("/console/api/notifications/\(tid)")

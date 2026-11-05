@@ -171,6 +171,25 @@ class RealDevicesIT {
     }
 
     @Test
+    void apnsTokenIsValidatedStoredAndNeverReturned() throws Exception {
+        String token = "ab12cd34".repeat(8);
+        String id = UUID.randomUUID().toString();
+        assertThat(post("/console/api/real-devices", "{\"appId\":\"shop\",\"userId\":\"apns-user\",\"deviceId\":\""
+                + id + "\",\"platform\":\"IOS\",\"label\":\"l\"}").statusCode()).isEqualTo(201);
+        HttpResponse<String> set = post("/console/api/real-devices/" + id + "/apns-token", "{\"apnsToken\":\"" + token + "\"}");
+        assertThat(set.statusCode()).isEqualTo(200);
+        assertThat(set.body()).doesNotContain(token).contains("\"hasApnsToken\":true");
+        assertThat(get("/console/api/devices?appId=shop&userId=apns-user").body()).doesNotContain(token)
+                .contains("\"hasApnsToken\":true");
+        assertThat(post("/console/api/real-devices/" + UUID.randomUUID() + "/apns-token", "{\"apnsToken\":\"" + token + "\"}")
+                .statusCode()).isEqualTo(404);
+        HttpResponse<String> bad = post("/console/api/real-devices/" + id + "/apns-token", "{\"apnsToken\":\"../x\"}");
+        assertThat(bad.statusCode()).isEqualTo(400);
+        assertThat(post("/console/api/real-devices/" + id + "/apns-token", "{\"apnsToken\":\"\"}").statusCode()).isEqualTo(400);
+        assertThat(json.readTree(get("/console/api/apps").body()).get(0).get("apnsEnabled").asBoolean()).isFalse();
+    }
+
+    @Test
     void appsReportRealFcmModeOffWithoutCredentials() throws Exception {
         JsonNode apps = json.readTree(get("/console/api/apps").body());
         assertThat(apps.get(0).get("fcmEnabled").asBoolean()).isFalse();
