@@ -2,13 +2,14 @@
 
 The Helm chart `deploy/helm/reliable-push` deploys the backend only: the API and the fallback worker, never the harness,
 the console or the load generator. It needs Kubernetes 1.30 or later (OpenShift 4.17 or later) and Helm 3 or 4 (the chart
-checks run Helm 4.3). Chart reference (values, modes, checks): [`deploy/helm/reliable-push/README.md`](../deploy/helm/reliable-push/README.md);
-configuration keys, metrics and logs: [operations.md](operations.md).
+checks run Helm 4.3). Chart reference (values, modes, checks):
+[`deploy/helm/reliable-push/README.md`](../deploy/helm/reliable-push/README.md); configuration keys, metrics and logs:
+[operations.md](operations.md).
 
 The commands below use the namespace `reliable-push` and the release `rp` (objects are named `rp-reliable-push*`). The
 generic steps were run as written against the local kind cluster of `./scripts/helm-smoke.sh --keep`, with an extra
-values file for the locally loaded image and smaller CPU requests; the GKE and OpenShift parts were checked with `helm template` and kubeconform
-(`deploy/helm/scripts/validate.sh`) only, not on a real GKE or OpenShift cluster.
+values file for the locally loaded image and smaller CPU requests; the GKE and OpenShift parts were checked with
+`helm template` and kubeconform (`deploy/helm/scripts/validate.sh`) only, not on a real GKE or OpenShift cluster.
 
 ## Prerequisites
 
@@ -42,14 +43,17 @@ the reference.
 | `RP_DEVICE_KEY_K1`, `RP_DEVICE_PUB_K1` | device-token signing key pair `k1` (PEM, PKCS#8 private / SPKI public, P-256) |
 | `RP_SHOP_GRANT_SECRET` | only for `identity.type: signed-grant` (`grant-secret-ref`), at least 32 bytes |
 
-Generate the values in an empty directory that is never committed (values are read verbatim, so strip the newline
-`openssl rand` prints), then create the Secret from the files:
+Secret values are never typed inline on a command line (shell history, `ps`): they are generated into files, read
+without echo, or copied from another Secret. Work in an empty directory that is never committed (values are read
+verbatim, so strip the newline `openssl rand` prints), then create the Secret from the files:
 
 ```sh
 umask 077 && mkdir rp-secrets && cd rp-secrets
 openssl rand -hex 32 | tr -d '\n' >sender-key.txt         # give it to the sending backend; only its SHA-256 is configured
 openssl rand -hex 32 | tr -d '\n' >shop-hook-secret.txt   # give it to the fallback receiver
-printf '%s' 'the-database-password' >db-password.txt      # the password of the database user
+printf 'database password: ' >&2; read -rs DBPW && printf '%s' "$DBPW" >db-password.txt; unset DBPW; echo >&2
+# or, with an operator-managed database, copy its generated password (CloudNativePG: Secret <cluster>-app, key password):
+# kubectl -n <db-namespace> get secret <cluster>-app -o jsonpath='{.data.password}' | base64 -d >db-password.txt
 openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -pkeyopt ec_param_enc:named_curve -out k1.pem
 openssl pkey -in k1.pem -pubout -out k1.pub.pem
 openssl dgst -sha256 -hex sender-key.txt | sed 's/^.* //'   # => sender-api-key-sha256 for the values file
@@ -138,7 +142,9 @@ helm install rp deploy/helm/reliable-push -n reliable-push -f deploy/helm/reliab
   management port with a `BackendConfig` (`cloud.google.com/v1`, `healthCheck: {type: HTTP, port: 8081,
   requestPath: /actuator/health/readiness}`) and the Service annotation
   `cloud.google.com/backend-config: '{"default": "<name>"}'` on `rp-reliable-push-api` (the chart has no value for
-  Service annotations yet: `kubectl annotate`). Verify it on your cluster before sending traffic.
+  Service annotations yet: `kubectl annotate`). Google's health-check probes come from `35.191.0.0/16` and
+  `130.211.0.0/22` and must reach port 8081 as well: add a firewall rule if the cluster's rules allow only the serving
+  port. Verify it on your cluster before sending traffic.
 - **Managed Prometheus:** a `PodMonitoring` (`monitoring.googleapis.com/v1`) scrapes `/actuator/prometheus` on the
   `management` port every 30 s (`metrics.podMonitoring.interval`). Managed collection is on by default in recent GKE
   versions; the CRD must exist or the install fails.
