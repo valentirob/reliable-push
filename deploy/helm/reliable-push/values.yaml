@@ -1,0 +1,101 @@
+# Reliable Push backend chart. Required values have no default: image.repository, database.url, database.username,
+# secrets.existingSecret and at least one entry under config.apps. Never put a secret value in this file.
+
+# combined: one Deployment running the API and the worker (profiles api,worker,json).
+# split: separate "<fullname>-api" and "<fullname>-worker" Deployments.
+mode: combined
+
+nameOverride: ""
+fullnameOverride: ""
+
+image:
+  # repository: registry.example.com/reliable-push    # required
+  tag: ""            # defaults to the chart appVersion
+  digest: ""         # sha256:..., takes precedence over tag
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+database:
+  # url: jdbc:postgresql://postgres:5432/reliablepush  # required
+  # username: reliablepush                             # required
+  # The password is SPRING_DATASOURCE_PASSWORD in the Secret below.
+
+secrets:
+  # Name of an existing Secret, loaded with envFrom. It must contain SPRING_DATASOURCE_PASSWORD and one key for every
+  # `env:NAME` reference in `config` (device token keys, webhook HMAC secrets). Not checkable at render time.
+  # existingSecret: reliable-push-secrets              # required
+  existingSecret: ""
+
+# Rendered verbatim under `reliable-push:` in application.yml (YAML form of the reliable-push.* properties, see
+# docs/operations.md). Every key ending in -ref must be env:NAME. At least one app is required.
+config:
+  # retention-days: 30
+  # worker: { poll-interval: 5s, batch-size: 100, lease: 2m }
+  # device-token:
+  #   current-kid: k1
+  #   signing-keys:
+  #     - kid: k1
+  #       private-key-pem-ref: env:RP_DEVICE_KEY_K1
+  #       public-key-pem-ref: env:RP_DEVICE_PUB_K1
+  apps: {}
+  # apps:
+  #   shop:
+  #     sender-api-key-sha256: "<64 hex characters>"
+  #     identity: { type: oidc, issuer: "https://idp.example.com", audience: shop-mobile, user-claim: sub }
+  #     default-timeout-minutes: 10
+  #     fallback:
+  #       url: https://fallback.example.com/hook
+  #       hmac-secret-ref: env:RP_SHOP_HOOK_SECRET
+
+# API pods (and the combined Deployment, which also uses worker.maxConcurrency).
+api:
+  replicas: 2
+  hikariMaximumPoolSize: 10
+  podDisruptionBudget:
+    minAvailable: 1       # rendered only when replicas > 1
+  resources:
+    requests: { cpu: 500m, memory: 768Mi }
+    limits: { cpu: "2", memory: 1Gi }
+
+worker:
+  replicas: 2
+  strategy: RollingUpdate   # RollingUpdate | Recreate
+  maxConcurrency: 100
+  hikariMaximumPoolSize: 10
+  podDisruptionBudget:
+    minAvailable: 1
+  resources:
+    requests: { cpu: 250m, memory: 512Mi }
+    limits: { cpu: "1", memory: 768Mi }
+
+# The image's baked defaults are replaced by this value, so repeat them when you change it.
+javaToolOptions: "-XX:MaxRAMPercentage=75 -XX:+ExitOnOutOfMemoryError"
+
+# Covers the worker's graceful stop (largest app http-timeout + 5 s).
+terminationGracePeriodSeconds: 60
+
+podSecurityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+securityContext:
+  readOnlyRootFilesystem: true
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: [ALL]
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+podAnnotations: {}
+extraEnv: []
+extraVolumes: []
+extraVolumeMounts: []
+extraContainers: []
+extraInitContainers: []
+nodeSelector: {}
+tolerations: []
+affinity: {}
+topologySpreadConstraints: []

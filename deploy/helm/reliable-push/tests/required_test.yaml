@@ -1,0 +1,98 @@
+suite: required values
+templates:
+  - validate.yaml
+  - deployment.yaml
+  - configmap.yaml
+release:
+  name: rp
+set:
+  image.repository: registry.example.com/reliable-push
+  database.url: jdbc:postgresql://db:5432/rp
+  database.username: rp
+  secrets.existingSecret: rp-secrets
+tests:
+  - it: fails without image.repository
+    template: validate.yaml
+    set:
+      image.repository: null
+    asserts:
+      - failedTemplate:
+          errorPattern: image.repository
+  - it: fails without database.url
+    template: validate.yaml
+    set:
+      database.url: null
+    asserts:
+      - failedTemplate:
+          errorPattern: database.url
+  - it: fails without database.username
+    template: validate.yaml
+    set:
+      database.username: null
+    asserts:
+      - failedTemplate:
+          errorPattern: database.username
+  - it: fails without secrets.existingSecret
+    template: validate.yaml
+    set:
+      secrets.existingSecret: null
+    asserts:
+      - failedTemplate:
+          errorPattern: secrets.existingSecret
+  - it: fails with empty config.apps
+    template: validate.yaml
+    set:
+      config:
+        apps: {}
+    asserts:
+      - failedTemplate:
+          errorPattern: config.apps
+  - it: fails with no config.apps at all
+    template: validate.yaml
+    set:
+      config: {}
+    asserts:
+      - failedTemplate:
+          errorPattern: config.apps
+  - it: a plain inline value under a -ref key fails and names the key path, not the value
+    template: validate.yaml
+    set:
+      config.apps.shop.fallback.hmac-secret-ref: not-an-env-ref-s3cret
+    asserts:
+      - failedTemplate:
+          errorMessage: config.apps.shop.fallback.hmac-secret-ref must be a reference of the form env:NAME (NAME is a key of secrets.existingSecret); inline values are not allowed
+  - it: a bad ref inside a list fails with the indexed path
+    template: validate.yaml
+    set:
+      config.apps.shop.default-timeout-minutes: 10
+      config.device-token.signing-keys:
+        - kid: k1
+          private-key-pem-ref: env:GOOD
+          public-key-pem-ref: "-----BEGIN PUBLIC KEY-----"
+    asserts:
+      - failedTemplate:
+          errorPattern: config\.device-token\.signing-keys\[0\]\.public-key-pem-ref
+  - it: valid env refs in maps and lists render
+    template: configmap.yaml
+    set:
+      config.apps.shop.default-timeout-minutes: 10
+      config.apps.shop.fallback.hmac-secret-ref: env:RP_SHOP_HOOK_SECRET
+      config.device-token.signing-keys:
+        - kid: k1
+          private-key-pem-ref: env:RP_DEVICE_KEY_K1
+          public-key-pem-ref: env:RP_DEVICE_PUB_K1
+    asserts:
+      - isKind:
+          of: ConfigMap
+  - it: invalid mode is rejected
+    template: validate.yaml
+    set:
+      mode: both
+    asserts:
+      - failedTemplate: {}
+  - it: invalid worker strategy is rejected
+    template: validate.yaml
+    set:
+      worker.strategy: Blue
+    asserts:
+      - failedTemplate: {}
