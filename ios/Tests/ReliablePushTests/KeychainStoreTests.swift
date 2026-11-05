@@ -13,9 +13,7 @@ final class KeychainStoreTests: XCTestCase {
             throw XCTSkip("Keychain unavailable in this test host (errSecMissingEntitlement -34018); covered by Task 6 hosted tests")
         }
         guard case .missing = store.read(account: account) else { return XCTFail("expected missing") }
-        guard store.write(Data("one".utf8), account: account) else {
-            throw XCTSkip("Keychain write refused in this test host; covered by Task 6 hosted tests")
-        }
+        XCTAssertTrue(store.write(Data("one".utf8), account: account))
         guard case let .found(d1) = store.read(account: account) else { return XCTFail("expected found") }
         XCTAssertEqual(d1, Data("one".utf8))
         XCTAssertTrue(store.write(Data("two".utf8), account: account))

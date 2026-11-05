@@ -50,7 +50,10 @@ final class KeychainStore: SecretStore {
     }
 
     func write(_ data: Data, account: String) -> Bool {
-        let update = SecItemUpdate(query(account) as CFDictionary, [kSecValueData as String: data] as CFDictionary)
+        let update = SecItemUpdate(query(account) as CFDictionary, [
+            kSecValueData as String: data,
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
+        ] as CFDictionary)
         if update == errSecSuccess { return true }
         guard update == errSecItemNotFound else { return false }
         var add = query(account)

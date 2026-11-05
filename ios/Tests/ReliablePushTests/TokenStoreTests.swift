@@ -75,12 +75,14 @@ final class TokenStoreTests: XCTestCase {
         XCTAssertFalse(box.messages.joined().contains("garbage"))
     }
 
-    func testMissingDeviceIdWithTokenIsCorruptAndCleared() {
+    func testSecretPresentBeforeMetadataIsNotClearedByReader() {
+        // Interleaving: another process's save() has written the Keychain record, SharedState not yet.
         XCTAssertTrue(store.save(registration()))
         state.clearRegistration()
-        guard case .notRegistered = store.load() else { return XCTFail() }
-        XCTAssertFalse(secrets.has("app1"))
-        XCTAssertTrue(box.messages.contains { $0.hasPrefix("event=token.unreadable") })
+        guard case let .registered(deviceId, _) = store.load() else { return XCTFail("reader must see the record") }
+        XCTAssertEqual(deviceId, "dev-1")
+        XCTAssertTrue(secrets.has("app1"))
+        XCTAssertTrue(box.messages.isEmpty)
     }
 
     func testRestoredWithoutSecretIsNotRegisteredAndDropsStaleState() {

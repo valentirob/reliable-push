@@ -5,7 +5,7 @@ import os
 /// `event=<name> key=value…`. WARN is written at `.error`, INFO at `.info`; debug and info only when `debug` is true
 /// (default: `DEBUG` builds). Fields whose key names a token, a user id or notification content are never written.
 /// Callers still must not pass such values under other names. Values are logged `privacy: .private` unless the key is
-/// `tid` or `deviceId`.
+/// `trackingId` or `deviceId` (the only public fields).
 enum SDKLog {
     enum Level: Sendable { case debug, info, warn }
 
@@ -16,7 +16,7 @@ enum SDKLog {
         "token", "idtoken", "id_token", "devicetoken", "device_token", "authorization",
         "userid", "user_id", "user", "title", "body",
     ]
-    private static let publicKeys: Set<String> = ["tid", "deviceid"]
+    private static let publicKeys: Set<String> = ["trackingid", "deviceid"]
 
     private struct State: Sendable {
         #if DEBUG
