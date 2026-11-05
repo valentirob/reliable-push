@@ -50,3 +50,7 @@ android/sample/google-services.json
 .env
 .env.*
 !.env.example
+
+# SwiftPM (root package)
+/.build/
+/.swiftpm/

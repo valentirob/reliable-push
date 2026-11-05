@@ -154,31 +154,31 @@ Requirements: FR-4 to FR-8, FR-10, NFR-1, NFR-5, NFR-6, NFR-10. Rules: `.agents/
   - `ios/scripts/size.sh`
 - Modify: root `.gitignore` (`/.build/`, `/.swiftpm/`)
 
-- [ ] **Step 1: Check the prerequisites** and record them in the report and in `ios/README.md`:
+- [x] **Step 1: Check the prerequisites** and record them in the report and in `ios/README.md`:
   - `xcodebuild -version`;
   - `xcrun simctl list runtimes`;
   - the chosen default `IOS_SIMULATOR` device name (an iPhone on the newest installed iOS runtime).
 
   If `xcodebuild` is missing, stop with **BLOCKED** ("maintainer must install Xcode"). Never install it.
-- [ ] **Step 2: Manifest.**
+- [x] **Step 2: Manifest.**
   - Products, targets and platforms as in Global Constraints.
   - `resources: [.copy("PrivacyInfo.xcprivacy")]`.
   - Swift settings `.enableUpcomingFeature("ExistentialAny")`.
-- [ ] **Step 3: Smoke test.**
+- [x] **Step 3: Smoke test.**
   - `VersionTests.testVersionIsSnapshot()`: `XCTAssertEqual(ReliablePush.version, "0.1.0-SNAPSHOT")`. `public enum ReliablePush { public static let version = "0.1.0-SNAPSHOT" }` is the only code in this task.
   - Run: `xcodebuild test -scheme ReliablePush -destination "platform=iOS Simulator,name=$IOS_SIMULATOR"` → `** TEST SUCCEEDED **`.
   - `plutil -lint ios/Sources/ReliablePush/PrivacyInfo.xcprivacy` → OK. Its content is as in Global Constraints.
-- [ ] **Step 4: Size script.** `ios/scripts/size.sh`:
+- [x] **Step 4: Size script.** `ios/scripts/size.sh`:
   - Compiles every file under `ios/Sources/ReliablePush` with `xcrun --sdk iphoneos swiftc -emit-library -O -whole-module-optimization -module-name ReliablePush -target arm64-apple-ios15.0 -swift-version 6`.
   - Runs `strip -x` on the result.
   - Prints `ReliablePush stripped arm64 dylib: <bytes> bytes (limit 307200)` and exits 1 above the limit.
 
   Run it → under the limit.
-- [ ] **Step 5: Docs.** `ios/README.md`:
+- [x] **Step 5: Docs.** `ios/README.md`:
   - layout (root manifest, `ios/Sources`, `ios/Tests`, `ios/Sample` from Task 6);
   - prerequisites (Xcode version, Simulator runtime, `IOS_SIMULATOR`);
   - commands.
-- [ ] **Step 6: Commit** `build(ios): swift package, privacy manifest and size check`
+- [x] **Step 6: Commit** `build(ios): swift package, privacy manifest and size check`
 
 ### Task 1: Device API client
 
