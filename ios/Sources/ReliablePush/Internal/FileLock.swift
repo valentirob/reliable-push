@@ -47,6 +47,21 @@ final class FileLock: Sendable {
         return try body()
     }
 
+    /// Runs `body` holding the lock if it can be taken within `timeout` (polled every 20 ms); after that `body` runs
+    /// anyway, with WARN `lock.unavailable reason=timeout`. For cleanups (logout, reconfigure) that must not wait for
+    /// another process's flush for long, and must happen in any case.
+    func withLock<T>(timeout: TimeInterval, _ body: () -> T) -> T {
+        let end = Date().addingTimeInterval(timeout)
+        var held = tryLock()
+        while held == nil && Date() < end {
+            usleep(20_000)
+            held = tryLock()
+        }
+        if held == nil { SDKLog.warn("lock.unavailable", ["file": url.lastPathComponent, "reason": "timeout"]) }
+        defer { held?.release() }
+        return body()
+    }
+
     /// Takes the lock without blocking; nil when somebody else holds it (or the file cannot be opened).
     func tryLock() -> Held? {
         let fd = openFile()

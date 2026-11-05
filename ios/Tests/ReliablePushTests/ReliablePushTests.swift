@@ -228,6 +228,37 @@ final class ReliablePushTests: XCTestCase {
         XCTAssertEqual(fx.queue.count, 0)
     }
 
+    func testHeldFlushLockBoundsLogoutAndReconfigureWait() async throws {
+        try configure(appId: "app1")
+        await awaitFlush()
+        fx.register()
+        fx.queue.add(event("t1"))
+        StubURLProtocol.reset { _ in .response(status: 204) }
+        let held = try XCTUnwrap(fx.flushLock.tryLock(), "another process's flush holds the lock")
+        defer { held.release() }
+
+        var start = Date()
+        let confirmed = await withCheckedContinuation { c in ReliablePush.logout { c.resume(returning: $0) } }
+        var elapsed = Date().timeIntervalSince(start)
+        XCTAssertTrue(confirmed)
+        XCTAssertGreaterThan(elapsed, 1.8, "waited for the lock first")
+        XCTAssertLessThan(elapsed, 2.5)
+        XCTAssertFalse(fx.secrets.has("app1"))
+        XCTAssertEqual(fx.queue.count, 0)
+        XCTAssertTrue(fx.log.messages.contains { $0.contains("event=lock.unavailable") && $0.contains("reason=timeout") })
+
+        fx.register()
+        fx.queue.add(event("t2"))
+        start = Date()
+        try configure(appId: "app2")
+        elapsed = Date().timeIntervalSince(start)
+        XCTAssertGreaterThan(elapsed, 1.8)
+        XCTAssertLessThan(elapsed, 2.5)
+        XCTAssertFalse(fx.secrets.has("app1"))
+        XCTAssertEqual(fx.queue.count, 0)
+        XCTAssertEqual(fx.state.config?.appId, "app2")
+    }
+
     // MARK: trackOpen
 
     func testTrackOpenSendsReadForTapAndCustomActionNotForDismiss() async throws {

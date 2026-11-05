@@ -19,9 +19,10 @@ public enum ReliablePush {
     ///
     /// The same base URL and app id as the stored configuration is a no-op (the registration is kept). A different
     /// one replaces the stored configuration and clears the registration, the queued events and any rate-limit
-    /// back-off. On a fresh install (no stored configuration) a Keychain record left by an earlier installation is
-    /// cleared, so a reinstalled app starts unregistered. The configuration is persisted in the App Group's `UserDefaults`, where the extension reads it. The
-    /// first call in a process starts one flush of the events still queued (bounded, inside an expiring activity).
+    /// back-off; this waits at most about 2 s for a flush still running in the extension. On a fresh install (no
+    /// stored configuration) a Keychain record left by an earlier installation is cleared, so a reinstalled app starts
+    /// unregistered. The configuration is persisted in the App Group's `UserDefaults`, where the extension reads it.
+    /// The first call in a process starts one flush of the events still queued (bounded, inside an expiring activity).
     ///
     /// - Parameters:
     ///   - baseURL: The backend, `https` (cleartext `http` only for `localhost`, `127.0.0.1`, `::1`).

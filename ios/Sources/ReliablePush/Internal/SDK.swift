@@ -70,6 +70,9 @@ final class SDK: Sendable {
     /// I/O, and iOS kills a suspended app holding such a lock — 0xdead10cc).
     static let appFlushTimeout: TimeInterval = 25
     static let requestTimeout: TimeInterval = 10
+    /// Longest wait for `flush.lock` before a logout or reconfigure clears anyway (an extension flush can hold it for
+    /// up to 25 s, an earlier app flush for `appFlushTimeout`).
+    static let lockWait: TimeInterval = 2
 
     let baseURL: URL
     let appId: String
@@ -111,20 +114,23 @@ final class SDK: Sendable {
     /// Installs the configuration. Same base URL and app id as the stored one: the stored registration is kept (and an
     /// in-process SDK for it is reused). Otherwise the old registration, queue and retry-not-before are cleared and
     /// the new config persisted. Starts the flush once per process.
+    ///
+    /// The clear (which may wait up to `lockWait` for `flush.lock`) runs outside the process lock but before this
+    /// returns; the new SDK becomes `current` only after it, so nothing is queued for it and then wiped.
     static func configure(baseURL: URL, appId: String, env: SDKEnvironment) {
-        let (sdk, startFlush) = process.withLock { p -> (SDK, Bool) in
-            let sdk: SDK
-            if let current = p.current, current.baseURL == baseURL, current.appId == appId {
-                sdk = current
-            } else {
-                p.current?.cancelFlush()
-                sdk = SDK(baseURL: baseURL, appId: appId, env: env)
-                sdk.applyConfig()
-                p.current = sdk
-            }
-            let start = !p.launchFlushStarted
-            p.launchFlushStarted = true
-            return (sdk, start)
+        let previous = current
+        let sdk: SDK
+        if let previous, previous.baseURL == baseURL, previous.appId == appId {
+            sdk = previous
+        } else {
+            previous?.cancelFlush()
+            sdk = SDK(baseURL: baseURL, appId: appId, env: env)
+            sdk.applyConfig()
+        }
+        let startFlush = process.withLock { p -> Bool in
+            p.current = sdk
+            defer { p.launchFlushStarted = true }
+            return !p.launchFlushStarted
         }
         if startFlush { sdk.startFlush() }
     }
@@ -132,14 +138,15 @@ final class SDK: Sendable {
     static func resetForTesting() { process.withLock { $0 = Process() } }
 
     /// Persists the config. A different stored one: clears its registration, the queue and the back-off, under
-    /// `flush.lock` so a flush still running (here or in the extension) cannot save a token afterwards. No stored
+    /// `flush.lock` (waiting at most `lockWait`) so a flush still running here or in the extension cannot save a token
+    /// afterwards. No stored
     /// config (fresh install or reinstall: the App Group defaults are gone, the Keychain item is not): clears this app
     /// id's Keychain record, which may belong to another user (Android parity).
     private func applyConfig() {
         let state = env.state
         if let stored = state.config {
             if stored.baseURL.absoluteString == baseURL.absoluteString && stored.appId == appId { return }
-            flushLock.withLock {
+            flushLock.withLock(timeout: Self.lockWait) {
                 TokenStore(secrets: env.secrets, state: state, appId: stored.appId).clear()
                 tokens.clear()
                 queue.clear()
@@ -180,8 +187,8 @@ final class SDK: Sendable {
     }
 
     /// Best-effort revoke, then local cleanup in any case. True when the backend confirmed or nothing was registered.
-    /// The app flush is cancelled first and the cleanup runs under `flush.lock` (blocking, off the main thread), so a
-    /// refresh that was in flight cannot save a token after the logout.
+    /// The app flush is cancelled first and the cleanup runs under `flush.lock` (waiting at most `lockWait`, off the
+    /// main thread), so a refresh that was in flight cannot save a token after the logout.
     func logout() async -> Bool {
         cancelFlush()
         var deviceId: String?
@@ -196,7 +203,7 @@ final class SDK: Sendable {
             deviceId = env.state.deviceId
             confirmed = false
         }
-        flushLock.withLock {
+        flushLock.withLock(timeout: Self.lockWait) {
             tokens.clear()
             queue.clear()
             env.state.retryNotBefore = nil

@@ -3,8 +3,8 @@ import os
 
 /// The SDK logger: unified logging, subsystem `io.reliablepush`, category `ReliablePush` (`os_log`, see `log`),
 /// message `event=<name> key=value…` (fields in call order). WARN is written at `.error`, INFO at `.info`; debug and
-/// info only when `debug` is true (default: `DEBUG` builds). Fields whose key names a token, a user id or notification content are never written.
-/// Callers still must not pass such values under other names. Values are logged `privacy: .private` unless the key is
+/// info only when `debug` is true (default: `DEBUG` builds). Fields whose key names a token, a user id or notification
+/// content are never written. Callers still must not pass such values under other names. Values are logged `privacy: .private` unless the key is
 /// `trackingId` or `deviceId` (the only public fields).
 enum SDKLog {
     enum Level: Sendable { case debug, info, warn }
