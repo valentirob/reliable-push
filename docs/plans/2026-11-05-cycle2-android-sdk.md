@@ -143,7 +143,7 @@ The SDK posts the visible notification first, persists the event, schedules the 
   - `sealed interface ApiResult<T>` = `Ok(value)` | `Http(status: Int, retryAfterSeconds: Long?)` | `NetworkError`.
   - Body shapes follow `backend/src/main/resources/openapi.yaml` (`/v1/devices`, `/v1/devices/token:refresh`, `/v1/devices/me`, `/v1/events`); `platform` is `ANDROID`.
 
-- [ ] **Step 1: Failing tests** (Robolectric, so `org.json` is real):
+- [x] **Step 1: Failing tests** (Robolectric, so `org.json` is real):
   - `registerSendsAppIdIdTokenPlatformAndParsesToken()`
   - `registerReusesStoredDeviceId()`
   - `refreshSendsBearerToken()`
@@ -154,13 +154,13 @@ The SDK posts the visible notification first, persists the event, schedules the 
   - `doesNotFollowRedirects()` (the server answers 302 to another path that records any call: zero calls, result `Http(302)`)
   - `rejectsCleartextToRemoteHost()`: `http://example.com` throws; `http://10.0.2.2:8080`, `http://localhost`, `https://x.example` pass.
   - `neverLogsTokens()`: capture `ShadowLog`; no log line contains the id token or device token.
-- [ ] **Step 2: Run** `./gradlew :reliablepush:testDebugUnitTest` → FAIL.
-- [ ] **Step 3: Implement** with `HttpURLConnection`.
+- [x] **Step 2: Run** `./gradlew :reliablepush:testDebugUnitTest` → FAIL.
+- [x] **Step 3: Implement** with `HttpURLConnection`.
   - `Content-Type: application/json` and `Accept: application/json, application/problem+json`.
   - Bodies are read with a 64 KB cap.
   - Connections are always disconnected in `finally`.
-- [ ] **Step 4: Run** → PASS.
-- [ ] **Step 5: Commit** `feat(android): device api client`
+- [x] **Step 4: Run** → PASS.
+- [x] **Step 5: Commit** `feat(android): device api client`
 
 ### Task 2: Token storage and refresh rule
 
