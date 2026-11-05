@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import io.reliablepush.apps.AppConfig;
 import io.reliablepush.apps.AppFixtures;
 import io.reliablepush.apps.AppRegistry;
+import io.reliablepush.apps.ReliablePushProperties;
 import java.time.Duration;
 import java.util.Collection;
 import java.util.Map;
@@ -51,16 +52,15 @@ class WorkerConfigTest {
     }
 
     @Test
-    void shutdownTimeoutLongerThanShutdownPhaseFailsStartup() {
-        assertThatThrownBy(() -> WorkerConfig.checkShutdownTimeout(Duration.ofSeconds(31), Duration.ofSeconds(30)))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("reliable-push.worker.shutdown-timeout")
-                .hasMessageContaining("spring.lifecycle.timeout-per-shutdown-phase");
-    }
+    void shutdownTimeoutLongerThanSpringShutdownPhaseStillStarts() {
+        // R10: the worker stop runs synchronously and is not cut by spring.lifecycle.timeout-per-shutdown-phase (30 s),
+        // so an http-timeout of 40 s (shutdown timeout 45 s) is a valid configuration
+        Map<String, Object> properties = new java.util.HashMap<>(AppFixtures.minimalApp("shop", "k-shop"));
+        properties.put("reliable-push.apps.shop.fallback.http-timeout", "40s");
+        ReliablePushProperties bound = AppFixtures.bind(properties);
+        AppRegistry registry = new AppRegistry(bound, AppFixtures.environment());
 
-    @Test
-    void shutdownTimeoutWithinShutdownPhaseIsFine() {
-        WorkerConfig.checkShutdownTimeout(Duration.ofSeconds(30), Duration.ofSeconds(30));
+        assertThat(new WorkerConfig().fallbackWorkerLifecycle(null, registry, bound)).isNotNull();
     }
 
     @Test

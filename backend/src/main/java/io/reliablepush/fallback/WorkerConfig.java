@@ -16,7 +16,6 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
-import org.springframework.core.env.Environment;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
 import org.springframework.scheduling.annotation.EnableScheduling;
@@ -64,15 +63,10 @@ class WorkerConfig {
      */
     @Bean
     FallbackWorkerLifecycle fallbackWorkerLifecycle(
-            FallbackScheduler scheduler, AppRegistry apps, ReliablePushProperties properties, Environment env) {
+            FallbackScheduler scheduler, AppRegistry apps, ReliablePushProperties properties) {
         Duration timeout = resolveShutdownTimeout(properties.worker().shutdownTimeout(), apps.all());
-        Duration phase = env.getProperty(SHUTDOWN_PHASE_KEY, Duration.class, DEFAULT_SHUTDOWN_PHASE);
-        checkShutdownTimeout(timeout, phase);
         return new FallbackWorkerLifecycle(scheduler, timeout);
     }
-
-    private static final String SHUTDOWN_PHASE_KEY = "spring.lifecycle.timeout-per-shutdown-phase";
-    private static final Duration DEFAULT_SHUTDOWN_PHASE = Duration.ofSeconds(30);
 
     /** The configured {@code worker.shutdown-timeout}, else the largest app {@code http-timeout} plus 5 s. */
     static Duration resolveShutdownTimeout(Duration configured, Collection<AppConfig> apps) {
@@ -84,20 +78,6 @@ class WorkerConfig {
                 .max(Duration::compareTo)
                 .orElse(Duration.ZERO);
         return longest.plusSeconds(5);
-    }
-
-    /**
-     * Spring cuts a lifecycle phase after {@code timeout-per-shutdown-phase}; a longer worker stop would be abandoned
-     * silently and its rows re-sent after the lease.
-     *
-     * @throws IllegalStateException when {@code shutdownTimeout} exceeds the phase timeout
-     */
-    static void checkShutdownTimeout(Duration shutdownTimeout, Duration phaseTimeout) {
-        if (shutdownTimeout.compareTo(phaseTimeout) > 0) {
-            throw new IllegalStateException("reliable-push.worker.shutdown-timeout (" + shutdownTimeout
-                    + ") must not exceed " + SHUTDOWN_PHASE_KEY + " (" + phaseTimeout
-                    + "); raise the latter or lower the former, otherwise Spring cuts the worker stop and rows are re-sent");
-        }
     }
 
     /**

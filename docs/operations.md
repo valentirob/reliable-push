@@ -60,7 +60,7 @@ says so (minutes for `worker.lease` and `fallback.backoff`, days for `device-tok
 | `worker.batch-size` | `100` | 1-10000; at most this many rows per claim. A tick keeps claiming while claims come back full, for up to half the lease |
 | `worker.max-concurrency` | `batch-size` | 1-10000; webhook calls in flight per worker instance (one virtual thread each). A row is claimed only when a slot is free |
 | `worker.lease` | `2m` | A product duration (scaled by the fast clock); a bare number means minutes. Must be longer than every app's `fallback.http-timeout`; otherwise startup fails (a warning only with the fast clock) |
-| `worker.shutdown-timeout` | largest app `fallback.http-timeout` + `5s` | Positive; how long a stopping worker (`SIGTERM`) waits for its webhook calls in flight. Must not exceed `spring.lifecycle.timeout-per-shutdown-phase` (`30s`, set in `application.yml`), otherwise startup fails naming both keys; with a `fallback.http-timeout` above 25 s raise that too |
+| `worker.shutdown-timeout` | largest app `fallback.http-timeout` + `5s` | Positive; how long a stopping worker (`SIGTERM`) waits for its webhook calls in flight. Keep `terminationGracePeriodSeconds` above it (see "Graceful stop" below) |
 | `worker.backlog-refresh-interval` | `30s` | Optional; how often `rp_due_backlog` is recomputed |
 | `retention-days` | `30` | At least 1. Closed notifications older than this are deleted daily |
 | `retention.cron` | `0 17 3 * * *` | Spring cron expression (six fields, always UTC) of the daily retention run (worker role); `-` disables the schedule |
@@ -130,7 +130,8 @@ the application sets 5000 instead of Hikari's 30000, see "Database pool" below).
   `health` and `prometheus` are exposed under `/actuator`. By default they share the application port: do not route
   `/actuator/**` through a public ingress. In Kubernetes set `MANAGEMENT_SERVER_PORT=8081` (the Helm chart does):
   `/actuator/**` is then served on 8081 only (the application port answers 404), probes and Prometheus scrapes target
-  8081, and probe calls no longer produce `api.request` log lines. `/actuator/**` is unauthenticated and never reaches the rate limiter on either port.
+  8081, and probe calls no longer produce `api.request` log lines. `/actuator/**` is unauthenticated and never reaches
+  the rate limiter on either port.
 - Prometheus: `GET /actuator/prometheus` (standard JVM and HTTP server metrics plus the application metrics below).
 
 | Metric | Type | Meaning |
@@ -253,8 +254,11 @@ is harmless. It logs `retention.purged` with the count. Devices are not purged b
 - **Graceful stop:** on `SIGTERM` (Kubernetes rolling update, scale-down) a worker claims nothing more and finishes the
   webhook calls in flight, writing their outcomes before the connection pool closes, for at most
   `worker.shutdown-timeout`. A call that outlives it is logged once at WARN (`worker stop timed out; N rows may be
-  re-sent after their lease`) and its row is re-sent after the lease. Set `terminationGracePeriodSeconds` above
-  `shutdown-timeout + 30 s` (the chart default is 60) so the kubelet does not `SIGKILL` the pod first.
+  re-sent after their lease`) and its row is re-sent after the lease. The stop is not cut by Spring's
+  `spring.lifecycle.timeout-per-shutdown-phase` (`30s`, it bounds the web server's graceful drain); the hard bound is
+  the kubelet's `SIGKILL`. Set `terminationGracePeriodSeconds` above
+  `preStop 5 s (API pods) + worker.shutdown-timeout + 30 s` (the chart default is 60;
+  [deployment.md](deployment.md#graceful-shutdown)) so the kubelet does not `SIGKILL` the pod first.
 - **Crash re-sends:** if a worker dies after the receiver accepted a call but before the outcome was written, another
   worker re-sends once after the lease ends. Such re-sends are not counted against `max-attempts`. Receivers must
   de-duplicate on `Idempotency-Key` ([integration-guide.md](integration-guide.md)).
@@ -377,13 +381,18 @@ the Kubernetes probes).
   80% line coverage), then the image job (`-Pimage`, Trivy scan for CRITICAL/HIGH fixed vulnerabilities), plus dependency
   review on pull requests. End-to-end tests never run in CI.
 - `.github/workflows/codeql.yml`: CodeQL for Java; also scheduled weekly.
+- `.github/workflows/harness-ci.yml`: `client-java`, `harness` (`-am`) and the `loadtest` job
+  (`./mvnw -B -pl loadtest verify`: compiles the Gatling simulations and runs the module's unit tests, no load run).
+- `.github/workflows/helm-ci.yml`: `deploy/helm/scripts/validate.sh` (`helm lint --strict`, helm-unittest, kubeconform)
+  with the pinned images of `deploy/helm/tools.env`. The kind smoke install and the load runs are local only.
 - **Scheduled runs only start from the default branch.** Dependabot (`.github/dependabot.yml`) and the CodeQL `schedule`
   use the configuration on the repository's default branch; changes merged only to `develop` take effect for them once
   they reach the default branch.
-- **Path-filtered workflows and required checks:** both workflows only run when `backend/**` (or the workflow file)
-  changes. A path-filtered workflow that does not run reports no status, so marking one of its jobs as a *required* status
-  check blocks every pull request that does not touch the backend. Either do not require those checks, or add an
-  always-running aggregate job that is the only required check.
+- **Path-filtered workflows and required checks:** every workflow runs only when its own paths change (`backend/**`
+  for backend-ci and CodeQL; `client-java/**`, `harness/**`, `loadtest/**` and the root Maven files for harness-ci;
+  `deploy/helm/**` for helm-ci; or the workflow file). A path-filtered workflow that does not run reports no status, so
+  marking one of its jobs as a *required* status check blocks every pull request that does not touch those paths. Either
+  do not require those checks, or add an always-running aggregate job that is the only required check.
 - **CodeQL on fork and Dependabot pull requests:** the token is read-only there, so uploading the SARIF results fails
   (`security-events: write` is not granted). Treat that failure as expected for those PRs, or run CodeQL for them on push
   after merge.

@@ -218,9 +218,9 @@ On `SIGTERM` (rolling update, scale-down, node drain):
   pool closes, for at most `reliable-push.worker.shutdown-timeout` (default: the largest app `fallback.http-timeout` + 5 s,
   15 s with the defaults). A call that outlives it is logged once at WARN and its row is re-sent after the lease.
 - **The hard bound is the kubelet:** it sends `SIGKILL` `terminationGracePeriodSeconds` after the start of termination
-  (chart default 60). Keep it above `worker.shutdown-timeout` plus the web server's drain plus the 5 s `preStop` sleep. If
-  you raise an app's `http-timeout` (for example to 40 s, so a 45 s shutdown timeout), raise
-  `terminationGracePeriodSeconds` too (for example to 90). A `SIGKILL` during dispatch is the crash case: rows are re-sent
+  (chart default 60). Keep it above `worker.shutdown-timeout` plus the web server's drain (at most 30 s,
+  `spring.lifecycle.timeout-per-shutdown-phase`) plus the 5 s `preStop` sleep. If you raise an app's `http-timeout` (for
+  example to 40 s, so a 45 s shutdown timeout), raise `terminationGracePeriodSeconds` too (for example to 90). A `SIGKILL` during dispatch is the crash case: rows are re-sent
   once after the lease and receivers de-duplicate on `Idempotency-Key`.
 
 The kind smoke install (`./scripts/helm-smoke.sh`) checks this: it rolls the workers while webhook calls are in flight and

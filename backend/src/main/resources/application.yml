@@ -5,8 +5,9 @@ spring:
   profiles:
     default: api,worker
   lifecycle:
-    # Each shutdown phase may take this long; the worker stop (reliable-push.worker.shutdown-timeout) runs in one phase
-    # and must fit, otherwise startup fails. Keep terminationGracePeriodSeconds above it + 30 s.
+    # Bounds the web server's graceful drain (server.shutdown: graceful) on SIGTERM. The worker stop
+    # (reliable-push.worker.shutdown-timeout) runs synchronously and is not cut by it: the hard bound is the kubelet's
+    # SIGKILL, so keep terminationGracePeriodSeconds above preStop 5 s (API pods) + worker.shutdown-timeout + 30 s.
     timeout-per-shutdown-phase: 30s
   threads:
     virtual:
