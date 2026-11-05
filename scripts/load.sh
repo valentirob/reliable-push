@@ -15,6 +15,7 @@
 # result line was parsed and true; otherwise FAILED with a "reason" in summary.json.
 # Simulation settings come from the environment: LOAD_DEVICES, LOAD_NOTIFICATIONS_PER_SECOND, LOAD_RAMP, LOAD_STEADY,
 # LOAD_BURST_SIZE (multiple of LOAD_BURST_PER_SECOND), LOAD_BURST_PER_SECOND, LOAD_READY_TIMEOUT (seconds, default 120).
+# Worker container limits (default none): LOAD_WORKER_CPUS (e.g. 1), LOAD_WORKER_MEMORY (e.g. 768m); recorded in config.
 # Without --keep the stack is removed at the end (down -v); with --keep it keeps running. The Maven cache of the Gatling
 # runner is the external volume reliable-push-gatling-m2 and survives `down -v`; purge it with
 #   docker volume rm reliable-push-gatling-m2
@@ -72,7 +73,7 @@ avg_cpu() {
 [ "${LOAD_SH_SOURCE_ONLY:-0}" = 1 ] && return 0
 
 usage() {
-    sed -n '2,20p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    sed -n '2,21p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
 }
 
 SIMULATION=all API_POOL=10 WORKER_CONCURRENCY=100 WORKER_POOL=10 WORKERS=1 KEEP=0
@@ -97,6 +98,8 @@ need_int --api-pool "$API_POOL"
 need_int --worker-concurrency "$WORKER_CONCURRENCY"
 need_int --worker-pool "$WORKER_POOL"
 READY_TIMEOUT="${LOAD_READY_TIMEOUT:-120}"
+[[ "${LOAD_WORKER_CPUS:-1}" =~ ^[0-9]+(\.[0-9]+)?$ ]] || rp_die "LOAD_WORKER_CPUS must be a number like 1 or 0.5, got '${LOAD_WORKER_CPUS}'"
+[[ "${LOAD_WORKER_MEMORY:-1g}" =~ ^[0-9]+[kmg]?$ ]] || rp_die "LOAD_WORKER_MEMORY must be like 768m or 1g, got '${LOAD_WORKER_MEMORY}'"
 need_int LOAD_READY_TIMEOUT "$READY_TIMEOUT"
 export LOAD_API_POOL="$API_POOL" LOAD_WORKER_CONCURRENCY="$WORKER_CONCURRENCY" LOAD_WORKER_POOL="$WORKER_POOL"
 
@@ -225,7 +228,7 @@ cpu_sampler() {
 
 ENTRIES=()
 ALL_PASSED=1
-CONFIG_JSON="{\"apiCpus\":2,\"apiMemory\":\"1g\",\"apiPool\":$API_POOL,\"workers\":$WORKERS,\"workerConcurrency\":$WORKER_CONCURRENCY,\"workerPool\":$WORKER_POOL}"
+CONFIG_JSON="{\"apiCpus\":2,\"apiMemory\":\"1g\",\"apiPool\":$API_POOL,\"workers\":$WORKERS,\"workerConcurrency\":$WORKER_CONCURRENCY,\"workerPool\":$WORKER_POOL,\"workerCpus\":\"${LOAD_WORKER_CPUS:-unlimited}\",\"workerMemory\":\"${LOAD_WORKER_MEMORY:-unlimited}\"}"
 
 # run_gatling <name> <simulation class> <expected assertion count> <skip ramp seconds>
 # Sets SIM_RC, SIM_REASON, SIM_ASSERTIONS, SIM_CPU (used for INVALID), SIM_CPU_INJECTION, SIM_CPU_STEADY

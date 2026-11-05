@@ -38,11 +38,15 @@ services:
       # default 6,000/min would reject the 500 registrations/s and the 1,500/s burst
       RELIABLEPUSH_APPS_SHOP_RATELIMITS_SENDERPERMINUTE: "600000"
   worker-a:
+    cpus: "${LOAD_WORKER_CPUS:-0}"          # 0 = no limit (default); e.g. LOAD_WORKER_CPUS=1 for the chart's limit
+    mem_limit: "${LOAD_WORKER_MEMORY:-0}"   # 0 = no limit (default); e.g. LOAD_WORKER_MEMORY=768m
     env_file: !override
       - path: ../build/load/secrets.env
         required: false
     environment: *worker-env
   worker-b:
+    cpus: "${LOAD_WORKER_CPUS:-0}"          # 0 = no limit (default); e.g. LOAD_WORKER_CPUS=1 for the chart's limit
+    mem_limit: "${LOAD_WORKER_MEMORY:-0}"   # 0 = no limit (default); e.g. LOAD_WORKER_MEMORY=768m
     env_file: !override
       - path: ../build/load/secrets.env
         required: false
