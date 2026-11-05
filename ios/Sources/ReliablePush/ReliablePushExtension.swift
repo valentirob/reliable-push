@@ -4,19 +4,18 @@ import UserNotifications
 /// Helper for the host's Notification Service Extension: reports `DELIVERED` for the SDK's notifications and always
 /// hands the notification back, exactly once.
 ///
-/// Create one instance per `UNNotificationServiceExtension` instance and forward both entry points. In Swift 6
-/// language mode, import UserNotifications with `@preconcurrency` and declare the override's handler `@Sendable`
-/// (the SDK calls it from a background thread; the system's handler may be called from any thread):
+/// Single use: create one instance per request, as the system creates one `UNNotificationServiceExtension` instance
+/// per request, and forward both entry points from the extension's synchronous overrides:
 ///
 /// ```swift
-/// @preconcurrency import UserNotifications
+/// import UserNotifications
 /// import ReliablePush
 ///
 /// final class NotificationService: UNNotificationServiceExtension {
 ///     private let reliablePush = ReliablePushExtension(appGroup: "group.com.example.app")
 ///
 ///     override func didReceive(_ request: UNNotificationRequest,
-///                              withContentHandler contentHandler: @escaping @Sendable (UNNotificationContent) -> Void) {
+///                              withContentHandler contentHandler: @escaping (UNNotificationContent) -> Void) {
 ///         if !reliablePush.didReceive(request, withContentHandler: contentHandler) {
 ///             contentHandler(request.content) // not the SDK's push
 ///         }
@@ -26,20 +25,23 @@ import UserNotifications
 /// }
 /// ```
 ///
-/// `@unchecked Sendable`: the only mutable state (the pending content handler, the best content so far and the flush
-/// task) is guarded by `lock`. The handler is taken out under the lock and called outside it, so whichever path comes
-/// first (flush done, deadline, expiry) calls it and every later path finds nothing to call: exactly once, with no
-/// actor hop that could reorder the paths. The configuration (`sdk`, `timeout`) is immutable.
+/// `@unchecked Sendable`: the only mutable state (the pending content handler, the best content so far, the flush
+/// task and the expiry flag) is guarded by `lock`. The handler is taken out under the lock and called outside it, so
+/// whichever path comes first (flush done, safety timer, expiry) calls it and every later path finds nothing to call:
+/// exactly once, with no actor hop that could reorder the paths. The system's handler is not `Sendable`; it is only
+/// ever reached through this lock-guarded slot and may be called from any thread. The configuration (`sdk`,
+/// `timeout`) is immutable.
 public final class ReliablePushExtension: @unchecked Sendable {
     private static let maxSendTimeout: TimeInterval = 25
     private static let gateTimeout: TimeInterval = 2
+    private static let safetyMargin: TimeInterval = 0.5
 
     private let sdk: SDK?
     private let settings: (any NotificationSettingsSource)?
     private let timeout: TimeInterval
 
     private let lock = NSLock()
-    private var pending: (@Sendable (UNNotificationContent) -> Void)?
+    private var pending: ((UNNotificationContent) -> Void)?
     private var bestContent: UNNotificationContent?
     private var work: Task<Void, Never>?
     private var expired = false
@@ -49,7 +51,8 @@ public final class ReliablePushExtension: @unchecked Sendable {
     ///
     /// - Parameters:
     ///   - appGroup: The same App Group id the app passes to `configure`.
-    ///   - options: The Keychain access group override and `extensionSendTimeout`; see `ReliablePushOptions`.
+    ///   - options: The Keychain access group override and `extensionSendTimeout`; see `ReliablePushOptions`. Pass
+    ///     the same `keychainAccessGroup` as the app.
     public convenience init(appGroup: String, options: ReliablePushOptions = .init()) {
         let env = try? SDKEnvironment.appGroup(appGroup, options: options)
         if env == nil { SDKLog.warn("sdk.app_group_unavailable") }
@@ -67,15 +70,18 @@ public final class ReliablePushExtension: @unchecked Sendable {
     /// Returns `false`, without calling `handler`, when the request has no valid `rp_tid` (a malformed one is logged
     /// as WARN), so the host extension can handle its own pushes. Otherwise it returns `true` and owns `handler`:
     /// - it applies `customize` to a mutable copy of the content (with the tracking id);
-    /// - it checks the notification settings; only if the notification will be shown and the device is registered is
+    /// - if the device is registered, it checks the notification settings; only if the notification will be shown is
     ///   `DELIVERED` persisted in the queue, before this method returns;
-    /// - it flushes the queue until `extensionSendTimeout`, then calls `handler` once with the (customised) content.
+    /// - it flushes the queue for what is left of `extensionSendTimeout`, then calls `handler` once with the
+    ///   (customised) content.
     ///
     /// When the device is not registered, `handler` is called at once and no event is recorded (WARN
     /// `tracking.not_registered`). Without a stored configuration the content is passed through untouched.
     ///
-    /// The settings check and the queue write happen on the calling thread, so this blocks briefly (the settings read
-    /// is capped at 2 s; if it does not answer, the notification counts as not shown). The send runs in the background.
+    /// Call it once per instance, from the extension's synchronous `didReceive(_:withContentHandler:)` override, never
+    /// from async code: the settings check and the queue write block the calling thread briefly (the settings read is
+    /// capped at 2 s whatever `extensionSendTimeout` is; a source that does not answer counts as not shown). The send
+    /// runs in the background.
     ///
     /// - Parameters:
     ///   - request: The request given to `UNNotificationServiceExtension.didReceive(_:withContentHandler:)`.
@@ -83,7 +89,7 @@ public final class ReliablePushExtension: @unchecked Sendable {
     ///   - customize: Optional synchronous changes to the content (title, attachments…), with the tracking id.
     @discardableResult
     public func didReceive(_ request: UNNotificationRequest,
-                           withContentHandler handler: @escaping @Sendable (UNNotificationContent) -> Void,
+                           withContentHandler handler: @escaping (UNNotificationContent) -> Void,
                            customize: (@Sendable (UNMutableNotificationContent, String) -> Void)? = nil) -> Bool {
         guard case let .valid(trackingId) = TrackingId.parse(request.content.userInfo) else { return false }
         let start = Date()
@@ -98,13 +104,13 @@ public final class ReliablePushExtension: @unchecked Sendable {
         if let customize, let mutable { customize(mutable, trackingId) }
         let content: UNNotificationContent = mutable ?? request.content
 
-        // DELIVERED goes to disk before the handler can be called by any path (flush end, deadline, expiry).
-        let shown = NotificationGate.settings(from: settings, timeout: min(timeout, Self.gateTimeout))?.isShown ?? false
+        // DELIVERED goes to disk before the handler can be called by any path (flush end, safety timer, expiry).
+        // Registration first: an unregistered device needs no settings read.
         let registered = sdk.isRegistered
         if !registered {
             SDKLog.warn("tracking.not_registered", ["trackingId": trackingId, "type": EventType.delivered.rawValue])
-        } else if shown {
-            sdk.record(trackingId, .delivered)
+        } else if NotificationGate.settings(from: settings, timeout: Self.gateTimeout)?.isShown == true {
+            sdk.enqueue(trackingId, .delivered)
         }
 
         let expiredEarly = install(handler: handler, content: content)
@@ -113,8 +119,10 @@ public final class ReliablePushExtension: @unchecked Sendable {
             return true
         }
 
+        // The settings read counts against the send budget.
         let remaining = max(timeout - Date().timeIntervalSince(start), 0)
         let task = Task { [self] in
+            // Returns once the sender has unwound and released flush.lock; only then is the notification handed back.
             _ = await sdk.boundedFlush(timeout: remaining)
             finish(expired: false)
         }
@@ -123,10 +131,11 @@ public final class ReliablePushExtension: @unchecked Sendable {
             work = task
             return expired
         }) { task.cancel() }
-        // Hands the notification back at the deadline even if the flush has not unwound yet.
-        DispatchQueue.global().asyncAfter(deadline: .now() + remaining) { [self] in
-            finish(expired: false)
+        // Safety net only (the bounded flush normally returns first): hands the notification back even if the
+        // flush has not unwound by then.
+        DispatchQueue.global().asyncAfter(deadline: .now() + remaining + Self.safetyMargin) { [self] in
             task.cancel()
+            finish(expired: false)
         }
         return true
     }
@@ -140,15 +149,13 @@ public final class ReliablePushExtension: @unchecked Sendable {
             expired = true
             return work
         }
-        finish(expired: true)
         task?.cancel()
+        finish(expired: true)
     }
 
     /// Installs the handler and the best content; returns true when the time already expired (then finish at once).
-    private func install(handler: @escaping @Sendable (UNNotificationContent) -> Void, content: UNNotificationContent) -> Bool {
-        // One request per instance is the system's contract; a second one first hands back the previous one.
-        finish(expired: false)
-        return locked {
+    private func install(handler: @escaping (UNNotificationContent) -> Void, content: UNNotificationContent) -> Bool {
+        locked {
             pending = handler
             bestContent = content
             return expired
@@ -157,7 +164,7 @@ public final class ReliablePushExtension: @unchecked Sendable {
 
     /// Calls the pending handler, if any, exactly once.
     private func finish(expired: Bool) {
-        let taken = locked { () -> (handler: @Sendable (UNNotificationContent) -> Void, content: UNNotificationContent)? in
+        let taken = locked { () -> (handler: (UNNotificationContent) -> Void, content: UNNotificationContent)? in
             guard let handler = pending, let content = bestContent else { return nil }
             pending = nil
             bestContent = nil

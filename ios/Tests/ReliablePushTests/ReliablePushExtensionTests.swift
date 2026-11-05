@@ -162,6 +162,18 @@ final class ReliablePushExtensionTests: XCTestCase {
         XCTAssertEqual(SDKFixture.sentEvents(), expected)
     }
 
+    func testZeroSendTimeoutStillReadsGateAndQueuesDelivered() {
+        StubURLProtocol.reset { _ in .hang }
+        let tid = UUID().uuidString
+        let h = recorder()
+        XCTAssertTrue(makeExtension(timeout: 0).didReceive(request(["rp_tid": tid]), withContentHandler: h.handler))
+        XCTAssertEqual(fx.queue.peek(max: 10).map(\.key), ["\(tid)|DELIVERED"])
+        wait(for: [h.called], timeout: 2)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.8))
+        XCTAssertEqual(h.count, 1)
+        waitForFlushEnd()
+    }
+
     func testNotRegisteredCallsHandlerWithoutEvent() {
         fx.tokens().clear()
         let h = recorder()

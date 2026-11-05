@@ -46,8 +46,9 @@ struct SystemNotificationSettings: NotificationSettingsSource {
 
 enum NotificationGate {
     /// Synchronous read of `source`, bounded by `timeout` (nil when it did not answer in time). Used by the
-    /// extension so DELIVERED is on disk before `didReceive` returns. Never call it from the main actor's async
-    /// context or a source that needs the calling thread.
+    /// extension so DELIVERED is on disk before `didReceive` returns. Call it only from synchronous code outside Swift's
+    /// cooperative thread pool (the extension's synchronous override): it blocks the calling thread while `source` runs
+    /// on the pool.
     static func settings(from source: any NotificationSettingsSource, timeout: TimeInterval) -> GateSettings? {
         let result = Locked<GateSettings?>(nil)
         let done = DispatchSemaphore(value: 0)

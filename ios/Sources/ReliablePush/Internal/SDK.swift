@@ -112,6 +112,7 @@ final class SDK: Sendable {
             if let current = p.current, current.baseURL == baseURL, current.appId == appId {
                 sdk = current
             } else {
+                p.current?.cancelFlush()
                 sdk = SDK(baseURL: baseURL, appId: appId, env: env)
                 sdk.applyConfig()
                 p.current = sdk
@@ -125,15 +126,24 @@ final class SDK: Sendable {
 
     static func resetForTesting() { process.withLock { $0 = Process() } }
 
+    /// Persists the config. A different stored one: clears its registration, the queue and the back-off, under
+    /// `flush.lock` so a flush still running (here or in the extension) cannot save a token afterwards. No stored
+    /// config (fresh install or reinstall: the App Group defaults are gone, the Keychain item is not): clears this app
+    /// id's Keychain record, which may belong to another user (Android parity).
     private func applyConfig() {
         let state = env.state
         if let stored = state.config {
             if stored.baseURL.absoluteString == baseURL.absoluteString && stored.appId == appId { return }
-            TokenStore(secrets: env.secrets, state: state, appId: stored.appId).clear()
-            tokens.clear()
-            queue.clear()
-            state.retryNotBefore = nil
+            flushLock.withLock {
+                TokenStore(secrets: env.secrets, state: state, appId: stored.appId).clear()
+                tokens.clear()
+                queue.clear()
+                state.retryNotBefore = nil
+            }
             SDKLog.info("sdk.reconfigured")
+        } else {
+            tokens.clear()
+            SDKLog.info("sdk.reconfigured", ["reason": "no_stored_config"])
         }
         state.config = (baseURL, appId)
     }
@@ -165,7 +175,10 @@ final class SDK: Sendable {
     }
 
     /// Best-effort revoke, then local cleanup in any case. True when the backend confirmed or nothing was registered.
+    /// The app flush is cancelled first and the cleanup runs under `flush.lock` (blocking, off the main thread), so a
+    /// refresh that was in flight cannot save a token after the logout.
     func logout() async -> Bool {
+        cancelFlush()
         var deviceId: String?
         let confirmed: Bool
         switch tokens.load() {
@@ -178,9 +191,11 @@ final class SDK: Sendable {
             deviceId = env.state.deviceId
             confirmed = false
         }
-        tokens.clear()
-        queue.clear()
-        env.state.retryNotBefore = nil
+        flushLock.withLock {
+            tokens.clear()
+            queue.clear()
+            env.state.retryNotBefore = nil
+        }
         if confirmed {
             SDKLog.info("device.revoked", ["deviceId": deviceId ?? "none"])
         } else {
@@ -199,15 +214,22 @@ final class SDK: Sendable {
     }
 
     /// Queues `type` for `trackingId` (disk only). False with WARN `tracking.not_registered` when not registered.
-    @discardableResult
     func record(_ trackingId: String, _ type: EventType) -> Bool {
         guard isRegistered else {
             SDKLog.warn("tracking.not_registered", ["trackingId": trackingId, "type": type.rawValue])
             return false
         }
-        queue.add(QueuedEvent(trackingId: trackingId, type: type, occurredAt: env.now()))
+        enqueue(trackingId, type)
         return true
     }
+
+    /// Queues `type` for `trackingId` (disk only); the caller has checked the registration.
+    func enqueue(_ trackingId: String, _ type: EventType) {
+        queue.add(QueuedEvent(trackingId: trackingId, type: type, occurredAt: env.now()))
+    }
+
+    /// Cancels the most recent app-side flush, if still running (it unwinds and releases `flush.lock`).
+    func cancelFlush() { lastFlush.withLock { $0 }?.cancel() }
 
     /// One flush bounded by `timeout`: the deadline is raced against the sender, whose in-flight request is then
     /// cancelled. Returns once the sender has unwound, so `flush.lock` is released. Cancelling the calling task has

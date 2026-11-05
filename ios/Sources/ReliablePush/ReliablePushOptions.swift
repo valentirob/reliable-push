@@ -1,6 +1,9 @@
 import Foundation
 
 /// Options shared by `ReliablePush.configure` (app) and `ReliablePushExtension` (Notification Service Extension).
+///
+/// In the app, options are fixed for the process once configured: a later `configure` with the same base URL and
+/// app id keeps the options of the first call.
 public struct ReliablePushOptions: Sendable {
     /// Keychain access group holding the device token, shared by the app and the extension. `nil` (the default) uses
     /// the App Group id, which is a valid keychain access group and needs no extra entitlement.

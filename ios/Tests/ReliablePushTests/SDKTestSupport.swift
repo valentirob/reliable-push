@@ -53,6 +53,9 @@ final class SDKFixture {
     static let baseURL = URL(string: "http://localhost:8080")!
     /// Healthy token: 97 % of its lifetime left at `now`.
     static let goodToken = DeviceTokenTests.token(iat: 1_700_000_000 - 100, exp: 1_700_000_000 + 3500)
+    /// Expiring token: under 20 % left at `now`, so the next flush refreshes first.
+    static let staleToken = DeviceTokenTests.token(iat: 1_700_000_000 - 3500, exp: 1_700_000_000 + 100)
+    static let freshToken = DeviceTokenTests.token(iat: 1_700_000_000, exp: 1_700_000_000 + 3600)
 
     let root: URL
     let dir: URL
@@ -85,8 +88,8 @@ final class SDKFixture {
 
     func storeConfig(appId: String = "app1") { state.config = (Self.baseURL, appId) }
 
-    func register(appId: String = "app1", deviceId: String = "dev1") {
-        XCTAssertTrue(tokens(appId).save(Registration(deviceId: deviceId, deviceToken: Self.goodToken,
+    func register(appId: String = "app1", deviceId: String = "dev1", token: String = goodToken) {
+        XCTAssertTrue(tokens(appId).save(Registration(deviceId: deviceId, deviceToken: token,
                                                       expiresAt: Self.now.addingTimeInterval(3500))))
     }
 
@@ -118,6 +121,10 @@ final class SDKFixture {
         let ids = ((obj?["events"] as? [[String: Any]]) ?? []).compactMap { $0["trackingId"] as? String }
         let list = ids.map { #"{"trackingId":"\#($0)","outcome":"ACCEPTED"}"# }.joined(separator: ",")
         return .response(status: 200, body: Data(#"{"items":[\#(list)]}"#.utf8))
+    }
+
+    static func refreshed(_ token: String = freshToken) -> StubURLProtocol.Reply {
+        .response(status: 200, body: Data(#"{"deviceToken":"\#(token)","expiresAt":"2023-11-15T00:00:00Z"}"#.utf8))
     }
 
     static func registration(deviceId: String = "dev1", token: String = goodToken) -> StubURLProtocol.Reply {

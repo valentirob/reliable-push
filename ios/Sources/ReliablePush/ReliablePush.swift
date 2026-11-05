@@ -19,14 +19,16 @@ public enum ReliablePush {
     ///
     /// The same base URL and app id as the stored configuration is a no-op (the registration is kept). A different
     /// one replaces the stored configuration and clears the registration, the queued events and any rate-limit
-    /// back-off. The configuration is persisted in the App Group's `UserDefaults`, where the extension reads it. The
+    /// back-off. On a fresh install (no stored configuration) a Keychain record left by an earlier installation is
+    /// cleared, so a reinstalled app starts unregistered. The configuration is persisted in the App Group's `UserDefaults`, where the extension reads it. The
     /// first call in a process starts one flush of the events still queued (bounded, inside an expiring activity).
     ///
     /// - Parameters:
     ///   - baseURL: The backend, `https` (cleartext `http` only for `localhost`, `127.0.0.1`, `::1`).
     ///   - appId: The app id registered at the backend.
     ///   - appGroup: The App Group id shared with the Notification Service Extension (e.g. `group.com.example.app`).
-    ///   - options: Keychain access group override; see `ReliablePushOptions`.
+    ///   - options: Keychain access group override; see `ReliablePushOptions`. Fixed for the process: a later call with
+    ///     the same base URL and app id keeps the first options.
     /// - Throws: `ReliablePushError.insecureBaseURL` / `.invalidBaseURL` for an unusable base URL,
     ///   `.invalidAppId` for a blank app id, `.appGroupUnavailable` when the App Group cannot be opened.
     public static func configure(baseURL: String, appId: String, appGroup: String,

@@ -45,15 +45,21 @@ final class SDKLogTests: XCTestCase {
         defer { fx.cleanup() }
         SDKLog.debug = true
         let idToken = "ID-TOKEN-\(UUID().uuidString)"
+        try ReliablePush.configure(baseURL: "http://localhost:8080", appId: "app1", environment: fx.environment)
+        _ = await SDK.current?.lastFlushForTesting?.value
+
+        StubURLProtocol.reset { _ in .response(status: 401) }
+        let rejected = await ReliablePush.register(idToken: idToken)
+        XCTAssertEqual(rejected, .failed(httpStatus: 401))
+
         StubURLProtocol.reset { req in
             switch req.url?.path {
-            case "/v1/devices": return SDKFixture.registration()
+            case "/v1/devices": return SDKFixture.registration(token: SDKFixture.staleToken) // next flush refreshes
+            case "/v1/devices/token:refresh": return SDKFixture.refreshed()
             case "/v1/devices/me": return .response(status: 204)
             default: return SDKFixture.acceptAll(req)
             }
         }
-        try ReliablePush.configure(baseURL: "http://localhost:8080", appId: "app1", environment: fx.environment)
-        _ = await SDK.current?.lastFlushForTesting?.value
         let registered = await ReliablePush.register(idToken: idToken)
         XCTAssertEqual(registered, .success(deviceId: "dev1"))
 
@@ -65,7 +71,11 @@ final class SDKLogTests: XCTestCase {
         let request = UNNotificationRequest(identifier: "n1", content: content, trigger: nil)
         let handled = expectation(description: "handled")
         let ext = ReliablePushExtension(environment: fx.environment, options: .init())
-        XCTAssertTrue(ext.didReceive(request, withContentHandler: { _ in handled.fulfill() }))
+        // didReceive is called from a synchronous override, never from the cooperative pool
+        nonisolated(unsafe) let req = request
+        DispatchQueue.global().async {
+            XCTAssertTrue(ext.didReceive(req, withContentHandler: { _ in handled.fulfill() }))
+        }
         await fulfillment(of: [handled], timeout: 5)
 
         XCTAssertTrue(ReliablePush.trackOpen(userInfo: ["rp_tid": tid], actionIdentifier: UNNotificationDefaultActionIdentifier))
@@ -78,7 +88,10 @@ final class SDKLogTests: XCTestCase {
         XCTAssertTrue(all.contains { $0.contains("event=device.registered") && $0.contains("deviceId=dev1") })
         XCTAssertTrue(all.contains { $0.contains("event=tracking.event_queued") && $0.contains("trackingId=\(tid)") })
         XCTAssertTrue(all.contains { $0.contains("event=device.revoked") })
-        for secret in [idToken, SDKFixture.goodToken, "Bearer", "SECRET-TITLE", "SECRET-BODY"] {
+        XCTAssertTrue(all.contains { $0.contains("event=token.refreshed") })
+        XCTAssertTrue(all.contains { $0.contains("event=auth.failed") })
+        XCTAssertTrue(StubURLProtocol.requests.contains { $0.url.path == "/v1/devices/token:refresh" })
+        for secret in [idToken, SDKFixture.staleToken, SDKFixture.freshToken, "Bearer", "SECRET-TITLE", "SECRET-BODY"] {
             XCTAssertFalse(all.contains { $0.contains(secret) }, "\(secret) leaked: \(all)")
         }
     }

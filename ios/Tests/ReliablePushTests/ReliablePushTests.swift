@@ -107,6 +107,17 @@ final class ReliablePushTests: XCTestCase {
         XCTAssertTrue(fx.log.messages.contains { $0.contains("event=sdk.reconfigured") })
     }
 
+    func testFirstConfigureWithoutStoredConfigClearsSurvivingKeychainRecord() throws {
+        // a reinstall: the App Group defaults are gone, the ThisDeviceOnly Keychain item survived
+        fx.register()
+        fx.state.clearRegistration()
+        XCTAssertTrue(fx.secrets.has("app1"))
+        try configure()
+        XCTAssertFalse(fx.secrets.has("app1"))
+        XCTAssertNil(ReliablePush.deviceId)
+        guard case .notRegistered = fx.tokens().load() else { return XCTFail("record survived") }
+    }
+
     // MARK: register / logout
 
     func testRegisterStoresTokenAndCallsBackOnMain() async throws {
@@ -189,6 +200,31 @@ final class ReliablePushTests: XCTestCase {
         }
         await fulfillment(of: [failed], timeout: 5)
         XCTAssertFalse(fx.secrets.has("app1"))
+        XCTAssertEqual(fx.queue.count, 0)
+    }
+
+    func testLogoutDuringRefreshLeavesNoRegistration() async throws {
+        fx.storeConfig()
+        fx.register(token: SDKFixture.staleToken)
+        fx.queue.add(event("t1"))
+        StubURLProtocol.reset { req in
+            switch req.url?.path {
+            case "/v1/devices/token:refresh":
+                Thread.sleep(forTimeInterval: 0.5) // the new token arrives after the logout
+                return SDKFixture.refreshed()
+            case "/v1/devices/me": return .response(status: 204)
+            default: return SDKFixture.acceptAll(req)
+            }
+        }
+        try configure() // the launch flush starts with a refresh
+        let refreshing = await waitUntilAsync { StubURLProtocol.requests.contains { $0.url.path == "/v1/devices/token:refresh" } }
+        XCTAssertTrue(refreshing)
+
+        let confirmed = await withCheckedContinuation { c in ReliablePush.logout { c.resume(returning: $0) } }
+        XCTAssertTrue(confirmed)
+        try await Task.sleep(nanoseconds: 1_000_000_000) // any late refresh answer has landed by now
+        XCTAssertFalse(fx.secrets.has("app1"), "no token saved after logout")
+        XCTAssertNil(ReliablePush.deviceId)
         XCTAssertEqual(fx.queue.count, 0)
     }
 
