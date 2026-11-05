@@ -10,7 +10,9 @@
 # The emulator reaches the stack at 10.0.2.2 (backend 8080, harness 8090). Compose project reliable-push-android-e2e,
 # fast clock, the same files and secrets generation as scripts/e2e.sh.
 # Outputs in harness/build/android-e2e/: summary.json (same shape as e2e.sh), junit/*.xml, logs/ (gradle, logcat,
-# emulator, containers). Exit code 0 only if every entry PASSED.
+# emulator, containers). Exit code 0 only if every entry PASSED. Each run first removes the Gradle connected-test results
+# (android/{reliablepush,sample}/build/outputs/androidTest-results). On an attached device it sets the animation scales
+# to 0 and restores them at the end; logcat is collected from the start of the run (the device's buffer is not cleared).
 # Environment: ANDROID_AVD, ANDROID_SERIAL, E2E_READY_TIMEOUT (stack readiness, default 120 s), ANDROID_BOOT_TIMEOUT
 # (emulator boot, default 300 s).
 set -euo pipefail
@@ -23,7 +25,7 @@ RP_TAG="android-e2e"
 . "$RP_ROOT/scripts/lib/common.sh"
 
 usage() {
-    sed -n '2,16p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    sed -n '2,18p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
 }
 
 PKG="io.reliablepush.sample"
@@ -97,30 +99,46 @@ EMU_PID=""
 ANIM_SAVED=""
 adb_s() { "$ADB" -s "$SERIAL" "$@"; }
 
-restore_device() {
-    [ -n "$SERIAL" ] || return 0
-    if [ "$EMU_STARTED" = 1 ]; then
-        rp_log "stopping the emulator this run started ($SERIAL)"
-        adb_s emu kill >/dev/null 2>&1 || true
-        local i=0
-        while [ -n "$EMU_PID" ] && kill -0 "$EMU_PID" 2>/dev/null && [ "$i" -lt 30 ]; do
-            sleep 1
-            i=$((i + 1))
-        done
-        [ -n "$EMU_PID" ] && kill -0 "$EMU_PID" 2>/dev/null && kill "$EMU_PID" 2>/dev/null || true
-    elif [ -n "$ANIM_SAVED" ]; then
-        # a device that was already there: put its animation scales back
-        local s w t a
-        read -r w t a <<<"$ANIM_SAVED"
-        for s in "window_animation_scale:$w" "transition_animation_scale:$t" "animator_duration_scale:$a"; do
-            if [ "${s#*:}" = null ]; then
-                adb_s shell settings delete global "${s%%:*}" >/dev/null 2>&1 || true
-            else
-                adb_s shell settings put global "${s%%:*}" "${s#*:}" >/dev/null 2>&1 || true
-            fi
-        done
-        adb_s shell cmd connectivity airplane-mode disable >/dev/null 2>&1 || true
+ANIM_KEYS="window_animation_scale transition_animation_scale animator_duration_scale"
+LOGCAT_SINCE=""
+
+# Stops the emulator this run started: `emu kill` when adb knows it, and in any case its process (TERM, then KILL),
+# so an interrupt or a timeout while it is still booting leaves nothing running.
+stop_started_emulator() {
+    [ "$EMU_STARTED" = 1 ] || return 0
+    rp_log "stopping the emulator this run started (${SERIAL:-not in adb yet})"
+    [ -n "$SERIAL" ] && "$ADB" -s "$SERIAL" emu kill >/dev/null 2>&1
+    [ -n "$EMU_PID" ] || return 0
+    local i=0
+    while kill -0 "$EMU_PID" 2>/dev/null && [ "$i" -lt 20 ]; do
+        [ "$i" = 5 ] && { pkill -TERM -P "$EMU_PID" 2>/dev/null; kill -TERM "$EMU_PID" 2>/dev/null; }
+        sleep 1
+        i=$((i + 1))
+    done
+    if kill -0 "$EMU_PID" 2>/dev/null; then
+        pkill -KILL -P "$EMU_PID" 2>/dev/null
+        kill -KILL "$EMU_PID" 2>/dev/null
     fi
+    wait "$EMU_PID" 2>/dev/null
+    return 0
+}
+
+# A device that was already attached: put back what this run changed (animation scales, airplane mode)
+restore_attached_device() {
+    [ "$EMU_STARTED" = 0 ] && [ -n "$SERIAL" ] && [ -n "$ANIM_SAVED" ] || return 0
+    local key value
+    set -- $ANIM_SAVED
+    for key in $ANIM_KEYS; do
+        value="${1:-null}"
+        shift || true
+        if [ "$value" = null ]; then
+            adb_s shell settings delete global "$key" >/dev/null 2>&1
+        else
+            adb_s shell settings put global "$key" "$value" >/dev/null 2>&1
+        fi
+    done
+    adb_s shell cmd connectivity airplane-mode disable >/dev/null 2>&1
+    return 0
 }
 
 finish() {
@@ -128,7 +146,11 @@ finish() {
     trap - EXIT INT TERM
     set +e
     if [ -n "$SERIAL" ]; then
-        adb_s logcat -d -v threadtime >"$RP_OUT/logs/logcat.txt" 2>&1
+        if [ -n "$LOGCAT_SINCE" ]; then
+            adb_s logcat -d -v threadtime -T "$LOGCAT_SINCE" >"$RP_OUT/logs/logcat.txt" 2>&1
+        else
+            adb_s logcat -d -v threadtime >"$RP_OUT/logs/logcat.txt" 2>&1
+        fi
     fi
     if [ "$RP_STACK_STARTED" = 1 ]; then
         rp_collect_logs
@@ -139,7 +161,8 @@ finish() {
             rp_compose down -v --remove-orphans >/dev/null 2>&1
         fi
     fi
-    restore_device
+    restore_attached_device
+    stop_started_emulator
     rp_log "outputs: harness/build/android-e2e (summary.json, junit/, logs/)"
     if [ "$rc" = 0 ]; then rp_log "RESULT: all entries PASSED"; else rp_log "RESULT: FAILED (exit $rc)"; fi
     exit "$rc"
@@ -178,11 +201,11 @@ else
     while [ -z "$SERIAL" ]; do
         kill -0 "$EMU_PID" 2>/dev/null || {
             tail -n 30 "$RP_OUT/logs/emulator.log" >&2
-            EMU_STARTED=0
             rp_die "the emulator exited during start-up (harness/build/android-e2e/logs/emulator.log)"
         }
         SERIAL="$("$ADB" devices | awk 'NR > 1 && $1 ~ /^emulator-/ { print $1 }' | grep -vxF -- "$before" | head -n 1 || true)"
-        [ "$(date +%s)" -lt "$deadline" ] || rp_die "the emulator did not show up in adb within ${BOOT_TIMEOUT}s"
+        [ -n "$SERIAL" ] || [ "$(date +%s)" -lt "$deadline" ] \
+            || rp_die "the emulator did not show up in adb within ${BOOT_TIMEOUT}s"
         [ -n "$SERIAL" ] || sleep 2
     done
     rp_log "waiting up to ${BOOT_TIMEOUT}s for $SERIAL to finish booting"
@@ -196,18 +219,22 @@ export ANDROID_SERIAL="$SERIAL"
 [ "$(adb_s shell getprop ro.build.version.sdk | tr -d '\r')" -ge 33 ] 2>/dev/null \
     || rp_warn "$SERIAL is below Android 13: the POST_NOTIFICATIONS steps do not apply"
 
+# logcat from now on (device clock), without clearing the buffer of a device that was already attached
+# (epoch seconds: `logcat -T` accepts 'sssss.mmm', which needs no quoting through adb shell)
+LOGCAT_SINCE="$(adb_s shell date +%s 2>/dev/null | tr -dc '0-9' || true)"
+[ -n "$LOGCAT_SINCE" ] && LOGCAT_SINCE="$LOGCAT_SINCE.000"
 # animations off (UiAutomator), screen awake and unlocked (the notification shade test)
 if [ "$EMU_STARTED" = 0 ]; then
-    ANIM_SAVED="$(for s in window_animation_scale transition_animation_scale animator_duration_scale; do
-        adb_s shell settings get global "$s" | tr -d '\r'
-    done | tr '\n' ' ')"
+    ANIM_SAVED="$(for s in $ANIM_KEYS; do
+        v="$(adb_s shell settings get global "$s" | tr -d '\r')"
+        printf '%s ' "${v:-null}"
+    done)"
 fi
-for s in window_animation_scale transition_animation_scale animator_duration_scale; do
+for s in $ANIM_KEYS; do
     adb_s shell settings put global "$s" 0
 done
 adb_s shell input keyevent KEYCODE_WAKEUP >/dev/null 2>&1 || true
 adb_s shell wm dismiss-keyguard >/dev/null 2>&1 || true
-adb_s logcat -c >/dev/null 2>&1 || true
 
 # ---- stack -----------------------------------------------------------------------------------------------------
 rp_start_stack "$READY_TIMEOUT"
@@ -258,7 +285,7 @@ done
 # ---- cold start: the app process is not running when the push arrives (FR-6) ----------------------------------
 ENTRIES=()
 cold_start() {
-    local apk="$RP_ROOT/android/sample/build/outputs/apk/debug/sample-debug.apk" user tid code out device pid i state
+    local apk="$RP_ROOT/android/sample/build/outputs/apk/debug/sample-debug.apk" user tid code out device pid i attempt state
     local started fail=""
     started=$(date +%s)
     user="android-e2e-cold-$(date +%s)-$$"
@@ -269,19 +296,23 @@ cold_start() {
     fi
     if [ -z "$fail" ]; then
         rp_log "$COLD_START: starting MainActivity, it registers $user"
-        sleep 3 # let the package update settle: a launch racing it is restarted without its extras
-        adb_s shell am start -S -W -n "$PKG/.MainActivity" --es autoRegisterUser "$user" >"$RP_OUT/logs/cold-start-am.log" 2>&1 || true
+        # a launch racing the end of the package update is restarted without its extras: retry until it registers
         device=""
-        for i in $(seq 1 60); do
-            out="$RP_OUT/responses/cold-start-devices.json"
-            if [ "$(rp_http GET "$RP_HARNESS_URL/console/api/devices?appId=shop&userId=$user" "$out")" = 200 ] \
-                && grep -q '"kind":"REAL"' "$out"; then
-                device="$(rp_json_strings deviceId <"$out" | head -n 1)"
-                break
-            fi
-            sleep 0.5
+        for attempt in 1 2 3; do
+            adb_s shell am start -S -W -n "$PKG/.MainActivity" --es autoRegisterUser "$user" \
+                >>"$RP_OUT/logs/cold-start-am.log" 2>&1 || true
+            for i in $(seq 1 20); do
+                out="$RP_OUT/responses/cold-start-devices.json"
+                if [ "$(rp_http GET "$RP_HARNESS_URL/console/api/devices?appId=shop&userId=$user" "$out")" = 200 ] \
+                    && grep -q '"kind":"REAL"' "$out"; then
+                    device="$(rp_json_strings deviceId <"$out" | head -n 1)"
+                    break 2
+                fi
+                sleep 0.5
+            done
+            rp_warn "$COLD_START: $user not registered 10 s after launch $attempt"
         done
-        [ -n "$device" ] || fail="the app did not register $user within 30 s (no real device in the harness)"
+        [ -n "$device" ] || fail="the app did not register $user after 3 launches (no real device in the harness)"
     fi
     if [ -z "$fail" ]; then
         rp_log "$COLD_START: device $device registered; HOME, then killing the background process"

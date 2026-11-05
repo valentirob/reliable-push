@@ -29,6 +29,8 @@ Kotlin SDK (`io.reliablepush:reliable-push-android`, minSdk 26, compileSdk 37). 
 Robolectric tests run on JDK 21 with `--add-exports=java.base/jdk.internal.access=ALL-UNNAMED` (set in the build).
 
 The sample's debug build talks to `http://10.0.2.2:8080` (backend) and `http://10.0.2.2:8090` (harness), the emulator's
-view of the host (Gradle properties `rp.baseUrl`, `rp.appId`, `rp.harnessUrl`). Cleartext is allowed only to `10.0.2.2`.
+view of the host (Gradle properties `rp.baseUrl`, `rp.appId`, `rp.harnessUrl`). Cleartext is allowed only to `10.0.2.2`,
+and only in the debug build. The release build uses `rp.releaseBaseUrl` (default `https://reliable-push.example.invalid`,
+a placeholder that never resolves): set it to your backend's `https` URL.
 On Android 17 that private address also needs the runtime permission `ACCESS_LOCAL_NETWORK` (local network protection),
 declared by the debug build and granted by the E2E (`pm grant` / `adb install -g`).

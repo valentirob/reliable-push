@@ -3,6 +3,7 @@ package io.reliablepush.sample
 import android.app.NotificationManager
 import android.content.Context
 import android.net.ConnectivityManager
+import android.os.Build
 import android.os.ParcelFileDescriptor
 import android.os.Process
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -19,6 +20,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
+import org.junit.Assume.assumeTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -43,6 +45,10 @@ class AndroidE2ETest {
     private val baseUrl = args.getString("baseUrl") ?: BuildConfig.RP_BASE_URL
     private val harness = HarnessClient(args.getString("harnessUrl") ?: BuildConfig.RP_HARNESS_URL)
     private val notifications = context.getSystemService(NotificationManager::class.java)
+
+    /** When the last [register] callback ran (just after the backend issued the device token). */
+    @Volatile
+    private var registeredAt = 0L
 
     @Before
     fun setUp() {
@@ -104,23 +110,35 @@ class AndroidE2ETest {
         shell("cmd connectivity airplane-mode enable")
         awaitOffline()
         assertTrue("the notification is shown offline", deliver(tid, "Offline"))
+        val deliveredAt = System.currentTimeMillis()
         Thread.sleep(3_000)
+        // still offline (the harness is unreachable now, so the device side is checked): the event waits in the
+        // queue for the SDK's one-off retry job
+        val job = shell("cmd jobscheduler get-job-state $PACKAGE $RETRY_JOB_ID").trim()
+        assertTrue("retry job scheduled while offline (job state: '$job')", job.isNotEmpty() && "unknown" !in job.lowercase())
         shell("cmd connectivity airplane-mode disable")
         awaitOnline()
-        // the retry job has a 30 s minimum latency from the delivery: the event cannot have been sent yet
+        // well inside the job's 30 s minimum latency from the delivery: the event cannot have been sent yet
+        val sinceDelivery = System.currentTimeMillis() - deliveredAt
+        assertTrue("back online ${sinceDelivery / 1000} s after the delivery (must be < 25 s)", sinceDelivery < 25_000)
         assertEquals("still PENDING while the event waits for the retry job", "PENDING", state(tid))
         awaitState(tid, "DELIVERED", 110)
     }
 
     @Test
     fun notificationsBlockedMeansFallback() {
+        assumeTrue("POST_NOTIFICATIONS is a runtime permission from Android 13", Build.VERSION.SDK_INT >= 33)
         val user = register(SHOP)
         revokeNotificationPermissionWithoutKill()
         assertFalse("notifications reported blocked", notifications.areNotificationsEnabled())
 
         val tid = harness.push(SHOP, user, "Blocked", "E2E blocked", "NOT_DELIVERED", 5)
         assertFalse("handle reports the notification as not shown", deliver(tid, "Blocked"))
-        assertTrue("nothing posted", notifications.activeNotifications.none { it.tag == "rp" })
+        // notify is asynchronous: watch for a while, not just once
+        repeat(8) {
+            assertTrue("nothing posted", notifications.activeNotifications.none { it.tag == "rp" })
+            Thread.sleep(250)
+        }
         awaitState(tid, "FALLBACK_TRIGGERED", 30)
         awaitWebhooks(tid, 1)
         assertFalse("no DELIVERED in the timeline", timelineHas(tid, "DELIVERED"))
@@ -130,9 +148,9 @@ class AndroidE2ETest {
     fun tokenRefreshNearExpiry() {
         // app news: device tokens valid 20 s; the SDK refreshes when less than 20 % (4 s) is left
         ReliablePush.configure(context, baseUrl, NEWS, SampleApp.options())
-        val registeredAt = System.currentTimeMillis()
         val user = register(NEWS)
         val deviceId = checkNotNull(ReliablePush.deviceId)
+        // 17 s after the token was issued (its iat): 3 s of the 20 s left
         Thread.sleep((registeredAt + 17_000 - System.currentTimeMillis()).coerceAtLeast(0))
 
         val tid = harness.push(NEWS, user, "Refresh", "E2E refresh", "NOT_DELIVERED", 30)
@@ -171,7 +189,11 @@ class AndroidE2ETest {
         val grant = harness.grant(appId, user)
         val result = AtomicReference<RegisterResult>()
         val done = CountDownLatch(1)
-        ReliablePush.register(grant) { result.set(it); done.countDown() }
+        ReliablePush.register(grant) {
+            registeredAt = System.currentTimeMillis()
+            result.set(it)
+            done.countDown()
+        }
         assertTrue("register callback within 30 s", done.await(30, TimeUnit.SECONDS))
         val success = result.get() as? RegisterResult.Success ?: run {
             fail("registration failed: ${result.get()}")
@@ -191,6 +213,7 @@ class AndroidE2ETest {
 
     private fun webhookCount(tid: String): Int = notification(tid).optJSONArray("webhooks")?.length() ?: 0
 
+    /** Coarse: any timeline entry whose JSON contains the quoted state (e.g. a state_changed to DELIVERED). */
     private fun timelineHas(tid: String, state: String): Boolean {
         val timeline = notification(tid).optJSONArray("timeline") ?: return false
         return (0 until timeline.length()).any { timeline.getJSONObject(it).toString().contains("\"$state\"") }
@@ -216,7 +239,8 @@ class AndroidE2ETest {
 
     private fun awaitOffline() = awaitUntil(20, "no active network after airplane mode") { activeNetwork() == null }
 
-    private fun awaitOnline() = awaitUntil(30, "harness reachable after airplane mode") {
+    /** Bounded well under the retry job's 30 s minimum latency, so the PENDING check after it means something. */
+    private fun awaitOnline() = awaitUntil(15, "harness reachable after airplane mode") {
         activeNetwork() != null && harness.reachable()
     }
 
@@ -227,14 +251,18 @@ class AndroidE2ETest {
 
     private fun awaitUntil(seconds: Int, what: () -> String, condition: () -> Boolean) {
         val deadline = System.currentTimeMillis() + seconds * 1_000L
+        var lastError: Exception? = null
         while (true) {
             val ok = try {
-                condition()
+                condition().also { if (it) lastError = null }
             } catch (e: Exception) {
+                lastError = e
                 false
             }
             if (ok) return
-            if (System.currentTimeMillis() > deadline) fail("expected within $seconds s: ${what()}")
+            if (System.currentTimeMillis() > deadline) {
+                fail("expected within $seconds s: ${what()}" + (lastError?.let { " (last error: $it)" } ?: ""))
+            }
             Thread.sleep(250)
         }
     }
@@ -247,14 +275,20 @@ class AndroidE2ETest {
      */
     private fun revokeNotificationPermissionWithoutKill() {
         val ui = instrumentation.uiAutomation
+        // adoptShellPermissionIdentity(String...) is API 29+; callers are API 33+ (assumeTrue)
         ui.adoptShellPermissionIdentity(
             "android.permission.REVOKE_POST_NOTIFICATIONS_WITHOUT_KILL",
             "android.permission.REVOKE_RUNTIME_PERMISSIONS",
         )
         try {
             val type = Class.forName("android.permission.PermissionManager")
-            type.getMethod("revokePostNotificationPermissionWithoutKillForTest", String::class.java, Int::class.java)
-                .invoke(context.getSystemService(type), PACKAGE, Process.myUid() / PER_USER_RANGE)
+            val revoke = try {
+                type.getMethod(REVOKE_WITHOUT_KILL, String::class.java, Int::class.java)
+            } catch (e: NoSuchMethodException) {
+                fail("hidden test API PermissionManager.$REVOKE_WITHOUT_KILL(String, int) not found on API ${Build.VERSION.SDK_INT}: the test needs another way to block notifications without killing the process")
+                error("unreachable")
+            }
+            revoke.invoke(context.getSystemService(type), PACKAGE, Process.myUid() / PER_USER_RANGE)
         } finally {
             ui.dropShellPermissionIdentity()
         }
@@ -270,6 +304,8 @@ class AndroidE2ETest {
         const val PACKAGE = "io.reliablepush.sample"
         const val SHOP = "shop"
         const val NEWS = "news"
+        const val REVOKE_WITHOUT_KILL = "revokePostNotificationPermissionWithoutKillForTest"
+        const val RETRY_JOB_ID = 0x52500001 // ReliablePushOptions.jobId default
         const val PER_USER_RANGE = 100_000 // UserHandle.PER_USER_RANGE: uid = userId * 100000 + appId
     }
 }

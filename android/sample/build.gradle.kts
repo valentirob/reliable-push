@@ -2,9 +2,11 @@ plugins {
     alias(libs.plugins.android.application)
 }
 
-// Where the sample talks to (debug defaults: the local harness stack seen from the emulator, spec §10).
-// Override with -Prp.baseUrl=… -Prp.appId=… -Prp.harnessUrl=…
+// Where the sample talks to. Debug: the local harness stack seen from the emulator (spec §10), overridable with
+// -Prp.baseUrl=… -Prp.appId=… -Prp.harnessUrl=…. Release: an https placeholder (-Prp.releaseBaseUrl=…), never the
+// cleartext emulator address (a release build has no cleartext permission and would queue events forever).
 val rpBaseUrl = providers.gradleProperty("rp.baseUrl").getOrElse("http://10.0.2.2:8080")
+val rpReleaseBaseUrl = providers.gradleProperty("rp.releaseBaseUrl").getOrElse("https://reliable-push.example.invalid")
 val rpAppId = providers.gradleProperty("rp.appId").getOrElse("shop")
 val rpHarnessUrl = providers.gradleProperty("rp.harnessUrl").getOrElse("http://10.0.2.2:8090")
 
@@ -21,7 +23,6 @@ android {
         versionCode = 1
         versionName = "0.1.0"
 
-        buildConfigField("String", "RP_BASE_URL", quoted(rpBaseUrl))
         buildConfigField("String", "RP_APP_ID", quoted(rpAppId))
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -31,8 +32,12 @@ android {
 
     buildTypes {
         debug {
+            buildConfigField("String", "RP_BASE_URL", quoted(rpBaseUrl))
             // the harness client and the debug push receiver exist only in the debug source set
             buildConfigField("String", "RP_HARNESS_URL", quoted(rpHarnessUrl))
+        }
+        release {
+            buildConfigField("String", "RP_BASE_URL", quoted(rpReleaseBaseUrl))
         }
     }
 

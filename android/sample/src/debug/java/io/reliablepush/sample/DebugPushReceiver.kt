@@ -15,12 +15,13 @@ import io.reliablepush.android.ReliablePush
  *
  * Protected by `android.permission.DUMP` (adb shell has it, other apps cannot get it). The string extras are the data
  * of the push; [ReliablePush.handle] runs off the main thread, like the FCM entry point, so `DELIVERED` is on disk
- * before the receiver finishes.
+ * before the receiver finishes. Only the extras `rp_tid`, `title` and `body` are forwarded.
  */
 class DebugPushReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        val extras = intent.extras ?: return
-        val data = extras.keySet().mapNotNull { key -> extras.getString(key)?.let { key to it } }.toMap()
+        // only the payload keys of a tracked push (spec §6), nothing else the sender put in the intent
+        val data = PAYLOAD_KEYS.mapNotNull { key -> intent.getStringExtra(key)?.let { key to it } }.toMap()
+        if (data.isEmpty()) return
         val app = context.applicationContext
         val pending = goAsync()
         Thread({
@@ -30,5 +31,9 @@ class DebugPushReceiver : BroadcastReceiver() {
                 pending.finish()
             }
         }, "debug-push").start()
+    }
+
+    private companion object {
+        val PAYLOAD_KEYS = listOf("rp_tid", "title", "body")
     }
 }
