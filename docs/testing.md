@@ -107,7 +107,8 @@ The console has six screens: Devices, Send push, Live tracking, Fallback inbox, 
 "Test harness — simulated data, not for production". No secret is shown in the page or exposed by its API; live updates use
 Server-Sent Events and reconnect automatically. The console API accepts writes (`POST`) only with `Content-Type: application/json`
 (an explicit `{}` when there is nothing to send) and rejects cross-site requests (`Origin` or `Sec-Fetch-Site` from another
-origin) with 403; `curl`, the scripts and the emulator's `HttpURLConnection` send neither header. The console and the harness are never built into the backend
+origin) with 403. Every `/console/api/` request (reads too) must also carry a `Host` of `localhost`, `127.0.0.1`, `[::1]`,
+`10.0.2.2` or `harness` (any port), else 403, which defeats DNS rebinding. `curl`, the scripts and the emulator's `HttpURLConnection` send neither cross-site header. The console and the harness are never built into the backend
 image or deployed with a Helm chart.
 
 For real apps (the Android sample on an emulator, which reaches the host harness at `10.0.2.2:8090`) the console API also has
@@ -116,7 +117,7 @@ simulator's; the only endpoint that returns one, never logged) and `POST /consol
 platform, label}` (201; kept in memory, at most 50). Real devices show in the Devices list as `REAL` (the harness holds no
 token for them, so no refresh/offline buttons); `GET /console/api/devices` marks every entry `"kind": "REAL"` or
 `"SIMULATED"`. The push preview also shows the `adb shell am broadcast` line for the sample app's debug receiver; its values
-are single-quoted twice (host shell and device shell), so paste it into a host shell.
+are single-quoted twice (host shell and device shell), so paste it into a POSIX host shell (not PowerShell or cmd).
 
 ## Load tests (local only)
 

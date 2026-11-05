@@ -167,7 +167,8 @@ public class ConsoleApiController {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("grant", grant);
         m.put("expiresAt", iso(grants.expiresAt(grant)));
-        return ResponseEntity.status(HttpStatus.CREATED).body(m);
+        return ResponseEntity.status(HttpStatus.CREATED).cacheControl(org.springframework.http.CacheControl.noStore())
+                .body(m);
     }
 
     /** A device that registered by itself (emulator app): listed in the console, no token held by the harness. */

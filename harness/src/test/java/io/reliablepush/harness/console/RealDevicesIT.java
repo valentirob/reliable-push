@@ -74,6 +74,7 @@ class RealDevicesIT {
         assertThat(claims.get("aud").asString()).isEqualTo("shop");
         assertThat(claims.get("sub").asString()).isEqualTo("emu-user");
         assertThat(claims.get("exp").asLong() - claims.get("iat").asLong()).isEqualTo(120);
+        assertThat(r.headers().firstValue("Cache-Control").orElse("")).contains("no-store");
         assertThat(out.get("expiresAt").asString()).isNotBlank();
         assertThat(minter.issuedGrantsForLogHygieneScan()).contains(grant);
     }
