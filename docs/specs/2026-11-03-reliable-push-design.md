@@ -36,6 +36,32 @@
 > - §10.2: the console page is served at `/` (http://127.0.0.1:8090/), `./scripts/demo.sh` runs the compose project
 >   `reliable-push-demo`, and `console-smoke` is the 17th entry of the E2E run (Playwright for Java, Maven profile
 >   `console-smoke`, not part of the default build).
+>
+> **Changes during implementation (plan 1C, 2026-11-05).** Helm chart, load tests and capacity sizing; §9.2, §10, §11 and
+> §12 were updated to match:
+>
+> - §9: opt-in **management port**: with `MANAGEMENT_SERVER_PORT=8081` (set by the chart) `/actuator/**` (probes,
+>   `/actuator/prometheus`) is served on 8081 only and the API port answers 404 for it.
+> - §9: **graceful worker stop**: on `SIGTERM` a worker claims nothing more and waits for its webhook calls in flight,
+>   writing their outcomes before the pool closes, for at most `reliable-push.worker.shutdown-timeout` (default: largest
+>   app `fallback.http-timeout` + 5 s); a call that outlives it is logged at WARN and re-sent after the lease. The hard
+>   bound is the kubelet's `SIGKILL` after `terminationGracePeriodSeconds` (chart default 60), which must exceed the
+>   shutdown timeout plus the web server's graceful drain.
+> - §9.2: chart `deploy/helm/reliable-push` (backend only): `mode: combined` (one Deployment, profiles `api,worker,json`)
+>   or `split` (`-api`, `-worker`); Services `-api` (port 80 → `http` 8080) and `-management` (8081, never routed);
+>   required values `image.repository`, `database.url`, `database.username`, `secrets.existingSecret` (one existing
+>   Secret loaded with `envFrom`; every `*-ref` under `config` must be `env:NAME`) and at least one `config.apps` entry;
+>   `config` rendered into a ConfigMap whose `checksum/config` rolls the pods; Ingress (`/v1` only) or Route, HPA for the
+>   API, PodDisruptionBudgets, ServiceMonitor / PodMonitoring; overlays `values-gke.yaml` (UID 1001, GID 0, Ingress `gce`,
+>   PodMonitoring, Cloud SQL Auth Proxy example) and `values-openshift.yaml` (Route, ServiceMonitor, no UID/GID/fsGroup);
+>   tool images pinned in `deploy/helm/tools.env`. Checks: `deploy/helm/scripts/validate.sh` (CI) and the local kind
+>   smoke install `./scripts/helm-smoke.sh`. Guide: [`docs/deployment.md`](../deployment.md).
+> - §10, §12: `loadtest/` (Gatling Java DSL, test scope; JDK-only main code) run locally by `./scripts/load.sh` on the
+>   harness compose stack; CI only compiles it and runs its unit tests.
+> - §10: **NFR-2 criterion and result:** one API replica limited to 2 CPUs / 1 GiB, 1,000 `POST /v1/events`/s plus 500
+>   `POST /v1/notifications`/s for 5 minutes after a 60 s ramp (open model), ≤ 0.1 % failed, p95 ≤ 100 ms, p99 ≤ 250 ms
+>   per request group; **passed**, criterion and replica size unchanged. Results:
+>   [operations.md, "Measured capacity"](../operations.md#measured-capacity).
 
 ## 1. Architecture
 
@@ -304,7 +330,7 @@ Size targets (checked in CI from cycle 2/3): Android AAR < 100 KB, iOS framework
 
 Authentication filters are implemented as small servlet filters on top of `nimbus-jose-jwt` instead of Spring Security; they are covered by dedicated unit and integration tests and by the security reviewer role.
 - Container: a jlink-trimmed Temurin 21 JRE on a pinned Alpine (about 105 MB uncompressed; the budget is measured as the sum of the uncompressed layer sizes), non-root, writable dirs only under `/tmp`, works with OpenShift arbitrary UIDs.
-- Deploy: Helm chart (`deploy/helm/reliable-push`) with values for GKE and OpenShift (Route instead of Ingress, no fixed UID); separate `api`/`worker` deployments optional.
+- Deploy: Helm chart (`deploy/helm/reliable-push`) with values for GKE and OpenShift (Route instead of Ingress, no fixed UID); separate `api`/`worker` deployments optional (`mode: split`); probes and metrics on the management port 8081. Guide: `docs/deployment.md`.
 
 ## 10. Testing strategy
 
@@ -314,7 +340,7 @@ Authentication filters are implemented as small servlet filters on top of `nimbu
 | Integration (`*IT`) | Testcontainers PostgreSQL, WireMock (OIDC JWKS, webhook) | REST endpoints, SKIP LOCKED claiming with concurrent workers, retries, rate limits |
 | Contract | OpenAPI validation of requests/responses in ITs | API drift |
 | End-to-end (local only, §10.1) | `harness/` + docker-compose | full scenarios across components |
-| Load | Gatling (cycle 1, basic) | NFR-2 target |
+| Load (local only, `loadtest/`, `./scripts/load.sh`) | Gatling Java DSL in a container on the harness compose network | NFR-2 (API ingest), worker burst drain |
 | Mobile (cycles 2–3) | JUnit/Robolectric, XCTest; emulator/simulator instrumented tests against the harness | SDK logic, NSE/service handling |
 
 **Harness (`harness/`):** signed-grant identity (the harness signs the grants devices register with; no fake OIDC issuer), fake
@@ -440,7 +466,7 @@ apps on real or emulated devices. Credentials are never committed or logged.
 ## 11. SDLC
 
 - Gitflow (`.agents/rules/gitflow.md`), Conventional Commits, SemVer tags on `main`.
-- GitHub Actions: on PR/push — build, unit + IT tests, JaCoCo coverage (≥ 80% line on backend), CodeQL, dependency review/OWASP check, container build + Trivy scan. No end-to-end job in CI: E2E runs locally (§10.1) and its result is reported in the merge. Mobile unit-test jobs added in cycles 2–3.
+- GitHub Actions: on PR/push — build, unit + IT tests, JaCoCo coverage (≥ 80% line on backend), CodeQL, dependency review/OWASP check, container build + Trivy scan. Helm chart lint, unit tests and kubeconform; the `loadtest/` module is compiled and unit-tested. No end-to-end, kind or load job in CI: E2E, the kind smoke install and the load tests run locally (§10.1) and their results are reported in the merge. Mobile unit-test jobs added in cycles 2–3.
 - Multi-agent review: `.agents/skills/review-loop` (correctness, security, tests, mobile policy) run before merging feature branches; Claude subagents in `.claude/agents/`, any other tool runs the roles from the skill.
 - Continuity: `AGENTS.md`, `.agents/rules`, `.agents/skills`, `docs/STATUS.md` updated each session.
 
@@ -450,7 +476,8 @@ apps on real or emulated devices. Credentials are never committed or logged.
 LICENSE  README.md  AGENTS.md  CLAUDE.md  CONTRIBUTING.md  SECURITY.md
 .agents/{rules,skills}/   .claude/{agents,skills->../.agents/skills}
 .github/workflows/
-backend/      client-java/      harness/      android/      ios/      deploy/helm/      scripts/ (e2e.sh, e2e.ps1, demo.sh, demo.ps1)
+backend/      client-java/      harness/      loadtest/      android/      ios/      deploy/helm/
+scripts/ (e2e.sh, e2e.ps1, demo.sh, demo.ps1, helm-smoke.sh, load.sh)
 docs/  requirements.md  STATUS.md  specs/  plans/  architecture.md  api.md
-       integration-guide.md  security.md  operations.md  testing.md
+       integration-guide.md  security.md  operations.md  deployment.md  testing.md
 ```

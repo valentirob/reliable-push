@@ -1,0 +1,43 @@
+name: Helm chart CI
+
+# Lints, unit-tests and schema-validates the backend Helm chart (deploy/helm/reliable-push) with the pinned tool images
+# of deploy/helm/tools.env (helm, helm-unittest, kubeconform); only Docker is needed on the runner. No cluster here: the
+# kind smoke install (./scripts/helm-smoke.sh) and the load tests (./scripts/load.sh) run locally only (spec 11).
+
+on:
+  push:
+    branches:
+      - develop
+      - main
+      - 'release/**'
+      - 'hotfix/**'
+    paths:
+      - 'deploy/helm/**'
+      - '.github/workflows/helm-ci.yml'
+  pull_request:
+    paths:
+      - 'deploy/helm/**'
+      - '.github/workflows/helm-ci.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  validate:
+    name: Lint, unit tests, kubeconform
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # helm lint --strict (combined and split), helm unittest, helm template | kubeconform on four renders
+      # (default, split, GKE, OpenShift); kubeconform fetches the CRD schemas from a pinned datreeio/CRDs-catalog commit.
+      - name: Validate the chart
+        run: deploy/helm/scripts/validate.sh

@@ -14,7 +14,7 @@ Spec: `docs/specs/2026-11-03-reliable-push-design.md` §10.1.
   runs through the host `./mvnw`: it needs JDK 21 and network access (Maven artifacts, Playwright's Chromium).
 - On a Mac with Colima: `export DOCKER_HOST=unix://$HOME/.colima/default/docker.sock`.
 - Mobile scenarios (cycles 2–3): Android emulator / Xcode iOS simulator booted.
-- Not in CI: `.github/workflows/harness-ci.yml` builds `client-java` and `harness` only.
+- Not in CI: `.github/workflows/harness-ci.yml` builds `client-java`, `harness` and `loadtest` only.
 
 ## Run
 1. Full suite: `./scripts/e2e.sh` (Windows, PowerShell 7: `pwsh scripts/e2e.ps1`, optional `-Scenario <name> -Keep`; untested on

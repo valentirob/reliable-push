@@ -1,9 +1,10 @@
 name: Client and harness CI
 
-# Builds and tests the Java sender client (client-java) and the local test harness (harness).
+# Builds and tests the Java sender client (client-java), the local test harness (harness) and the load-test module
+# (loadtest: compiles the Gatling simulations and runs its unit tests, never Gatling itself).
 # End-to-end tests never run here: they need the full docker-compose stack and run locally
 # (./scripts/e2e.sh); the result is reported in the PR (spec 10.1). The console smoke test (Playwright)
-# is not part of the default build either.
+# is not part of the default build either, and neither are the load runs (./scripts/load.sh, local only).
 
 on:
   push:
@@ -15,6 +16,7 @@ on:
     paths:
       - 'client-java/**'
       - 'harness/**'
+      - 'loadtest/**'
       - 'pom.xml'
       - 'mvnw'
       - 'mvnw.cmd'
@@ -24,6 +26,7 @@ on:
     paths:
       - 'client-java/**'
       - 'harness/**'
+      - 'loadtest/**'
       - 'pom.xml'
       - 'mvnw'
       - 'mvnw.cmd'
@@ -100,5 +103,36 @@ jobs:
             harness/target/surefire-reports/
             harness/target/failsafe-reports/
             harness/target/site/jacoco/
+          if-no-files-found: warn
+          retention-days: 14
+
+  loadtest:
+    name: Loadtest (compile + unit tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Java 21
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      # Compiles the simulations (test sources) and runs the unit tests; the Gatling plugin is bound to no phase, so no
+      # load is ever generated here.
+      - name: Maven verify (loadtest)
+        run: ./mvnw -B -pl loadtest verify
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: loadtest-reports
+          path: loadtest/target/surefire-reports/
           if-no-files-found: warn
           retention-days: 14

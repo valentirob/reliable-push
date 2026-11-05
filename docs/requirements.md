@@ -45,7 +45,7 @@ one or more apps.
 ## Non-functional requirements
 
 - **NFR-1 Security** All APIs authenticated (sender API key; device JWT). Events accepted only for `trackingId`s of the same app and user as the device token. Rate limiting per device and per app. No secrets in the repo.
-- **NFR-2 Performance** Lightweight: the device side makes at most one call per push event plus rare token renewals. Target ≥ 1,000 events/s per backend replica (to be validated by load tests).
+- **NFR-2 Performance** Lightweight: the device side makes at most one call per push event plus rare token renewals. Target ≥ 1,000 events/s per backend replica. **Validated (plan 1C, 2026-11-05): passed**: one API replica limited to 2 CPUs / 1 GiB, criterion and results in [operations.md, "Measured capacity"](operations.md#measured-capacity) (local load test `./scripts/load.sh`).
 - **NFR-3 Reliability** Survives restarts; runs as multiple replicas without double-firing fallbacks.
 - **NFR-4 Portability** Runs on Google Cloud GKE and Red Hat OpenShift (non-root, arbitrary UID), PostgreSQL as the only stateful dependency.
 - **NFR-5 Store compliance** SDKs follow Apple App Store and Google Play policies: short work in extensions/services, no hidden background activity, minimal data, privacy manifests and documented data collection.

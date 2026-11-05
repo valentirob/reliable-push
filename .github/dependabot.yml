@@ -13,7 +13,7 @@ updates:
           - minor
           - patch
 
-  # root reactor: client-java and harness (the backend has its own build)
+  # root reactor: client-java, harness and loadtest (the backend has its own build)
   - package-ecosystem: maven
     directory: /
     target-branch: develop
@@ -44,6 +44,20 @@ updates:
   # the pinned FROM tags of harness/Dockerfile
   - package-ecosystem: docker
     directory: /harness
+    target-branch: develop
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: build(deps)
+    groups:
+      docker-minor-patch:
+        update-types:
+          - minor
+          - patch
+
+  # the pinned FROM tag of loadtest/Dockerfile (Gatling runner of scripts/load.sh; Gatling itself is in the maven / entry)
+  - package-ecosystem: docker
+    directory: /loadtest
     target-branch: develop
     schedule:
       interval: weekly

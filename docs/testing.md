@@ -36,7 +36,8 @@ Reports: `target/surefire-reports/` (unit), `target/failsafe-reports/` (integrat
 | Harness | `harness/`, JUnit 5, `*Test` and `*IT` (Spring on a random port, no Docker needed) | surefire / failsafe | The harness itself: device simulator, signed grants, fallback receiver, fake sender, tracking poller, scenario runner, console REST and SSE |
 | End-to-end | `harness/`, `./scripts/e2e.sh` | local only, never in CI | 16 scenarios across the real backend (one API, two workers), PostgreSQL, the fallback receiver and the device simulator, with the fast clock |
 | Console smoke | Playwright for Java against the harness web console | local only | The 17th entry of the E2E run: a headless browser registers a device, sends a push and sees `DELIVERED` and the fallback in the inbox |
-| Load | Gatling | local / on demand | Arrives with plan 1C |
+| Load | `loadtest/`, Gatling (Java DSL), `./scripts/load.sh` | local only, never in CI (CI compiles the simulations and runs the module's unit tests) | NFR-2 ingest (`EventIngestSimulation`) and the fallback burst drained by the workers (`FallbackBurstSimulation` + `BurstDrainProbe`) |
+| Helm chart | helm-unittest, `helm lint --strict`, kubeconform (`deploy/helm/scripts/validate.sh`); kind smoke install (`./scripts/helm-smoke.sh`) | validate: CI and local; kind: local only | Required values and secret rules, rendering per mode and platform, schemas; a real install with a worker rollout during dispatch |
 | Mobile | Robolectric, XCTest, emulator/simulator tests | per SDK | Planned in cycles 2 and 3 |
 
 ## Notes on how the suites work
@@ -61,9 +62,10 @@ Run from the repository root (one Maven wrapper for `client-java` and `harness`;
 | Client build and tests (what CI runs) | `./mvnw -B -pl client-java verify` |
 | Harness build and tests, including `client-java` (what CI runs) | `./mvnw -B -pl harness -am verify` |
 | Console smoke test against a running stack (needs Playwright's Chromium, about 150 MB, downloaded on first use) | `./mvnw -B -pl harness -am verify -Pconsole-smoke` |
+| Loadtest module: compiles the simulations, runs the unit tests, never starts Gatling (what CI runs) | `./mvnw -B -pl loadtest verify` |
 
-The default build never downloads Playwright. GitHub Actions runs the first two (`.github/workflows/harness-ci.yml`); it never
-runs the stack.
+The default build never downloads Playwright. GitHub Actions runs the client, harness and loadtest builds
+(`.github/workflows/harness-ci.yml`); it never runs the stack or a load test.
 
 ## End-to-end tests (local only)
 
@@ -107,3 +109,43 @@ Server-Sent Events and reconnect automatically. The console API accepts writes (
 (an explicit `{}` when there is nothing to send) and rejects cross-site requests (`Origin` or `Sec-Fetch-Site` from another
 origin) with 403; `curl` and the scripts send neither header. The console and the harness are never built into the backend
 image or deployed with a Helm chart.
+
+## Load tests (local only)
+
+`./scripts/load.sh [--simulation ingest|burst|all] [--api-pool N] [--worker-concurrency N] [--worker-pool N] [--workers 1|2] [--keep]`
+(defaults: `all`, 10, 100, 10, 1). Never run in CI. Needs Docker with the compose plugin and ports 8080 and 8090 free on
+127.0.0.1, so it cannot run next to the E2E or demo stack. `--simulation all` takes about 15 minutes.
+
+- **Stack:** the E2E compose file plus `loadtest/compose/load.override.yml` (project `reliable-push-load`, real clock, API
+  limited to 2 CPUs / 1 GiB, workers on the management port 8081) and a Gatling container on the same compose network,
+  so host port forwarding never caps the throughput. Its Maven cache is the external volume `reliable-push-gatling-m2`.
+- **Simulations:** `ingest` is the NFR-2 criterion: 500 `POST /v1/notifications`/s and 1,000 `POST /v1/events`/s (one
+  event each) for 5 minutes after a 60 s ramp, asserting ≤ 0.1 % failed requests, p95 ≤ 100 ms and p99 ≤ 250 ms per
+  request group. `burst` registers `LOAD_BURST_SIZE` notifications (default 30,000 at 1,500/s) that fall due together;
+  `BurstDrainProbe` samples the workers' `/actuator/prometheus` until all are triggered. `all` runs ingest first, which
+  also warms the API (a burst alone on a cold stack can miss its p99 assertion).
+- **Results:** `harness/build/load/summary.json` (per simulation: `status` `PASSED`/`FAILED`/`INVALID`, metrics, config,
+  generator CPU), Gatling HTML reports in `harness/build/load/gatling/`, the probe output in `burst.json`, container logs in
+  `logs/`. Exit code 0 only if every simulation `PASSED`. A run whose Gatling container averages more than 90 % CPU is
+  `INVALID` (the generator, not the backend, was the limit).
+- **Settings:** environment variables `LOAD_DEVICES`, `LOAD_NOTIFICATIONS_PER_SECOND`, `LOAD_RAMP`, `LOAD_STEADY`,
+  `LOAD_BURST_SIZE` (a multiple of `LOAD_BURST_PER_SECOND`), `LOAD_BURST_PER_SECOND`, `LOAD_READY_TIMEOUT`,
+  `LOAD_WORKER_CPUS`, `LOAD_WORKER_MEMORY`. Details of the module: [`loadtest/README.md`](../loadtest/README.md).
+- **Measured results** and how to reproduce each table row: [operations.md, "Measured capacity"](operations.md#measured-capacity).
+
+## Helm chart checks
+
+- **`deploy/helm/scripts/validate.sh`** (Docker only; CI runs it in `.github/workflows/helm-ci.yml`): `helm lint --strict`
+  in both modes, the helm-unittest suites in `deploy/helm/reliable-push/tests/`, and `helm template | kubeconform -strict`
+  for four renders (default, split, GKE overlay, OpenShift overlay) against the Kubernetes 1.30 schemas, the vendored Route
+  schema (`deploy/helm/schemas/`) and the CRD catalog at a pinned commit (fetched over the network). Tool images are pinned
+  by digest in `deploy/helm/tools.env`; nothing is installed on the host.
+- **`./scripts/helm-smoke.sh [--keep]`** (local only, never in CI; needs kind, kubectl, curl, JDK 21): creates the kind
+  cluster `rp-smoke` (node image from `tools.env`), builds and loads the backend image, installs PostgreSQL, a slow dummy
+  fallback receiver and the chart in split mode (1 API, 2 workers, UID 1000870000 / GID 0 like OpenShift), then checks the
+  rollouts, `helm test`, the API through its Service, `/actuator` answering 404 on the API port, and a worker
+  `kubectl rollout restart` while webhook calls are in flight (all 200 rows triggered exactly once, no ERROR log, no
+  `fallback.reclaimed`). Each check prints `PASS`/`FAIL`; exit 0 = passed. It uses its own kubeconfig in
+  `harness/build/helm-smoke/` and never touches `~/.kube/config`; helm runs from `HELM_IMAGE`. Without `--keep` the
+  cluster is deleted at the end; with `--keep` delete it with
+  `kind delete cluster --name rp-smoke --kubeconfig harness/build/helm-smoke/kubeconfig`.

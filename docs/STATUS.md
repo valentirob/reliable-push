@@ -2,6 +2,34 @@
 
 Newest entry first. Updated at the end of every work session (see `.agents/skills/session-handoff/SKILL.md`).
 
+## 2026-11-05 (4) — Claude Code — `feature/cycle1c-deploy-load` (plan 1C, Task 9)
+
+- **Done:** CI and docs for plan 1C; all plan 1C tasks are ticked. `.github/workflows/helm-ci.yml` (runs
+  `deploy/helm/scripts/validate.sh`; no cluster, no load job), `harness-ci.yml` job `loadtest` (`./mvnw -B -pl loadtest
+  verify`) and path `loadtest/**`, Dependabot docker `/loadtest`; actionlint 1.7.12 clean. New `docs/deployment.md`
+  (Secret, values, install and checks, GKE, OpenShift, combined vs split, upgrades, graceful shutdown, sizing, per-IP
+  limits); its generic commands were run against the kind smoke cluster (`--keep`), GKE/OpenShift only rendered. README,
+  `AGENTS.md`, `docs/testing.md` (load tests, Helm checks), spec "Changes during implementation (plan 1C)", NFR-2 in
+  `docs/requirements.md` marked validated.
+- **State (final verification on this branch, not merged, not pushed):** `cd backend && ./mvnw -B verify` 237 unit +
+  218 integration tests, 0 failures, line coverage 93.3 %; `./mvnw -B -pl loadtest verify` 17 tests; `./mvnw -B -pl
+  harness -am verify` 34 client + 106 harness unit + 73 harness integration tests; `deploy/helm/scripts/validate.sh` lint
+  (both modes) + 68 helm-unittest tests + kubeconform on 4 renders, all passed; `./scripts/helm-smoke.sh` 12/12 PASS
+  (worker rollout during dispatch: 200/200 triggered once, no ERROR); `./scripts/e2e.sh`: `E2E: 17/17 passed`;
+  `./scripts/load.sh --simulation all`: **NFR-2: passed** (ingest PASSED: register p95 1 ms / p99 28 ms, events p95 2 ms /
+  p99 35 ms, 0 % failed, generator CPU 11.3 %; criterion and replica size unchanged, see `docs/operations.md` "Measured
+  capacity"); burst PASSED (30,000 triggered, 0 failed or expired).
+- **Next:**
+  1. Final whole-branch review of `feature/cycle1c-deploy-load` and its fix wave: includes R10 (remove the
+     `worker.shutdown-timeout` ≤ `spring.lifecycle.timeout-per-shutdown-phase` startup check and its text in
+     `docs/operations.md` and `application.yml`; keep the grace-period rule) and the deferred minors in the SDD ledger.
+  2. Then the maintainer decides the merge into `develop` (`--no-ff`; merge line `E2E: 17/17 passed` and the NFR-2 result).
+- **Open:** (a) GKE Ingress health check: the readiness probe is on 8081, so GKE falls back to `GET /` on 8080 (404);
+  `docs/deployment.md` describes a `BackendConfig` + `kubectl annotate` workaround, but the chart has no value for Service
+  annotations (consider `api.service.annotations` or a BackendConfig template). (b) The chart was never installed on a
+  real GKE or OpenShift cluster (render and kubeconform only). (c) Earlier open items: `scripts/*.ps1` untested on
+  Windows; console Host allowlist.
+
 ## 2026-11-05 (3) — Claude Code — `feature/cycle1c-deploy-load` (plan 1C, Task 8)
 
 - **Done:** local load runs (`./scripts/load.sh`) and capacity sizing. **NFR-2 passed:** one API replica (2 CPUs / 1 GiB)

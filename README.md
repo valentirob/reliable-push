@@ -32,6 +32,8 @@ and keeps the FCM/APNs credentials.
 | `ios/` | iOS SDK + Notification Service Extension helper | Swift, iOS 15+, SPM |
 | `client-java/` | Optional zero-dependency Java client for the sender API | Java 17+, JDK only |
 | `harness/` | Fake sender, fake fallback receiver, device simulator, E2E scenarios, web console for manual tests and demos | Java, plain HTML/JS, docker-compose |
+| `deploy/helm/` | Helm chart for the backend (combined or split API/worker, GKE and OpenShift values) | Helm, Kubernetes ≥ 1.30 |
+| `loadtest/` | Local load tests (NFR-2 ingest, fallback burst) run by `./scripts/load.sh` | Java 21, Gatling, docker-compose |
 | `docs/` | Requirements, specs, plans, guides, status | Markdown |
 
 Components land incrementally; see [docs/STATUS.md](docs/STATUS.md) for what
@@ -121,6 +123,7 @@ the metrics are in [docs/operations.md](docs/operations.md).
 - [Integration guide](docs/integration-guide.md)
 - [Security](docs/security.md)
 - [Operations](docs/operations.md)
+- [Deployment (Kubernetes, GKE, OpenShift)](docs/deployment.md)
 - [Testing](docs/testing.md)
 - [Project status](docs/STATUS.md)
 - [AGENTS.md](AGENTS.md) (context for AI coding agents)
