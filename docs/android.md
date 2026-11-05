@@ -80,8 +80,10 @@ class MessagingService : FirebaseMessagingService() {
 ```
 
 Declare the service in your manifest as usual. Messages without `rp_tid` are ignored (`false`), so the app keeps its own
-pushes. A tracked message is **never hidden**: it is shown, or blocked by the OS (then there is no `DELIVERED`); store policy forbids hidden notifications. If your push entry point is not an FCM service, call `ReliablePush.handle(context, data)` with the message's data map instead. Title and body come from the
-`title` and `body` data keys (fallback: the app name and an empty body).
+pushes. A tracked message is **never hidden**: it is shown, or blocked by the OS (then there is no `DELIVERED`); store
+policy forbids hidden notifications. If your push entry point is not an FCM service, call
+`ReliablePush.handle(context, data)` with the message's data map instead. Title and body come from the `title` and
+`body` data keys (fallback: the app name and an empty body).
 
 ## 5. Track opens in the launch activity
 
@@ -117,8 +119,11 @@ backend's fallback decides (that is the point of the product). `onMessageReceive
 - The queue holds up to 500 events (oldest dropped with a WARN) and is sent in batches of at most 50.
 - Events that cannot be sent (offline, backend down, `429` with `Retry-After`, `5xx`) stay queued. One one-off
   `JobScheduler` job (network constraint, minimum latency 30 s, exponential backoff) retries them; there is no polling and
-  no periodic work. Android may run the job later than 30 s: expect an offline `DELIVERED` to arrive roughly **30 to 60 s
-  after the network returns**. A notification with a very short fallback timeout can therefore fall back first; real
+  no periodic work. The 30 s counts from the push (the moment the job is scheduled), not from the network returning:
+  after a long outage the job therefore runs shortly after the network returns (the OS may add a few seconds), while an
+  event queued only moments before the network returns waits up to the remaining 30 s. After repeated `5xx` or I/O
+  failures the OS exponential backoff (capped at 5 hours) can delay the retry much longer. A server `Retry-After` is
+  honoured up to 1 hour. A notification with a very short fallback timeout can therefore fall back first; real
   timeouts are minutes (the default is 10).
 - Events from an earlier launch whose job was lost (for example after a reboot) are sent at the next `configure`.
 - A refresh answered `401` clears the registration: the app must call `register` again.

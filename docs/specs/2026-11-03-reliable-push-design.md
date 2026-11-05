@@ -80,8 +80,10 @@
 >   earlier launch are sent at `configure`, once per launch (R8). The tap `PendingIntent` is `SINGLE_TOP`, so hosts call
 >   `trackOpen` from `onCreate` and `onNewIntent` (R7).
 > - §7 retry: one one-off `JobScheduler` job (network constraint, minimum latency 30 s, exponential backoff,
->   `Retry-After` honoured), scheduled before every flush and cancelled when the queue is empty; no polling. On API 37
->   the job runs 30 to 60 s after the network returns (R10), so a very short notification timeout can fall back first.
+>   `Retry-After` honoured up to 1 h), scheduled before every flush and cancelled when the queue is empty; no polling.
+>   The 30 s minimum latency counts from the push: after a long outage the job runs shortly after the network returns,
+>   and after repeated `5xx` the OS exponential backoff (capped at 5 h) can delay it longer (R10), so a very short
+>   notification timeout can fall back first.
 > - §7: `http` base URLs only for `localhost`, `127.0.0.1` and `10.0.2.2`; redirects are not followed. Android 17
 >   (`targetSdk 37`) apps whose backend is on a private network need `ACCESS_LOCAL_NETWORK` (R11).
 > - §10: the emulator test for blocked notifications revokes `POST_NOTIFICATIONS` without killing the process through the hidden
