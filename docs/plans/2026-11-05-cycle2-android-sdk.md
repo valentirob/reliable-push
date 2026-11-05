@@ -320,7 +320,7 @@ The SDK posts the visible notification first, persists the event, schedules the 
     5. Writes `harness/build/android-e2e/summary.json` (same shape as `e2e.sh`), copies the JUnit XML and the container logs, then tears down. It stops the emulator only if it started it.
     6. Prints `Android E2E: N/N passed`; exit code 0 means all passed.
 
-- [ ] **Step 1: Instrumented tests**. Each creates its own user id, gets a grant from the harness, registers through the SDK, asks the harness to send (`POST /console/api/push`), delivers the message by calling `ReliablePush.handle` (as `DebugPushReceiver` does), and polls `GET /console/api/notifications/{id}`:
+- [x] **Step 1: Instrumented tests**. Each creates its own user id, gets a grant from the harness, registers through the SDK, asks the harness to send (`POST /console/api/push`), delivers the message by calling `ReliablePush.handle` (as `DebugPushReceiver` does), and polls `GET /console/api/notifications/{id}`:
   - `deliveredIsReported()`: NOT_DELIVERED, timeout 5 → `DELIVERED`, inbox empty after the timeout.
   - `readIsReportedOnTap()`: NOT_READ → UiAutomator opens the shade and taps the notification → `READ`.
   - `offlineDeliveryIsSentWhenNetworkReturns()`: `cmd connectivity airplane-mode enable` via `UiAutomation.executeShellCommand`, deliver, still `PENDING` after 3 s, disable airplane mode → `DELIVERED` before the timeout (timeout 60).
@@ -333,8 +333,8 @@ The SDK posts the visible notification first, persists the event, schedules the 
     1. `am start` `MainActivity` with the debug extra `autoRegisterUser=<id>` (debug build only: registers that user) and wait for the harness real-device entry.
     2. `input keyevent HOME`, then `am kill io.reliablepush.sample` (process gone, not force-stopped).
     3. Harness push, then `adb shell am broadcast` the debug push: the receiver starts the process, `SampleApp.onCreate` configures the SDK → `DELIVERED`.
-- [ ] **Step 2: Run** `./scripts/android-e2e.sh` before the sample code exists → FAIL (compile or test). **Step 3: Implement** the sample and the script. **Step 4: Run** → `Android E2E: 8/8 passed` (6 instrumented + the Keystore test + cold start). Feedback loop as in `run-e2e`: at most 3 rounds, then stop and record.
-- [ ] **Step 5: Commit** `feat(android): sample app and emulator e2e against the harness`
+- [x] **Step 2: Run** `./scripts/android-e2e.sh` before the sample code exists → FAIL (compile or test). **Step 3: Implement** the sample and the script. **Step 4: Run** → `Android E2E: 8/8 passed` (6 instrumented + the Keystore test + cold start). Feedback loop as in `run-e2e`: at most 3 rounds, then stop and record.
+- [x] **Step 5: Commit** `feat(android): sample app and emulator e2e against the harness`
 
 ### Task 7: Real FCM pushes (optional, maintainer's Firebase project)
 

@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Debug build only: cleartext to the emulator's host (10.0.2.2) and a push entry point for adb (no FCM). -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Android 17 local network protection: 10.0.2.2 (the emulator's host) is a private address; a runtime
+         permission, granted by the E2E (pm grant / adb install -g) -->
+    <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />
+
+    <application android:networkSecurityConfig="@xml/network_security_config">
+        <!-- DUMP is held by adb shell, never granted to other apps: only adb can send it a push -->
+        <receiver
+            android:name=".DebugPushReceiver"
+            android:exported="true"
+            android:permission="android.permission.DUMP">
+            <intent-filter>
+                <action android:name="io.reliablepush.sample.DEBUG_PUSH" />
+            </intent-filter>
+        </receiver>
+    </application>
+
+</manifest>
