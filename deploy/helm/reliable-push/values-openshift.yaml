@@ -1,0 +1,12 @@
+# OpenShift (>= 4.17) overlay: helm install rp deploy/helm/reliable-push -f values-openshift.yaml -f my-values.yaml
+# No runAsUser, runAsGroup or fsGroup anywhere: the restricted-v2 SCC assigns an arbitrary UID in group 0.
+route:
+  enabled: true
+  # host: push.apps.example.com   # empty: OpenShift generates one
+
+metrics:
+  serviceMonitor:                 # needs user workload monitoring enabled in the cluster
+    enabled: true
+
+test:
+  runAsUser: null

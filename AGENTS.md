@@ -24,6 +24,8 @@ sending pushes itself.
 | `ios/` | iOS SDK + Notification Service Extension helper | Swift, iOS 15+, SPM |
 | `client-java/` | Optional zero-dependency Java client for the sender API | Java 17+, JDK only |
 | `harness/` | Fake sender, fake fallback receiver, device simulator, E2E scenarios, web console for manual tests and demos (`./scripts/demo.sh`) | Java, plain HTML/JS, docker-compose |
+| `deploy/helm/` | Helm chart for the backend only (`deploy/helm/reliable-push`, combined/split, GKE and OpenShift values); tool images pinned in `deploy/helm/tools.env` | Helm, Kubernetes ≥ 1.30 |
+| `loadtest/` | Local-only Gatling load tests (NFR-2 ingest, fallback burst) and a JDK-only drain probe, run by `./scripts/load.sh` | Java 21, Gatling, docker-compose |
 | `docs/` | Requirements, specs, plans, guides, status | Markdown |
 
 ## Where the knowledge lives (read before working)
@@ -83,3 +85,7 @@ running the Maven commands. Details: `docs/testing.md`.
 | Console smoke test against a running stack (needs Playwright's Chromium) | `./mvnw -B -pl harness -am verify -Pconsole-smoke` |
 | Demo / manual-test web console (local only; `--realtime` for real minutes) | `./scripts/demo.sh [--realtime]` → http://127.0.0.1:8090/ |
 | E2E (local only, manual or agent) | `./scripts/e2e.sh [--scenario <name>] [--keep]` (Windows: `pwsh scripts/e2e.ps1`) — details in `.agents/skills/run-e2e/SKILL.md` |
+| Helm chart checks: lint, unit tests, kubeconform (Docker only, pinned images) | `deploy/helm/scripts/validate.sh` |
+| Helm kind smoke install (local only; needs kind, kubectl, JDK 21; `--keep` keeps the cluster) | `./scripts/helm-smoke.sh [--keep]` |
+| Loadtest module build + unit tests (compiles the simulations, never runs Gatling) | `./mvnw -B -pl loadtest verify` |
+| Load test (local only; NFR-2 ingest and fallback burst, about 15 minutes) | `./scripts/load.sh [--simulation ingest\|burst\|all]` — results in `harness/build/load/summary.json`, details in `docs/testing.md` |

@@ -10,6 +10,9 @@ import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.locks.Condition;
+import java.util.concurrent.locks.ReentrantLock;
 import org.springframework.scheduling.annotation.Scheduled;
 
 /**
@@ -25,6 +28,10 @@ import org.springframework.scheduling.annotation.Scheduled;
  *
  * <p>Concurrency: one virtual thread per row; the tick returns when all its rows are done, and the scheduler runs ticks
  * with a fixed delay, so ticks of one instance never overlap.
+ *
+ * <p>Graceful stop: {@link #requestStop()} sets a flag that is checked before every claim, the first included, so a
+ * tick claims nothing more but still waits for its rows in flight; {@link #awaitIdle} waits for a running tick to
+ * return (used by {@link FallbackWorkerLifecycle} on shutdown, before the connection pool closes).
  */
 public class FallbackScheduler {
 
@@ -34,6 +41,12 @@ public class FallbackScheduler {
     private final Duration lease;
     private final int batchSize;
     private final int maxConcurrency;
+
+    private volatile boolean stopRequested;
+    private final AtomicInteger rowsInFlight = new AtomicInteger();
+    private final ReentrantLock lock = new ReentrantLock();
+    private final Condition idle = lock.newCondition();
+    private int ticksRunning; // guarded by lock; a count, so awaitIdle stays correct even if ticks overlap
 
     FallbackScheduler(
             NotificationRepository notifications,
@@ -63,15 +76,82 @@ public class FallbackScheduler {
             fixedDelayString = "${reliable-push.worker.poll-interval:5s}",
             initialDelayString = "${reliable-push.worker.poll-interval:5s}")
     public int tick() {
+        lock.lock();
+        try {
+            ticksRunning++;
+        } finally {
+            lock.unlock();
+        }
+        try {
+            return claimAndDispatch();
+        } finally {
+            lock.lock();
+            try {
+                if (--ticksRunning == 0) {
+                    idle.signalAll();
+                }
+            } finally {
+                lock.unlock();
+            }
+        }
+    }
+
+    /**
+     * After this call no tick claims another row; a tick already running returns once the rows it dispatched are done.
+     * Irreversible: the instance is shutting down.
+     */
+    public void requestStop() {
+        stopRequested = true;
+    }
+
+    boolean isStopRequested() {
+        return stopRequested;
+    }
+
+    /** The rows of the running tick whose dispatch has not finished yet. */
+    int rowsInFlight() {
+        return rowsInFlight.get();
+    }
+
+    /**
+     * Waits until no tick is running (every running tick has returned, should ticks ever overlap).
+     *
+     * @return {@code true} if idle, {@code false} if a tick was still running after {@code timeout} (or the thread was
+     *     interrupted)
+     */
+    boolean awaitIdle(Duration timeout) {
+        long nanos = timeout.toNanos();
+        lock.lock();
+        try {
+            while (ticksRunning > 0) {
+                if (nanos <= 0) {
+                    return false;
+                }
+                nanos = idle.awaitNanos(nanos);
+            }
+            return true;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    private int claimAndDispatch() {
         Instant claimUntil = now().plus(lease.dividedBy(2));
         Semaphore slots = new Semaphore(maxConcurrency);
         int total = 0;
         try (ExecutorService rows = Executors.newVirtualThreadPerTaskExecutor()) {
             boolean first = true;
-            while (true) {
+            while (!stopRequested) {
                 int capacity = reserve(slots);
                 if (capacity == 0) {
                     break; // interrupted (shutdown): dispatch nothing more, wait for the rows in flight
+                }
+                if (stopRequested) { // stop requested while waiting for a free slot: claim nothing
+                    slots.release(capacity);
+                    break;
                 }
                 Instant now = now();
                 if (!first && !now.isBefore(claimUntil)) {
@@ -87,11 +167,13 @@ public class FallbackScheduler {
                     throw e;
                 }
                 slots.release(capacity - claimed.size());
+                rowsInFlight.addAndGet(claimed.size());
                 for (ClaimedNotification row : claimed) {
                     rows.execute(() -> {
                         try {
                             dispatcher.process(row);
                         } finally {
+                            rowsInFlight.decrementAndGet();
                             slots.release();
                         }
                     });

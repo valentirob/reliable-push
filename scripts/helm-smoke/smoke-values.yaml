@@ -1,0 +1,61 @@
+# Values of the kind smoke install (scripts/helm-smoke.sh). No secret value here: the Secret rp-secrets is created by
+# the script from harness/compose/GenSecrets.java. image.tag/pullPolicy: the image reliable-push-backend:smoke is loaded
+# into the node (kind load), never pulled.
+mode: split
+
+image:
+  repository: reliable-push-backend
+  tag: smoke
+  pullPolicy: Never
+
+database:
+  url: jdbc:postgresql://postgres:5432/reliablepush
+  username: reliablepush
+
+secrets:
+  existingSecret: rp-secrets
+
+# 1 API + 2 workers (small requests: Colima has 4 CPUs / 6 GiB). maxConcurrency 2 per worker: 4 webhook calls of ~2 s
+# in flight in total, so 200 due rows need about 100 s and the rolling restart (about a minute) hits calls in flight.
+api:
+  replicas: 1
+  resources:
+    requests: { cpu: 100m, memory: 512Mi }
+    limits: { memory: 768Mi }
+worker:
+  replicas: 2
+  maxConcurrency: 2
+  podDisruptionBudget:
+    minAvailable: 1
+  resources:
+    requests: { cpu: 100m, memory: 384Mi }
+    limits: { memory: 640Mi }
+
+# OpenShift restricted-v2 like: arbitrary UID in group 0, no fsGroup (the chart sets none).
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000870000
+  runAsGroup: 0
+  seccompProfile:
+    type: RuntimeDefault
+
+config:
+  device-token:
+    current-kid: e2e
+    signing-keys:
+      - kid: e2e
+        private-key-pem-ref: env:RP_DEVICE_KEY_E2E
+        public-key-pem-ref: env:RP_DEVICE_PUB_E2E
+  apps:
+    shop:
+      # sender-api-key-sha256 comes from the Secret (RELIABLEPUSH_APPS_SHOP_SENDERAPIKEYSHA256)
+      identity:
+        type: signed-grant
+        issuer: reliable-push-harness
+        audience: shop
+        grant-secret-ref: env:RP_SHOP_GRANT_SECRET
+      default-timeout-minutes: 1
+      fallback:
+        url: http://fallback-dummy:8080/hook
+        hmac-secret-ref: env:RP_SHOP_HOOK_SECRET
+        http-timeout: 10s

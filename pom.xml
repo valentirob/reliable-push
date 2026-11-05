@@ -13,5 +13,6 @@
     <modules>
         <module>client-java</module>
         <module>harness</module>
+        <module>loadtest</module>
     </modules>
 </project>

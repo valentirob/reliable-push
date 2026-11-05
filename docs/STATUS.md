@@ -2,6 +2,56 @@
 
 Newest entry first. Updated at the end of every work session (see `.agents/skills/session-handoff/SKILL.md`).
 
+## 2026-11-05 (4) — Claude Code — `feature/cycle1c-deploy-load` (plan 1C, Task 9 and final fix wave)
+
+- **Done:** CI and docs for plan 1C; all plan 1C tasks are ticked. `.github/workflows/helm-ci.yml` (runs
+  `deploy/helm/scripts/validate.sh`; no cluster, no load job), `harness-ci.yml` job `loadtest` (`./mvnw -B -pl loadtest
+  verify`) and path `loadtest/**`, Dependabot docker `/loadtest`; actionlint 1.7.12 clean. New `docs/deployment.md`
+  (Secret, values, install and checks, GKE, OpenShift, combined vs split, upgrades, graceful shutdown, sizing, per-IP
+  limits); its generic commands were run against the kind smoke cluster (`--keep`), GKE/OpenShift only rendered. README,
+  `AGENTS.md`, `docs/testing.md` (load tests, Helm checks), spec "Changes during implementation (plan 1C)", NFR-2 in
+  `docs/requirements.md` marked validated.
+- **Final fix wave** (after the whole-branch review): removed the `worker.shutdown-timeout` ≤
+  `spring.lifecycle.timeout-per-shutdown-phase` startup check (R10: the worker stop is synchronous; grace rule
+  `terminationGracePeriodSeconds > preStop 5 s + worker.shutdown-timeout + 30 s`); worker stop tests (graceful-shutdown
+  IT with batch-size 1, tick counter in `FallbackScheduler`, `FallbackWorkerLifecycleTest`); chart
+  `api.service.annotations` and `gke.backendConfig` (GKE health check on 8081 `/actuator/health/readiness`, on in
+  `values-gke.yaml`); PDB follows `autoscaling.api.minReplicas` with the HPA, `*Ref`/`*_ref` keys checked like `-ref`;
+  `load.sh` records the effective settings and `nfr2Criterion` in `summary.json`, burst warm-up (`LOAD_BURST_WARMUP`),
+  ingest stops after a failed register; `helm-smoke.sh` marks a kept cluster by its control-plane container ID and wipes
+  `logs/` on reuse.
+- **State (verification after the final fix wave, on this branch, not merged, not pushed):** `cd backend && ./mvnw -B
+  verify` 240 unit + 218 integration tests, 0 failures, line coverage 93.3 %; `./mvnw -B -pl loadtest verify` 19 tests;
+  `./mvnw -B -pl harness -am verify` 34 client + 106 harness unit + 73 harness integration tests (Task 9, harness and
+  client unchanged since); `deploy/helm/scripts/validate.sh` lint (both modes) + 83 helm-unittest tests + kubeconform on
+  4 renders (the GKE one includes the `BackendConfig`), all passed; `./scripts/helm-smoke.sh --keep` then
+  `./scripts/helm-smoke.sh` (reuse of the kept cluster) 12/12 PASS each (worker rollout during dispatch: 200/200
+  triggered once, no ERROR); `./scripts/e2e.sh`: `E2E: 17/17 passed`; `./scripts/load.sh --simulation all`: **NFR-2:
+  passed** (ingest PASSED with `nfr2Criterion: true`: register p95 1 ms / p99 28 ms, events p95 2 ms / p99 34 ms, 0 %
+  failed, generator CPU 10.8 %; criterion and replica size unchanged, see `docs/operations.md` "Measured capacity");
+  burst PASSED (30,000 triggered, 0 failed or expired, 1,553 rows/s); `./scripts/load.sh --simulation burst` on a fresh
+  stack PASSED (`notify` p99 1 ms after the 30 s warm-up; 30,000 triggered, 0 failed or expired).
+- **Next:**
+  1. Review of the final fix wave (range from `17b774c`); the other deferred minors stay as triaged in the SDD ledger.
+  2. Then the maintainer decides the merge into `develop` (`--no-ff`; merge line `E2E: 17/17 passed` and the NFR-2 result).
+- **Open:** (a) The chart was never installed on a real GKE or OpenShift cluster (render and kubeconform only; the
+  `BackendConfig` health check and its firewall note are unverified on GKE). (b) Earlier open items: `scripts/*.ps1`
+  untested on Windows; console Host allowlist.
+
+## 2026-11-05 (3) — Claude Code — `feature/cycle1c-deploy-load` (plan 1C, Task 8)
+
+- **Done:** local load runs (`./scripts/load.sh`) and capacity sizing. **NFR-2 passed:** one API replica (2 CPUs / 1 GiB)
+  took 1,000 events/s + 500 notifications/s for 5 minutes with 0 % failed, p95 1-2 ms, p99 28-38 ms (pool 5, 10 and 20).
+  The default burst (30,000 rows at 1,500/s) drained at the arrival rate (about 1,550 rows/s, criterion ≥ 400); a backlog
+  due at once drained at 2,900-4,900 rows/s per worker (3,100-3,400 at 1 CPU), capped by PostgreSQL's 1 CPU. The first
+  baseline failed on the generator, not the backend (Gatling container out of ephemeral ports); fixed in the load
+  override (one feedback round, no backend change). Results and chart defaults: `docs/operations.md` "Measured capacity".
+- **State:** chart defaults revised (API requests 800m / 384Mi; worker max-concurrency 200, pool 20, requests 500m /
+  384Mi, limits 1 CPU / 512Mi); `deploy/helm/scripts/validate.sh` passes. Machine: Mac17,2, Colima 4 CPUs / 6 GiB.
+- **Next:** Task 9 of plan 1C (CI for chart and loadtest, final verification).
+- **Open:** a burst-only run on a freshly started stack fails its p99 ≤ 250 ms assertion (cold JIT, p99 400-460 ms);
+  `load.sh --simulation all` warms the API first.
+
 ## 2026-11-05 (2) — Claude Code — `develop`
 
 - **Done:** `feature/cycle1b-harness` merged into `develop` (`--no-ff`, `fad89f9`) and pushed; branch deleted. Plans 1A and 1B are both on `develop`.

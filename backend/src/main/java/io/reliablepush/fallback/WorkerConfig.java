@@ -58,6 +58,29 @@ class WorkerConfig {
     }
 
     /**
+     * Stops the worker before the web server and the connection pool go (SIGTERM): claims nothing more and waits for
+     * the calls in flight, at most {@code shutdown-timeout}.
+     */
+    @Bean
+    FallbackWorkerLifecycle fallbackWorkerLifecycle(
+            FallbackScheduler scheduler, AppRegistry apps, ReliablePushProperties properties) {
+        Duration timeout = resolveShutdownTimeout(properties.worker().shutdownTimeout(), apps.all());
+        return new FallbackWorkerLifecycle(scheduler, timeout);
+    }
+
+    /** The configured {@code worker.shutdown-timeout}, else the largest app {@code http-timeout} plus 5 s. */
+    static Duration resolveShutdownTimeout(Duration configured, Collection<AppConfig> apps) {
+        if (configured != null) {
+            return configured;
+        }
+        Duration longest = apps.stream()
+                .map(app -> app.fallback().httpTimeout())
+                .max(Duration::compareTo)
+                .orElse(Duration.ZERO);
+        return longest.plusSeconds(5);
+    }
+
+    /**
      * The lease must outlast one webhook call ({@code http-timeout}, a literal duration that is never scaled),
      * otherwise every slow call is re-claimed and re-sent by another worker. In production this fails the startup;
      * with the fast clock (e2e/demo) the scaled lease is usually shorter, which only warrants a warning.

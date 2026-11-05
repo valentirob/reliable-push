@@ -4,6 +4,11 @@ spring:
   # Runs both roles unless overridden (SPRING_PROFILES_ACTIVE=api or worker).
   profiles:
     default: api,worker
+  lifecycle:
+    # Bounds the web server's graceful drain (server.shutdown: graceful) on SIGTERM. The worker stop
+    # (reliable-push.worker.shutdown-timeout) runs synchronously and is not cut by it: the hard bound is the kubelet's
+    # SIGKILL, so keep terminationGracePeriodSeconds above preStop 5 s (API pods) + worker.shutdown-timeout + 30 s.
+    timeout-per-shutdown-phase: 30s
   threads:
     virtual:
       enabled: true
@@ -24,6 +29,8 @@ spring:
       enabled: false
 
 server:
+  # on SIGTERM the web server finishes the requests in flight (bounded by spring.lifecycle.timeout-per-shutdown-phase)
+  shutdown: graceful
   tomcat:
     # JSON request bodies are limited to 64 KB by BodySizeLimitFilter (/v1/**);
     # this only bounds how much Tomcat swallows of an upload the filter rejected unread.
@@ -37,6 +44,8 @@ info:
     version: "@project.version@"
 
 management:
+  # Opt-in: set MANAGEMENT_SERVER_PORT (e.g. 8081) to serve /actuator/** on a separate port, outside the API filters
+  # (access log, rate limit); the server port then answers 404 for /actuator/**. Unset: actuator shares the server port.
   endpoints:
     web:
       exposure:

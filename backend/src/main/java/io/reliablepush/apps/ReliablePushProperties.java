@@ -74,17 +74,22 @@ public record ReliablePushProperties(
 
     /**
      * {@code batchSize} bounds one claim, {@code maxConcurrency} the webhook calls in flight (default: the batch size).
-     * A tick keeps claiming while claims come back full, for at most half the lease.
+     * A tick keeps claiming while claims come back full, for at most half the lease. {@code shutdownTimeout} bounds how
+     * long a stopping worker waits for its calls in flight; null means the largest app {@code http-timeout} + 5 s.
      */
     public record Worker(
             @DefaultValue("5s") @NotNull Duration pollInterval,
             @DefaultValue("100") @Min(1) @Max(10_000) int batchSize,
             @DefaultValue("2m") @DurationUnit(ChronoUnit.MINUTES) @NotNull Duration lease,
-            @Min(1) @Max(10_000) Integer maxConcurrency) {
+            @Min(1) @Max(10_000) Integer maxConcurrency,
+            @Nullable Duration shutdownTimeout) {
 
         public Worker {
             if (maxConcurrency == null) {
                 maxConcurrency = batchSize;
+            }
+            if (shutdownTimeout != null && (shutdownTimeout.isZero() || shutdownTimeout.isNegative())) {
+                throw new IllegalStateException("reliable-push.worker.shutdown-timeout must be positive");
             }
         }
     }

@@ -6,6 +6,8 @@ COPY .mvn/ .mvn/
 COPY mvnw pom.xml ./
 COPY client-java/ client-java/
 COPY harness/ harness/
+# the root pom lists loadtest as a module: Maven needs its pom to read the reactor (its sources are not built here)
+COPY loadtest/pom.xml loadtest/pom.xml
 RUN ./mvnw -B -q -pl harness -am -Dmaven.test.skip=true package \
     && java -Djarmode=tools -jar harness/target/reliable-push-harness-*.jar extract --layers --launcher --destination /build/extracted \
     && chmod -R g=u /build/extracted
