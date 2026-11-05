@@ -206,7 +206,7 @@ Requirements: FR-4 to FR-8, FR-10, NFR-1, NFR-5, NFR-6, NFR-10. Rules: `.agents/
   - `enum APIResult<T>` = `.ok(T)` | `.http(status: Int, retryAfterSeconds: Int?)` | `.networkError`.
   - Bodies follow `backend/src/main/resources/openapi.yaml`; `platform` is `IOS`; dates are ISO-8601 with fractional seconds accepted.
 
-- [ ] **Step 1: Failing tests:**
+- [x] **Step 1: Failing tests:**
   - `testRegisterSendsAppIdIdTokenPlatformAndParsesToken`
   - `testRegisterReusesStoredDeviceId`
   - `testRefreshSendsBearerToken`
@@ -217,11 +217,11 @@ Requirements: FR-4 to FR-8, FR-10, NFR-1, NFR-5, NFR-6, NFR-10. Rules: `.agents/
   - `testDoesNotFollowRedirects` (the stub answers 302 to another URL that records any call: zero calls, result `.http(302)`)
   - `testRejectsCleartextToRemoteHost`: `http://example.com` throws `.insecureBaseURL`; `http://127.0.0.1:8091`, `http://localhost`, `http://[::1]:8080`, `https://x.example` pass.
   - `testBodyIsCappedAt64KB`: a larger response body → `.networkError`.
-- [ ] **Step 2: Run** the package tests → FAIL. **Step 3: Implement**:
+- [x] **Step 2: Run** the package tests → FAIL. **Step 3: Implement**:
   - A `URLSession` with a delegate whose `willPerformHTTPRedirection` completes with `nil`.
   - Headers: `Content-Type: application/json`, `Accept: application/json, application/problem+json`, the user agent.
   - `JSONEncoder`/`JSONDecoder` with ISO-8601 dates.
-- [ ] **Step 4: Run** → PASS. **Step 5: Commit** `feat(ios): device api client`
+- [x] **Step 4: Run** → PASS. **Step 5: Commit** `feat(ios): device api client`
 
 ### Task 2: Shared storage and refresh rule
 
