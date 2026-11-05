@@ -2,6 +2,25 @@
 
 Newest entry first. Updated at the end of every work session (see `.agents/skills/session-handoff/SKILL.md`).
 
+## 2026-11-05 (7) — Claude Code — `feature/cycle2-android-sdk` (plan 2, final fix wave)
+
+- **Done:** R18 fix wave (whole-branch review minors): SDK no longer posts or reports `DELIVERED` for a blocked channel
+  group or paused notifications; `register`/`logout` always call back (`Exception`), `TokenStore.save` never throws;
+  `Retry-After`/latency clamped to 1 h without overflow; `Sdk.flush` no longer reschedules a job `persist` just
+  scheduled; docs retry wording; harness validates the FCM `project_id`, maps any `RuntimeException` in `FcmSender.send`
+  to `FAILED(0)`, clears an FCM token only if unchanged (compare-and-clear); `AndroidE2eSummary` fails an expected
+  scenario that was SKIPPED (except `fcm-real-delivery`); `android-e2e.sh` usage, early skip of `--test
+  fcm-real-delivery`, separate `publishToMavenLocal` call, airplane mode restored to the saved state.
+- **State (not merged, not pushed):** `./gradlew build` OK (release AAR 67,347 bytes, gate 102,400); `./mvnw -B -pl
+  harness -am verify` OK; `./scripts/e2e.sh`: `E2E: 17/17 passed`; `./scripts/android-e2e.sh` and `--release-lib`:
+  `Android E2E: 8/8 passed, 1 skipped` (each after one rerun, see below); `--test fcm-real-delivery` skips in under 1 s.
+  Two single-entry failures were environmental and passed on rerun: `token-refresh-near-expiry` (the host stalled 15 min
+  inside the test, so the 20 s token had expired: refresh answered 401 by design) and, with `--release-lib`,
+  `offline-delivery-is-sent-when-network-returns` (JobScheduler did not start the job for 85 s after its latency, state
+  `NET READY`; the OS delay alarm is inexact). No emulator or stack left running.
+- **Follow-ups (not done):** `ReliablePushOptions` builder before 1.0; publish the R8 `mapping.txt`; move test hooks out
+  of the public `ReliablePush` object.
+
 ## 2026-11-05 (6) — Claude Code — `feature/cycle2-android-sdk` (plan 2, Android SDK, Task 8 and handoff)
 
 - **Done:** all plan 2 tasks (0 to 8) are implemented and ticked: the Android SDK (`android/reliablepush`, Kotlin, Kotlin
