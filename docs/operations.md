@@ -242,9 +242,11 @@ is harmless. It logs `retention.purged` with the count. Devices are not purged b
   `(lease/2) / (lease/2 + http-timeout + poll-interval)` (about 80 % with the defaults). Examples with the defaults
   (`max-concurrency` 100): a 200 ms receiver gives about 400 rows/s, so a 90,000-row campaign that falls due at once
   is dispatched in about 4 minutes; a 2 s receiver gives about 40 rows/s, about 38 minutes, which is longer than the
-  20-minute trigger window, so most of it would expire (the Helm chart sets `max-concurrency` 200, which doubles these
-  rates). Size for `backlog / (rows per second x replicas)` well inside
-  `trigger-window-minutes`: raise `max-concurrency` (and the receiver's capacity), add worker replicas, or both.
+  20-minute trigger window, so most of it would expire. The Helm chart sets `max-concurrency` 200, which helps most with
+  slow receivers (the rate is latency-bound there); with the instant harness receiver the measured gain over 100 was
+  about 17 % without a CPU limit (4,200 → 4,900 rows/s) and about 10 % at 1 CPU. Size for
+  `backlog / (rows per second x replicas)` well inside `trigger-window-minutes`: raise `max-concurrency` (and the
+  receiver's capacity), add worker replicas, or both.
   The formula holds only below the worker's own ceiling: with a receiver that answers at once, one replica limited to
   1 CPU dispatched about 3,100-3,400 rows/s, and a second replica did not help once PostgreSQL ran out of CPU
   ([Measured capacity](#measured-capacity)). `rp_due_backlog` shows how far behind the workers are.
@@ -273,8 +275,11 @@ generator to 1 CPU on the same compose network (it averaged 9-13 % CPU during in
 was never the limit), workers without a limit unless stated, database on the same host. All containers share 4 vCPUs.
 **The numbers are relative to this machine**: use them as ratios and orders of magnitude, then confirm on your cluster.
 
-**NFR-2 (API ingest): passed.** One API replica (2 CPUs / 1 GiB) took 1,000 `POST /v1/events`/s (one event each) plus
-500 `POST /v1/notifications`/s for 5 minutes after a 60 s ramp (open model, offered load fixed):
+**NFR-2 (API ingest): passed**, criterion and replica size unchanged. The criterion: one API replica limited to
+2 CPUs / 1 GiB sustains 1,000 `POST /v1/events`/s (one event each) for 5 minutes after a 60 s ramp, alongside 500
+`POST /v1/notifications`/s (open model, offered load fixed), with ≤ 0.1 % failed requests, p95 ≤ 100 ms and
+p99 ≤ 250 ms per request group (`register`, `events`); a run whose generator averages more than 90 % CPU is `INVALID`,
+not passed. Results:
 
 | API pool | register p95 / p99 | events p95 / p99 | failed | API CPU avg / max | API memory (RSS) |
 |---|---|---|---|---|---|
@@ -323,6 +328,27 @@ The Helm chart defaults follow these runs (`deploy/helm/reliable-push/values.yam
 800m / 384Mi (measured CPU and RSS at the NFR-2 load + 30 %), limits 2 CPUs / 1Gi (the NFR-2 size); worker
 `max-concurrency` 200, pool 20, requests 500m / 384Mi, limits 1 CPU / 512Mi. In `combined` mode the pods run both roles
 with `api.resources`: add the worker's requests.
+
+**Reproducing** (from the repository root; results land in `harness/build/load/summary.json`):
+
+- NFR-2 rows: `./scripts/load.sh --simulation ingest --api-pool 5` (and `10`, `20`); the defaults implement the
+  criterion.
+- Arrival-paced burst rows: `LOAD_RAMP=10s LOAD_STEADY=50s ./scripts/load.sh --simulation all --worker-concurrency 200
+  --worker-pool 20`, with the row's `--worker-concurrency` / `--worker-pool` (add `--workers 2` for two workers). The
+  short ingest warms the API first: `--simulation burst` alone on a freshly started stack currently fails its own
+  p99 ≤ 250 ms assertion (cold JIT, 400-460 ms) and then reports no drain figures.
+- "Backlog due at once" table (30,000- and 60,000-row runs): **not reproducible with `load.sh`
+  alone**: they come from pausing the worker container by hand. Run the arrival-paced command (with
+  `LOAD_BURST_SIZE=60000` for the 60,000-row runs) and, in a second shell: when `load.sh` prints
+  `running FallbackBurstSimulation`, run `docker pause reliable-push-load-worker-a-1` (and
+  `reliable-push-load-worker-b-1` with two workers); when `harness/build/load/logs/gatling-burst.log` shows
+  `Generating reports`, wait 65 s (every row is then due) and `docker unpause` the same containers. The drain probe
+  measures from the first trigger; its `maxBacklog` reads 0 there because the paused worker publishes the backlog
+  gauge.
+- Rows with a worker limit: add `LOAD_WORKER_CPUS=1 LOAD_WORKER_MEMORY=768m` (or `512m`) to the command.
+- If the generator reports `Cannot assign requested address`, it ran out of ephemeral ports (each virtual user opens
+  its own connection); the `sysctls` of the `gatling` service in `loadtest/compose/load.override.yml` fix it, so keep
+  them in any modified setup.
 
 ## Container image
 
