@@ -70,6 +70,8 @@ public class EventIngestSimulation extends Simulation {
                                     + "\"fallback\":{\"sms\":\"load\"}}"))
                             .check(status().is(201))
                             .check(jsonPath("$.trackingId").saveAs("trackingId"))))
+            // no trackingId after a failed register: the events would fail too and be counted against `events`
+            .exitHereIfFailed()
             .pause(Duration.ofMillis(50))
             // Two occurrences of the group: a group's response time is the sum of its requests, so keeping
             // each event in its own occurrence makes the `events` assertion a per-request figure (pause excluded).

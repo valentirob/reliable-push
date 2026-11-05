@@ -122,15 +122,18 @@ image or deployed with a Helm chart.
 - **Simulations:** `ingest` is the NFR-2 criterion: 500 `POST /v1/notifications`/s and 1,000 `POST /v1/events`/s (one
   event each) for 5 minutes after a 60 s ramp, asserting ≤ 0.1 % failed requests, p95 ≤ 100 ms and p99 ≤ 250 ms per
   request group. `burst` registers `LOAD_BURST_SIZE` notifications (default 30,000 at 1,500/s) that fall due together;
-  `BurstDrainProbe` samples the workers' `/actuator/prometheus` until all are triggered. `all` runs ingest first, which
-  also warms the API (a burst alone on a cold stack can miss its p99 assertion).
-- **Results:** `harness/build/load/summary.json` (per simulation: `status` `PASSED`/`FAILED`/`INVALID`, metrics, config,
-  generator CPU), Gatling HTML reports in `harness/build/load/gatling/`, the probe output in `burst.json`, container logs in
-  `logs/`. Exit code 0 only if every simulation `PASSED`. A run whose Gatling container averages more than 90 % CPU is
-  `INVALID` (the generator, not the backend, was the limit).
+  `BurstDrainProbe` samples the workers' `/actuator/prometheus` until all are triggered; a warm-up before the burst
+  (`LOAD_BURST_WARMUP`, default 30 s, request name `notify-warm-up`) keeps the cold JIT out of the asserted `notify`
+  requests, so `burst` alone works on a fresh stack. `all` runs ingest first.
+- **Results:** `harness/build/load/summary.json` (per simulation: `status` `PASSED`/`FAILED`/`INVALID`, metrics, the
+  effective config with `nfr2Criterion`, generator CPU), Gatling HTML reports in `harness/build/load/gatling/`, the probe
+  output in `burst.json`, container logs in `logs/`. Exit code 0 only if every simulation `PASSED`. A run whose Gatling
+  container averages more than 90 % CPU is `INVALID` (the generator, not the backend, was the limit). Only an `ingest`
+  entry with `status` `PASSED` and `config.nfr2Criterion` `true` (the run used the NFR-2 rates, 60 s ramp, ≥ 300 s
+  steady, API at 2 CPUs / 1g) validates NFR-2.
 - **Settings:** environment variables `LOAD_DEVICES`, `LOAD_NOTIFICATIONS_PER_SECOND`, `LOAD_RAMP`, `LOAD_STEADY`,
-  `LOAD_BURST_SIZE` (a multiple of `LOAD_BURST_PER_SECOND`), `LOAD_BURST_PER_SECOND`, `LOAD_READY_TIMEOUT`,
-  `LOAD_WORKER_CPUS`, `LOAD_WORKER_MEMORY`. Details of the module: [`loadtest/README.md`](../loadtest/README.md).
+  `LOAD_BURST_SIZE` (a multiple of `LOAD_BURST_PER_SECOND`), `LOAD_BURST_PER_SECOND`, `LOAD_BURST_WARMUP`,
+  `LOAD_READY_TIMEOUT`, `LOAD_WORKER_CPUS`, `LOAD_WORKER_MEMORY`. Details of the module: [`loadtest/README.md`](../loadtest/README.md).
 - **Measured results** and how to reproduce each table row: [operations.md, "Measured capacity"](operations.md#measured-capacity).
 
 ## Helm chart checks

@@ -48,7 +48,7 @@ class DeviceProvisionerTest {
 
     private LoadConfig config(int devices) {
         return new LoadConfig(URI.create("http://127.0.0.1:" + server.getAddress().getPort()), "key", "grant-secret",
-                "iss", "shop", devices, 1, Duration.ofSeconds(1), Duration.ofSeconds(1), 1, 1);
+                "iss", "shop", devices, 1, Duration.ofSeconds(1), Duration.ofSeconds(1), 1, 1, Duration.ofSeconds(1));
     }
 
     @Test

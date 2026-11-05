@@ -9,12 +9,17 @@
 # the Gatling simulations (EventIngestSimulation, FallbackBurstSimulation + BurstDrainProbe) and writes, in
 # harness/build/load/: gatling/<simulation>/ (HTML report), burst.json (probe), summary.json (one entry per simulation:
 # status PASSED|FAILED|INVALID, metrics, config, generatorCpuAvgPercent). Exit 0 only if every simulation PASSED.
+# config records the effective settings (rates, ramp, steady, devices, burst, API and worker limits read from the
+# containers; 0 or unset limits as "unlimited") and nfr2Criterion: true only when the run used the NFR-2 settings
+# (>= 1000 events/s, >= 500 notifications/s, 60 s ramp, >= 300 s steady, API limited to 2 CPUs / 1g). Only an ingest
+# entry with status PASSED and nfr2Criterion true validates NFR-2.
 # A run whose Gatling container averages more than 90 % CPU during injection is INVALID (the generator was saturated):
-# CPU is sampled (docker stats, every 5 s) from the start of the injection to the end of the simulation; for ingest the
-# ramp is excluded (steady phase only). A simulation is PASSED only if Gatling exited 0 and every expected assertion
+# CPU is sampled (docker stats, every 5 s) from the start of the injection to the end of the simulation; the ingest ramp
+# and the burst warm-up are excluded. A simulation is PASSED only if Gatling exited 0 and every expected assertion
 # result line was parsed and true; otherwise FAILED with a "reason" in summary.json.
 # Simulation settings come from the environment: LOAD_DEVICES, LOAD_NOTIFICATIONS_PER_SECOND, LOAD_RAMP, LOAD_STEADY,
-# LOAD_BURST_SIZE (multiple of LOAD_BURST_PER_SECOND), LOAD_BURST_PER_SECOND, LOAD_READY_TIMEOUT (seconds, default 120).
+# LOAD_BURST_SIZE (multiple of LOAD_BURST_PER_SECOND), LOAD_BURST_PER_SECOND, LOAD_BURST_WARMUP (default 30s: requests
+# ramping up to the burst rate before the measured burst, not asserted), LOAD_READY_TIMEOUT (seconds, default 120).
 # Worker container limits (default none): LOAD_WORKER_CPUS (e.g. 1), LOAD_WORKER_MEMORY (e.g. 768m); recorded in config.
 # Without --keep the stack is removed at the end (down -v); with --keep it keeps running. The Maven cache of the Gatling
 # runner is the external volume reliable-push-gatling-m2 and survives `down -v`; purge it with
@@ -56,7 +61,7 @@ probe_status() { printf '%s' "$1" | sed -n 's/.*"status":"\([A-Z]*\)"}[[:space:]
 # whole seconds of 90s | 5m | 1h | 500ms | 90 | PT90S | PT5M (empty when unsupported)
 duration_seconds() {
     case "$1" in
-        *ms) [ -n "${1%ms}" ] && printf '%s' $((${1%ms} / 1000 + 1)) ;;
+        *ms) [ -n "${1%ms}" ] && printf '%s' $(((${1%ms} + 999) / 1000)) ;;
         *s) printf '%s' "${1%s}" ;;
         *m) printf '%s' $((${1%m} * 60)) ;;
         *h) printf '%s' $((${1%h} * 3600)) ;;
@@ -70,10 +75,30 @@ duration_seconds() {
 avg_cpu() {
     awk -v from="$2" '$1 ~ /^[0-9]+$/ && $1 >= from && $2 != "" { gsub(/%/, "", $2); s += $2; n++ } END { if (n) printf "%.1f", s / n }' "$1"
 }
+# "unlimited" for an unset or 0 limit, else the value
+limit_label() { case "$1" in '' | 0) printf unlimited ;; *) printf '%s' "$1" ;; esac; }
+# docker HostConfig.NanoCpus -> CPUs (2000000000 -> 2), 0 -> unlimited
+cpus_label() { awk -v n="$1" 'BEGIN { if (n + 0 == 0) printf "unlimited"; else printf "%g", n / 1e9 }'; }
+# docker HostConfig.Memory (bytes) -> 1g / 768m / bytes, 0 -> unlimited
+mem_label() {
+    awk -v b="$1" 'BEGIN { g = 1073741824; m = 1048576
+        if (b + 0 == 0) printf "unlimited"; else if (b % g == 0) printf "%dg", b / g
+        else if (b % m == 0) printf "%dm", b / m; else printf "%d", b }'
+}
+# nfr2_criterion <notifications/s> <ramp s> <steady s> <api cpus> <api memory> -> true|false: the run used the NFR-2
+# settings (each notification sends two events: >= 1000 events/s, >= 500 notifications/s, ramp 60 s, steady >= 300 s,
+# API limited to 2 CPUs / 1g)
+nfr2_criterion() {
+    if [ $(($1 * 2)) -ge 1000 ] && [ "$1" -ge 500 ] && [ "$2" -eq 60 ] && [ "$3" -ge 300 ]         && [ "$4" = 2 ] && [ "$5" = 1g ]; then
+        printf true
+    else
+        printf false
+    fi
+}
 [ "${LOAD_SH_SOURCE_ONLY:-0}" = 1 ] && return 0
 
 usage() {
-    sed -n '2,21p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    awk 'NR > 1 && /^set -euo pipefail/ { exit } NR > 1' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
 }
 
 SIMULATION=all API_POOL=10 WORKER_CONCURRENCY=100 WORKER_POOL=10 WORKERS=1 KEEP=0
@@ -111,6 +136,15 @@ case "$BURST_SIZE$BURST_PER_SECOND" in '' | *[!0-9]*) rp_die "LOAD_BURST_SIZE an
 
 RAMP_SECONDS="$(duration_seconds "${LOAD_RAMP:-60s}")"
 [ -n "$RAMP_SECONDS" ] || rp_die "LOAD_RAMP must be like 90s, 5m, 1h, 90 or PT90S (needed to exclude the ramp from the CPU average)"
+STEADY_SECONDS="$(duration_seconds "${LOAD_STEADY:-300s}")"
+[ -n "$STEADY_SECONDS" ] || rp_die "LOAD_STEADY must be like 90s, 5m, 1h, 90 or PT90S (recorded in summary.json)"
+WARMUP_SECONDS="$(duration_seconds "${LOAD_BURST_WARMUP:-30s}")"
+[ -n "$WARMUP_SECONDS" ] || rp_die "LOAD_BURST_WARMUP must be like 30s, 1m, 30 or PT30S"
+# effective simulation settings (the defaults of LoadConfig), recorded in summary.json
+NOTIFICATIONS_PER_SECOND="${LOAD_NOTIFICATIONS_PER_SECOND:-500}"
+DEVICES="${LOAD_DEVICES:-2000}"
+need_int LOAD_NOTIFICATIONS_PER_SECOND "$NOTIFICATIONS_PER_SECOND"
+need_int LOAD_DEVICES "$DEVICES"
 
 rp_require_tools
 if [ -n "$(rp_compose ps -a -q 2>/dev/null)" ]; then
@@ -184,6 +218,15 @@ while :; do
     sleep 1
 done
 rp_log "stack ready"
+# effective container limits (what the containers really got, not what was asked for)
+limits_of() { docker inspect -f '{{.HostConfig.NanoCpus}} {{.HostConfig.Memory}}' "$(rp_compose ps -q "$1")"; }
+read -r api_nano api_mem <<<"$(limits_of api)"
+read -r worker_nano worker_mem <<<"$(limits_of worker-a)"
+[ -n "${api_nano:-}" ] && [ -n "${worker_nano:-}" ] || failed "cannot read the API and worker container limits"
+API_CPUS="$(cpus_label "$api_nano")" API_MEMORY="$(mem_label "$api_mem")"
+WORKER_CPUS="$(cpus_label "$worker_nano")" WORKER_MEMORY="$(mem_label "$worker_mem")"
+NFR2_CRITERION="$(nfr2_criterion "$NOTIFICATIONS_PER_SECOND" "$RAMP_SECONDS" "$STEADY_SECONDS" "$API_CPUS" "$API_MEMORY")"
+rp_log "API limits $API_CPUS CPUs / $API_MEMORY, worker limits $WORKER_CPUS CPUs / $WORKER_MEMORY; NFR-2 settings: $NFR2_CRITERION"
 
 # --- Gatling container helpers ---------------------------------------------------------------------------------
 # only the three keys the simulations need are passed (as names: the values stay out of argv)
@@ -194,7 +237,8 @@ for k in HARNESS_APPS_SHOP_SENDERAPIKEY HARNESS_APPS_SHOP_GRANTSECRET HARNESS_AP
     export "$k=$val"
     GATLING_ENV+=(-e "$k")
 done
-for v in LOAD_DEVICES LOAD_NOTIFICATIONS_PER_SECOND LOAD_RAMP LOAD_STEADY LOAD_BURST_SIZE LOAD_BURST_PER_SECOND LOAD_APP_ID; do
+for v in LOAD_DEVICES LOAD_NOTIFICATIONS_PER_SECOND LOAD_RAMP LOAD_STEADY LOAD_BURST_SIZE LOAD_BURST_PER_SECOND \
+    LOAD_BURST_WARMUP LOAD_APP_ID; do
     [ -n "${!v:-}" ] && GATLING_ENV+=(-e "$v=${!v}")
 done
 gexec() { rp_compose exec -T ${GATLING_ENV[@]+"${GATLING_ENV[@]}"} gatling "$@"; }
@@ -228,7 +272,12 @@ cpu_sampler() {
 
 ENTRIES=()
 ALL_PASSED=1
-CONFIG_JSON="{\"apiCpus\":2,\"apiMemory\":\"1g\",\"apiPool\":$API_POOL,\"workers\":$WORKERS,\"workerConcurrency\":$WORKER_CONCURRENCY,\"workerPool\":$WORKER_POOL,\"workerCpus\":\"${LOAD_WORKER_CPUS:-unlimited}\",\"workerMemory\":\"${LOAD_WORKER_MEMORY:-unlimited}\"}"
+CONFIG_JSON="{\"notificationsPerSecond\":$NOTIFICATIONS_PER_SECOND,\"eventsPerSecond\":$((NOTIFICATIONS_PER_SECOND * 2))"
+CONFIG_JSON="$CONFIG_JSON,\"rampSeconds\":$RAMP_SECONDS,\"steadySeconds\":$STEADY_SECONDS,\"devices\":$DEVICES"
+CONFIG_JSON="$CONFIG_JSON,\"burstSize\":$BURST_SIZE,\"burstPerSecond\":$BURST_PER_SECOND,\"burstWarmUpSeconds\":$WARMUP_SECONDS"
+CONFIG_JSON="$CONFIG_JSON,\"apiCpus\":\"$API_CPUS\",\"apiMemory\":\"$API_MEMORY\",\"apiPool\":$API_POOL,\"workers\":$WORKERS"
+CONFIG_JSON="$CONFIG_JSON,\"workerConcurrency\":$WORKER_CONCURRENCY,\"workerPool\":$WORKER_POOL"
+CONFIG_JSON="$CONFIG_JSON,\"workerCpus\":\"$WORKER_CPUS\",\"workerMemory\":\"$WORKER_MEMORY\",\"nfr2Criterion\":$NFR2_CRITERION}"
 
 # run_gatling <name> <simulation class> <expected assertion count> <skip ramp seconds>
 # Sets SIM_RC, SIM_REASON, SIM_ASSERTIONS, SIM_CPU (used for INVALID), SIM_CPU_INJECTION, SIM_CPU_STEADY
@@ -301,7 +350,7 @@ if [ "$SIMULATION" = burst ] || [ "$SIMULATION" = all ]; then
         probe --metrics $METRICS_URLS --expected "$BURST_SIZE" --timeout 20m --out /work/harness/build/load/burst.json
     sleep 3 # baseline sample before the first notification
     probe_alive || rp_warn "the drain probe is not running"
-    run_gatling burst FallbackBurstSimulation 2 0
+    run_gatling burst FallbackBurstSimulation 2 "$WARMUP_SECONDS"
     reason="$SIM_REASON"
     PROBE_JSON="null"
     if [ -n "$reason" ]; then

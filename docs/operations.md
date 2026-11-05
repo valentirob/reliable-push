@@ -283,7 +283,11 @@ was never the limit), workers without a limit unless stated, database on the sam
 2 CPUs / 1 GiB sustains 1,000 `POST /v1/events`/s (one event each) for 5 minutes after a 60 s ramp, alongside 500
 `POST /v1/notifications`/s (open model, offered load fixed), with ≤ 0.1 % failed requests, p95 ≤ 100 ms and
 p99 ≤ 250 ms per request group (`register`, `events`); a run whose generator averages more than 90 % CPU is `INVALID`,
-not passed. Results:
+not passed. Only an `ingest` entry of `harness/build/load/summary.json` with `"status": "PASSED"` **and**
+`"config": {"nfr2Criterion": true}` validates NFR-2: `load.sh` sets the flag only when the run used the criterion's
+settings (≥ 1,000 events/s, ≥ 500 notifications/s, 60 s ramp, ≥ 300 s steady, API container limited to 2 CPUs / 1g,
+read from the container); shorter or slower runs still pass or fail their own assertions but prove nothing about
+NFR-2. Results:
 
 | API pool | register p95 / p99 | events p95 / p99 | failed | API CPU avg / max | API memory (RSS) |
 |---|---|---|---|---|---|
@@ -336,11 +340,13 @@ with `api.resources`: add the worker's requests.
 **Reproducing** (from the repository root; results land in `harness/build/load/summary.json`):
 
 - NFR-2 rows: `./scripts/load.sh --simulation ingest --api-pool 5` (and `10`, `20`); the defaults implement the
-  criterion.
+  criterion (`nfr2Criterion: true` in `summary.json`).
 - Arrival-paced burst rows: `LOAD_RAMP=10s LOAD_STEADY=50s ./scripts/load.sh --simulation all --worker-concurrency 200
-  --worker-pool 20`, with the row's `--worker-concurrency` / `--worker-pool` (add `--workers 2` for two workers). The
-  short ingest warms the API first: `--simulation burst` alone on a freshly started stack currently fails its own
-  p99 ≤ 250 ms assertion (cold JIT, 400-460 ms) and then reports no drain figures.
+  --worker-pool 20`, with the row's `--worker-concurrency` / `--worker-pool` (add `--workers 2` for two workers)
+  (`nfr2Criterion: false` there: the ingest is shortened). `--simulation burst` alone also works on a freshly started
+  stack: the burst is preceded by a warm-up (`LOAD_BURST_WARMUP`, default 30 s, ramping up to the burst rate under the
+  request name `notify-warm-up`, not asserted; its notifications fall due after 60 minutes), so the cold JIT no longer
+  fails the measured `notify` p99 assertion.
 - "Backlog due at once" table (30,000- and 60,000-row runs): **not reproducible with `load.sh`
   alone**: they come from pausing the worker container by hand. Run the arrival-paced command (with
   `LOAD_BURST_SIZE=60000` for the 60,000-row runs) and, in a second shell: when `load.sh` prints

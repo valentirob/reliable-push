@@ -16,7 +16,8 @@ public record LoadConfig(
         Duration ramp,
         Duration steady,
         int burstSize,
-        int burstPerSecond) {
+        int burstPerSecond,
+        Duration burstWarmUp) {
 
     public static LoadConfig fromEnv(Map<String, String> env) {
         LoadConfig c = parse(env);
@@ -39,7 +40,8 @@ public record LoadConfig(
                 duration(env, "LOAD_RAMP", Duration.ofSeconds(60)),
                 duration(env, "LOAD_STEADY", Duration.ofSeconds(300)),
                 positiveInt(env, "LOAD_BURST_SIZE", 30000),
-                positiveInt(env, "LOAD_BURST_PER_SECOND", 1500));
+                positiveInt(env, "LOAD_BURST_PER_SECOND", 1500),
+                duration(env, "LOAD_BURST_WARMUP", Duration.ofSeconds(30)));
     }
 
     private static String required(Map<String, String> env, String name) {
@@ -109,6 +111,7 @@ public record LoadConfig(
     public String toString() {
         return "LoadConfig[apiUrl=" + apiUrl + ", appId=" + appId + ", devices=" + devices
                 + ", notificationsPerSecond=" + notificationsPerSecond + ", ramp=" + ramp + ", steady=" + steady
-                + ", burstSize=" + burstSize + ", burstPerSecond=" + burstPerSecond + ", secrets=<redacted>]";
+                + ", burstSize=" + burstSize + ", burstPerSecond=" + burstPerSecond + ", burstWarmUp=" + burstWarmUp
+                + ", secrets=<redacted>]";
     }
 }
