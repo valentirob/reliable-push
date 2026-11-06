@@ -111,6 +111,17 @@ final class TokenStoreTests: XCTestCase {
         guard case .registered = store.load() else { return XCTFail() }
     }
 
+    func testKeychainFailureWarnsWithStatusButLockedKeychainDoesNot() {
+        XCTAssertTrue(store.save(registration()))
+        secrets.force(.unavailable) // errSecInteractionNotAllowed: expected before the first unlock, no WARN
+        guard case .unavailable = store.load() else { return XCTFail() }
+        XCTAssertTrue(box.messages.isEmpty, "\(box.messages)")
+        secrets.force(.failed(-34018)) // errSecMissingEntitlement: a misconfigured access group
+        guard case .unavailable = store.load() else { return XCTFail() }
+        XCTAssertEqual(box.messages, ["event=token.unavailable status=-34018"])
+        XCTAssertEqual(state.deviceId, "dev-1", "never cleared")
+    }
+
     func testSaveRejectsUnparseableTokenWithoutWriting() {
         XCTAssertFalse(store.save(registration("nope")))
         XCTAssertNil(state.deviceId)

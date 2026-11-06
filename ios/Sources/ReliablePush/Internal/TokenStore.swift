@@ -32,7 +32,11 @@ final class TokenStore: Sendable {
 
     func load() -> TokenLoad {
         switch secrets.read(account: appId) {
-        case .unavailable, .failed:
+        case .unavailable:
+            return .unavailable
+        case .failed(let status):
+            // not "locked" (that is .unavailable): e.g. -34018, the access group is missing from the entitlements
+            SDKLog.warn("token.unavailable", ["status": "\(status)"])
             return .unavailable
         case .missing:
             // E.g. a restored backup: defaults came back, the ThisDeviceOnly item did not.

@@ -21,6 +21,19 @@ final class SDKLogTests: XCTestCase {
         XCTAssertEqual(box.messages, ["warn:event=x.y deviceId=d1"])
     }
 
+    /// R19: low-cardinality, non-personal keys are public, so a release-build WARN keeps its reason; the rest is private.
+    func testPublicAndPrivateFields() {
+        let fields: KeyValuePairs<String, String> = [
+            "trackingId": "t1", "deviceId": "d1", "reason": "r", "status": "429", "count": "2", "outcome": "LATE",
+            "type": "READ", "call": "register", "retryAfter": "60", "file": "flush.lock", "token": "SECRET",
+        ]
+        let parts = SDKLog.format("x.y", fields)
+        XCTAssertEqual(parts.pub, "event=x.y trackingId=t1 deviceId=d1 reason=r status=429 count=2 outcome=LATE type=READ call=register")
+        XCTAssertEqual(parts.priv, "retryAfter=60 file=flush.lock")
+        XCTAssertEqual(parts.all, "event=x.y trackingId=t1 deviceId=d1 reason=r status=429 count=2 outcome=LATE type=READ "
+                       + "call=register retryAfter=60 file=flush.lock")
+    }
+
     func testReleaseLoggingOnlyWarnAndAbove() {
         let box = WarnBox()
         SDKLog.sink = { level, m in box.add("\(level):\(m)") }

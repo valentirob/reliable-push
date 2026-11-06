@@ -3,9 +3,11 @@ import os
 
 /// The SDK logger: unified logging, subsystem `io.reliablepush`, category `ReliablePush` (`os_log`, see `log`),
 /// message `event=<name> key=value…` (fields in call order). WARN is written at `.error`, INFO at `.info`; debug and
-/// info only when `debug` is true (default: `DEBUG` builds). Fields whose key names a token, a user id or notification
-/// content are never written. Callers still must not pass such values under other names. Values are logged `privacy: .private` unless the key is
-/// `trackingId` or `deviceId` (the only public fields).
+/// info only when `debug` is true (default: `DEBUG` builds).
+///
+/// Fields whose key names a token, a user id or notification content are never written; callers still must not pass
+/// such values under other names. Public (R19): `trackingId`, `deviceId` and the low-cardinality, non-personal
+/// `reason`, `status`, `count`, `outcome`, `type`, `call`. Every other field is logged `private`.
 enum SDKLog {
     enum Level: Sendable { case debug, info, warn }
 
@@ -45,6 +47,14 @@ enum SDKLog {
     private static func emit(_ level: Level, _ event: String, _ fields: KeyValuePairs<String, String>) {
         let snapshot = state.withLock { $0 }
         if level != .warn && !snapshot.debug { return }
+        let parts = format(event, fields)
+        snapshot.sink?(level, parts.all)
+        let type: OSLogType = level == .warn ? .error : level == .info ? .info : .debug
+        os_log("%{public}@ %{private}@", log: log, type: type, parts.pub as NSString, parts.priv as NSString)
+    }
+
+    /// The public part (`event=` and the public fields), the private part, and the whole message (for the sink).
+    static func format(_ event: String, _ fields: KeyValuePairs<String, String>) -> (pub: String, priv: String, all: String) {
         var pub = "event=" + event
         var all = pub
         var priv = ""
@@ -54,16 +64,14 @@ enum SDKLog {
             case "token", "idtoken", "id_token", "devicetoken", "device_token", "authorization",
                  "userid", "user_id", "user", "title", "body":
                 continue
-            case "trackingid", "deviceid":
+            case "trackingid", "deviceid", "reason", "status", "count", "outcome", "type", "call":
                 pub += " " + pair
             default:
                 priv += priv.isEmpty ? pair : " " + pair
             }
             all += " " + pair
         }
-        snapshot.sink?(level, all)
-        let type: OSLogType = level == .warn ? .error : level == .info ? .info : .debug
-        os_log("%{public}@ %{private}@", log: log, type: type, pub as NSString, priv as NSString)
+        return (pub, priv, all)
     }
 }
 
