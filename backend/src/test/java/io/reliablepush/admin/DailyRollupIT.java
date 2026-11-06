@@ -242,6 +242,48 @@ class DailyRollupIT extends PostgresTestBase {
         assertThat(events("rollup.completed")).isEmpty();
     }
 
+    @Autowired
+    AdminKeys adminKeys;
+
+    @Autowired
+    io.reliablepush.apps.ReliablePushProperties reliablePushProperties;
+
+    @Autowired
+    io.reliablepush.apps.AppRegistry appRegistry;
+
+    @Test
+    void failureIsLoggedWithItsStackTraceAndRolledBack() {
+        DailyStatsRepository failing = new DailyStatsRepository(jdbc, appRegistry, clock) {
+            private int calls;
+
+            @Override
+            void upsert(LocalDate day) {
+                if (++calls == 2) {
+                    throw new IllegalStateException("boom");
+                }
+                super.upsert(day);
+            }
+        };
+        DailyRollupJob broken = new DailyRollupJob(
+                adminKeys, adminProperties, reliablePushProperties, failing, transactions, jdbc, clock);
+
+        try (EventCapture errors = new EventCapture(DailyRollupJob.class.getName())) {
+            assertThat(broken.run()).isZero();
+
+            List<LogEvent> failed = events("rollup.failed");
+            assertThat(failed).hasSize(1);
+            assertThat(failed.get(0).getLevel()).isEqualTo(org.apache.logging.log4j.Level.WARN);
+            assertThat(EventCapture.data(failed.get(0))).containsEntry("reason", "IllegalStateException");
+            assertThat(errors.events()).singleElement().satisfies(e -> {
+                assertThat(e.getLevel()).isEqualTo(org.apache.logging.log4j.Level.ERROR);
+                assertThat(e.getThrown()).isInstanceOf(IllegalStateException.class).hasMessage("boom");
+            });
+        }
+        // the first day written before the failure is rolled back with it
+        assertThat(jdbc.sql("select count(*) from daily_stats").query(Long.class).single()).isZero();
+        assertThat(events("rollup.completed")).isEmpty();
+    }
+
     @Test
     void oldRollupsDeleted() {
         jdbc.sql("""

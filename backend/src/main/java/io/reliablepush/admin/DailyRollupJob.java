@@ -7,6 +7,8 @@ import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -24,6 +26,8 @@ public class DailyRollupJob {
 
     /** Same constant on every worker: the transaction-scoped advisory lock of the rollup. */
     static final long LOCK_KEY = 4_242_001L;
+
+    private static final Logger LOG = LogManager.getLogger(DailyRollupJob.class);
 
     private final AdminKeys keys;
     private final AdminProperties properties;
@@ -87,6 +91,8 @@ public class DailyRollupJob {
             return count;
         } catch (RuntimeException e) {
             EventLog.warn("rollup.failed", Map.of("reason", e.getClass().getSimpleName()));
+            // the rollup SQL carries no personal data (app ids, days, counts), so the stack trace is safe to log
+            LOG.error("daily rollup failed and was rolled back", e);
             return 0;
         }
     }

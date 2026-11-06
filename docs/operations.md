@@ -205,7 +205,7 @@ below, all top-level. ThreadContext entries `trace.id` and `rp.*` are top-level;
 | `retention.purged` | Retention job finished | `count` (also 0) |
 | `retention.skipped` (WARN) | Retention did not run: admin is enabled, the rollup schedule is on and either `daily_stats` has no row computed in the last 20 hours, or a rollup was still running after the 30-minute wait | `reason` = `rollup_missing` or `rollup_running` |
 | `rollup.completed` | `DailyRollupJob` wrote the daily statistics | `count` = days written (not logged when another worker held the lock) |
-| `rollup.failed` (WARN) | The rollup failed and rolled back | `reason` = exception class name |
+| `rollup.failed` (WARN) | The rollup failed and rolled back; the stack trace follows at ERROR from logger `io.reliablepush.admin.DailyRollupJob` (the rollup SQL carries no personal data) | `reason` = exception class name |
 
 Webhook failure `reason` codes: `http_<status>`, `timeout`, `io_error`, `interrupted`, `client_error`.
 
