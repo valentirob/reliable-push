@@ -31,7 +31,7 @@ function appBlock(o, showName, first) {
 }
 
 export function render(root, ctx) {
-  const appSel = el('select', { id: 'app-select' }, option('', 'All apps'), ctx.me.apps.map((a) => option(a)));
+  const appSel = el('select', { id: 'app' }, option('', 'All apps'), ctx.me.apps.map((a) => option(a)));
   const winSel = el('select', { id: 'window' }, option('1h', '1 hour'), option('24h', '24 hours'), option('7d', '7 days'));
   winSel.value = '24h';
   const pause = el('button', { id: 'pause', type: 'button', 'aria-pressed': 'false', text: 'Pause refresh' });

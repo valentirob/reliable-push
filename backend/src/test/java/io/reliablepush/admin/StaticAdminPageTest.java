@@ -93,4 +93,27 @@ class StaticAdminPageTest {
         assertThat(dom).contains("textContent");
         assertThat(dom).doesNotContain("innerHTML");
     }
+
+    @Test
+    void assetUrlsAreAbsoluteUnderAdmin() {
+        // /admin is forwarded to index.html without a redirect, so a relative URL would resolve outside /admin/**.
+        var m = Pattern.compile("\\s(?:href|src)=\"([^\"]*)\"").matcher(read("index.html"));
+        int found = 0;
+        while (m.find()) {
+            String url = m.group(1);
+            if (url.startsWith("#")) continue;
+            assertThat(url).startsWith("/admin/");
+            found++;
+        }
+        assertThat(found).isGreaterThanOrEqualTo(2);
+    }
+
+    @Test
+    void stableElementIdsExist() {
+        String all = ALL.stream().map(StaticAdminPageTest::read).collect(Collectors.joining("\n"));
+        for (String id : List.of("key", "signin", "signout", "app", "window", "tiles", "backlog", "search-user",
+                "search-go", "results", "timeline", "show-payload", "payload")) {
+            assertThat(all).as("id " + id).containsAnyOf("id=\"" + id + "\"", "id: '" + id + "'", "id: first ? '" + id + "'");
+        }
+    }
 }

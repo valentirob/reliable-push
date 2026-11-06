@@ -163,4 +163,24 @@ class AdminApiIT extends PostgresTestBase {
         assertThat(css.getStatusCode().value()).isEqualTo(200);
         assertThat(css.getHeaders().getContentType().toString()).startsWith("text/css");
     }
+
+    @Test
+    void assetsReferencedByPageAtAdminWithoutSlashResolve() {
+        String html = get("/admin", "X-None", null).getBody();
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("\\s(?:href|src)=\"([^\"]+)\"").matcher(html);
+        int fetched = 0;
+        while (m.find()) {
+            String url = m.group(1);
+            if (url.startsWith("#")) continue;
+            // the browser resolves against http://host/admin: a relative URL would land outside /admin/
+            String resolved = url.startsWith("/") ? url : "/" + url;
+            ResponseEntity<String> response = get(resolved, "X-None", null);
+            assertThat(url).startsWith("/admin/");
+            assertThat(response.getStatusCode().value()).as(url).isEqualTo(200);
+            String type = response.getHeaders().getContentType().toString();
+            assertThat(type).as(url).matches(url.endsWith(".css") ? "text/css.*" : ".*(java|ecma)script.*");
+            fetched++;
+        }
+        assertThat(fetched).isEqualTo(2);
+    }
 }

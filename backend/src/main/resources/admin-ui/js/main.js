@@ -8,7 +8,7 @@ import * as search from './views/search.js';
 import * as notification from './views/notification.js';
 import * as devices from './views/devices.js';
 
-const root = document.getElementById('app');
+const root = document.getElementById('view');
 const nav = document.getElementById('nav');
 const signout = document.getElementById('signout');
 const whoami = document.getElementById('whoami');
