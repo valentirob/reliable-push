@@ -74,7 +74,8 @@
 		0E5A0000000000000000A042 /* Exceptions for "ReliablePushSampleNSE" folder in "ReliablePushSampleNSE" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
-				Info.plist,
+				"Info-Debug.plist",
+				"Info-Release.plist",
 				ReliablePushSampleNSE.entitlements,
 			);
 			target = 0E5A0000000000000000A102 /* ReliablePushSampleNSE */;
@@ -489,7 +490,7 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = ReliablePushSampleNSE/ReliablePushSampleNSE.entitlements;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = ReliablePushSampleNSE/Info.plist;
+				INFOPLIST_FILE = "ReliablePushSampleNSE/Info-Debug.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = ReliablePushSampleNSE;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -507,7 +508,7 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = ReliablePushSampleNSE/ReliablePushSampleNSE.entitlements;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = ReliablePushSampleNSE/Info.plist;
+				INFOPLIST_FILE = "ReliablePushSampleNSE/Info-Release.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = ReliablePushSampleNSE;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
