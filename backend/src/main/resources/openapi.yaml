@@ -372,6 +372,55 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
+  /v1/admin/stats/daily:
+    get:
+      tags: [admin]
+      operationId: adminDailyStats
+      summary: Daily counts and rates of one app
+      description: |
+        One entry per UTC day of `[from, to)` (dates; default: the last 30 days up to and including today; span at
+        most 400 days), oldest first. Days older than the rollup window (7 days, fewer when `retention-days` is smaller)
+        come from the stored nightly rollups (`live` false); the window days and today are computed from the
+        notifications now (`live` true, still changing). A day without a stored rollup is omitted. Rates are as in
+        `/v1/admin/overview`.
+      security:
+        - AdminKey: []
+      parameters:
+        - name: app
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: The days of the app.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminDailyStats'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
   /v1/admin/notifications:
     get:
       tags: [admin]
@@ -766,6 +815,64 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/AdminDevice'
+
+    AdminDailyStats:
+      type: object
+      required: [appId, days]
+      properties:
+        appId:
+          type: string
+        days:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminDailyDay'
+
+    AdminDailyDay:
+      type: object
+      required: [day, registered, cancelled, delivered, read, deliveredIos, deliveredAndroid, fallbackTriggered,
+                 fallbackFailed, fallbackExpired, deliveryP50Ms, deliveryP95Ms, deliveryRate, readRate, fallbackRate,
+                 live]
+      properties:
+        day:
+          type: string
+          format: date
+        registered:
+          type: integer
+        cancelled:
+          type: integer
+        delivered:
+          type: integer
+        read:
+          type: integer
+        deliveredIos:
+          type: integer
+        deliveredAndroid:
+          type: integer
+        fallbackTriggered:
+          type: integer
+        fallbackFailed:
+          type: integer
+        fallbackExpired:
+          type: integer
+        deliveryP50Ms:
+          type: integer
+          format: int64
+          nullable: true
+        deliveryP95Ms:
+          type: integer
+          format: int64
+          nullable: true
+        deliveryRate:
+          type: number
+          nullable: true
+        readRate:
+          type: number
+          nullable: true
+        fallbackRate:
+          type: number
+          nullable: true
+        live:
+          type: boolean
 
     AdminOverviews:
       type: object

@@ -64,6 +64,10 @@ says so (minutes for `worker.lease` and `fallback.backoff`, days for `device-tok
 | `worker.backlog-refresh-interval` | `30s` | Optional; how often `rp_due_backlog` is recomputed |
 | `retention-days` | `30` | At least 1. Closed notifications older than this are deleted daily |
 | `retention.cron` | `0 17 3 * * *` | Spring cron expression (six fields, always UTC) of the daily retention run (worker role); `-` disables the schedule |
+| `admin.keys[]` | none (admin disabled) | Admin API keys of the ops dashboard: `{id, key-sha256, apps, permissions}`; see `security.md`. With no key, `/v1/admin/**` and `/admin/**` answer 404 |
+| `admin.rate-limit-per-minute` | `600` | At least 1. Admin requests per minute per admin key and instance |
+| `admin.rollup-retention-days` | `400` | At least 1. `daily_stats` rows older than this are deleted by the rollup |
+| `admin.rollup.cron` | `0 7 3 * * *` | Spring cron expression (UTC) of `DailyRollupJob` (worker role, runs only when admin is enabled); `-` disables the schedule and the retention guard |
 | `testing.minute-duration` | unset (1 minute = 60 s) | Fast clock, e.g. `1s`. Accepted only with the `e2e` or `demo` profile, must be positive |
 
 Per app, under `apps.<appId>` (the app id matches `[A-Za-z0-9][A-Za-z0-9_-]{0,63}`; at least one app is required, a
@@ -196,6 +200,9 @@ below, all top-level. ThreadContext entries `trace.id` and `rp.*` are top-level;
 | `fallback.failed` (WARN) | Final failure or attempts exhausted, `FALLBACK_FAILED` | `reason`, `rp.attempt`, `event.duration` |
 | `fallback.expired` (WARN) | Closed as `FALLBACK_EXPIRED` | `reason` = `trigger_window_passed`, `next_retry_after_trigger_window` or `app_not_configured` |
 | `retention.purged` | Retention job finished | `count` (also 0) |
+| `retention.skipped` (WARN) | Retention did not run: admin is enabled, the rollup schedule is on and `daily_stats` has no row computed in the last 20 hours | `reason` = `rollup_missing` |
+| `rollup.completed` | `DailyRollupJob` wrote the daily statistics | `count` = days written (not logged when another worker held the lock) |
+| `rollup.failed` (WARN) | The rollup failed and rolled back | `reason` = exception class name |
 
 Webhook failure `reason` codes: `http_<status>`, `timeout`, `io_error`, `interrupted`, `client_error`.
 
@@ -215,6 +222,14 @@ Regenerate the list from the code with
 `retention-days`, in chunks of 1,000 rows, each chunk its own short transaction; events go with them (`ON DELETE
 CASCADE`). Notifications that are not closed are never deleted, whatever their age. Two replicas running it simultaneously
 is harmless. It logs `retention.purged` with the count. Devices are not purged by this job.
+
+Ordering with the rollup: `DailyRollupJob` (worker role, `admin.rollup.cron`, 03:07 UTC by default) runs before retention so
+daily trends survive the notification retention. It recomputes the last `min(7, retention-days)` complete UTC days of every
+configured app (zero rows included) under a PostgreSQL advisory lock (a second worker finds it taken and does nothing), deletes
+`daily_stats` rows older than `admin.rollup-retention-days` and logs `rollup.completed` (or WARN `rollup.failed`). When admin
+is enabled and `admin.rollup.cron` is not `-`, `RetentionJob` first requires a `daily_stats` row computed in the last 20 hours; otherwise
+it deletes nothing and logs WARN `retention.skipped` with `reason=rollup_missing`, and the next night retries both. With
+admin disabled, or the rollup schedule `-`, retention behaves as before.
 
 ## Scaling and capacity
 

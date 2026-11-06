@@ -1,14 +1,19 @@
 package io.reliablepush.admin;
 
+import io.reliablepush.apps.ReliablePushProperties;
 import io.reliablepush.notifications.NotificationState;
 import io.reliablepush.notifications.PageCursor;
 import io.reliablepush.shared.web.BadParameterException;
 import io.reliablepush.shared.web.InvalidRequestException;
 import io.reliablepush.shared.web.NotFoundException;
 import jakarta.servlet.http.HttpServletRequest;
+import java.time.Clock;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeParseException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
@@ -39,10 +44,113 @@ class AdminController {
 
     private final AdminQueries queries;
     private final OverviewQuery overviews;
+    private final DailyStatsRepository dailyStats;
+    private final ReliablePushProperties properties;
+    private final Clock clock;
 
-    AdminController(AdminQueries queries, OverviewQuery overviews) {
+    AdminController(
+            AdminQueries queries,
+            OverviewQuery overviews,
+            DailyStatsRepository dailyStats,
+            ReliablePushProperties properties,
+            Clock clock) {
         this.queries = queries;
         this.overviews = overviews;
+        this.dailyStats = dailyStats;
+        this.properties = properties;
+        this.clock = clock;
+    }
+
+    private static final int DEFAULT_TREND_DAYS = 30;
+    private static final int MAX_TREND_DAYS = 400;
+
+    record TrendDay(
+            String day,
+            int registered,
+            int cancelled,
+            int delivered,
+            int read,
+            int deliveredIos,
+            int deliveredAndroid,
+            int fallbackTriggered,
+            int fallbackFailed,
+            int fallbackExpired,
+            Long deliveryP50Ms,
+            Long deliveryP95Ms,
+            Double deliveryRate,
+            Double readRate,
+            Double fallbackRate,
+            boolean live) {}
+
+    record Trend(String appId, List<TrendDay> days) {}
+
+    /**
+     * Stored days older than the rollup window, then the window days and today computed live (spec 4); days without a
+     * stored row (before the first rollup) are omitted.
+     */
+    @GetMapping("/stats/daily")
+    Trend dailyStats(
+            HttpServletRequest request,
+            @RequestParam(required = false) String app,
+            @RequestParam(required = false) String from,
+            @RequestParam(required = false) String to) {
+        AdminPrincipal principal = principal(request);
+        String appId = visibleApp(principal, app);
+        LocalDate today = LocalDate.now(clock.withZone(ZoneOffset.UTC));
+        LocalDate parsedTo = parseDate("to", to);
+        LocalDate parsedFrom = parseDate("from", from);
+        LocalDate end = parsedTo != null ? parsedTo : today.plusDays(1);
+        LocalDate start = parsedFrom != null ? parsedFrom : end.minusDays(DEFAULT_TREND_DAYS);
+        if (!start.isBefore(end)) {
+            throw new BadParameterException("to", "must be after from");
+        }
+        if (java.time.temporal.ChronoUnit.DAYS.between(start, end) > MAX_TREND_DAYS) {
+            throw new BadParameterException("from", "span must not exceed " + MAX_TREND_DAYS + " days");
+        }
+        LocalDate liveFrom = today.minusDays(RollupWindow.width(properties.retentionDays()));
+        List<TrendDay> days = new ArrayList<>();
+        LocalDate storedEnd = end.isBefore(liveFrom) ? end : liveFrom;
+        if (start.isBefore(storedEnd)) {
+            dailyStats.range(appId, start, storedEnd).forEach(d -> days.add(trendDay(d, false)));
+        }
+        LocalDate liveStart = start.isAfter(liveFrom) ? start : liveFrom;
+        LocalDate liveEnd = end.isBefore(today.plusDays(1)) ? end : today.plusDays(1);
+        for (LocalDate day = liveStart; day.isBefore(liveEnd); day = day.plusDays(1)) {
+            days.add(trendDay(dailyStats.live(appId, day), true));
+        }
+        return new Trend(appId, days);
+    }
+
+    private static TrendDay trendDay(DailyStats d, boolean live) {
+        Counts c = d.counts();
+        return new TrendDay(
+                d.day().toString(),
+                c.registered(),
+                c.cancelled(),
+                c.delivered(),
+                c.read(),
+                d.deliveredIos(),
+                d.deliveredAndroid(),
+                c.fallbackTriggered(),
+                c.fallbackFailed(),
+                c.fallbackExpired(),
+                d.deliveryP50Ms(),
+                d.deliveryP95Ms(),
+                Rates.of(c.delivered(), c),
+                Rates.of(c.read(), c),
+                Rates.of(c.fallbackTriggered(), c),
+                live);
+    }
+
+    private static LocalDate parseDate(String field, String value) {
+        if (value == null) {
+            return null;
+        }
+        try {
+            return LocalDate.parse(value);
+        } catch (DateTimeParseException e) {
+            throw new BadParameterException(field, "must be a date (YYYY-MM-DD)");
+        }
     }
 
     @GetMapping("/overview")
