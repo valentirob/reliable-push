@@ -8,6 +8,14 @@ Everything left after `v0.1.0` is in [TODO.md](TODO.md): each item says why it i
 unblocks it. Agents: remind the maintainer of its section 1 (real APNs and the locked-device check, real FCM, Maven
 Central) at the start of a session.
 
+## 2026-11-06 (8) — Claude Code — docs-sync rule
+
+- **Done:** new always-on rule `.agents/rules/docs-sync.md` (maintainer request): every change updates the docs, the
+  Mermaid diagrams, the at-a-glance SVG and PNG and `docs/presentation.html` in the same branch. Linked from
+  `AGENTS.md` (rules index and working agreement), `CONTRIBUTING.md` and the `implement-task` skill (step 8).
+- **State:** process docs only; overview, picture and presentation checked, no change needed.
+- **Next:** the maintainer picks the 0.2.0 scope ([TODO.md](TODO.md) 5.1).
+
 ## 2026-11-06 (7) — Claude Code — Dependabot PRs and release 0.1.1
 
 - **Done:**

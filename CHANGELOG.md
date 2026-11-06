@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here. Versions follow [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+### Process
+
+- New rule `.agents/rules/docs-sync.md`: every change updates the docs, the diagrams and the presentation in the same
+  branch.
+
 ## 0.1.1 — 2026-11-06
 
 Maintenance release: documentation and dependency updates. No change to the API, the SDK behaviour or the database.
