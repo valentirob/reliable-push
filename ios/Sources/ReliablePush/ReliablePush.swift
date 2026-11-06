@@ -98,8 +98,10 @@ public enum ReliablePush {
         }
     }
 
-    /// The backend's id for this installation, or `nil` when not configured or not registered.
-    public static var deviceId: String? { SDK.current?.env.state.deviceId }
+    /// The backend's id for this installation, or `nil` when not configured or not registered. Read from the Keychain
+    /// record, so it is `nil` after a backup restore or a device migration (the record is `ThisDeviceOnly`); while the
+    /// Keychain is locked, the last known id.
+    public static var deviceId: String? { SDK.current?.deviceId }
 
     // MARK: Internal (also the test entry points)
 

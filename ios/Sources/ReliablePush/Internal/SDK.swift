@@ -216,14 +216,18 @@ final class SDK: Sendable {
         return confirmed
     }
 
-    /// Disk-only registration check: a readable token, or (Keychain locked) the cached device id.
-    var isRegistered: Bool {
+    /// The registered device id from the Keychain record (I2: the `SharedState` cache may be a restored backup's), or
+    /// the cached one while the Keychain is unavailable. Disk only.
+    var deviceId: String? {
         switch tokens.load() {
-        case .registered: return true
-        case .notRegistered: return false
-        case .unavailable: return env.state.deviceId != nil
+        case .registered(let id, _): return id
+        case .notRegistered: return nil
+        case .unavailable: return env.state.deviceId
         }
     }
+
+    /// Disk-only registration check: a readable token, or (Keychain locked) the cached device id.
+    var isRegistered: Bool { deviceId != nil }
 
     /// Queues `type` for `trackingId` (disk only). False with WARN `tracking.not_registered` when not registered.
     func record(_ trackingId: String, _ type: EventType) -> Bool {

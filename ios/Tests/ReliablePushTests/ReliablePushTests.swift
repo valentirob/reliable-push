@@ -118,6 +118,27 @@ final class ReliablePushTests: XCTestCase {
         guard case .notRegistered = fx.tokens().load() else { return XCTFail("record survived") }
     }
 
+    func testRestoredBackupWithoutKeychainRecordIsNotRegisteredAfterConfigure() async throws {
+        // the App Group defaults (config, device id) came back from a backup, the ThisDeviceOnly Keychain record did not
+        fx.storeConfig()
+        fx.state.deviceId = "dev1"
+        try configure()
+        await awaitFlush()
+        XCTAssertNil(ReliablePush.deviceId, "not registered after a restore")
+        XCTAssertNil(fx.state.deviceId, "the stale cache is dropped")
+    }
+
+    func testDeviceIdFollowsTheKeychainRecordNotTheCache() async throws {
+        try configure()
+        await awaitFlush()
+        fx.register(deviceId: "dev1")
+        fx.state.deviceId = "stale" // a SharedState cache differing from the Keychain record loses
+        XCTAssertEqual(ReliablePush.deviceId, "dev1")
+        fx.secrets.force(.unavailable) // Keychain locked: the cache is the best answer
+        XCTAssertEqual(ReliablePush.deviceId, "stale")
+        fx.secrets.force(nil)
+    }
+
     // MARK: register / logout
 
     func testRegisterStoresTokenAndCallsBackOnMain() async throws {

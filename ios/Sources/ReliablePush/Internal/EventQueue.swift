@@ -142,7 +142,7 @@ final class EventQueue: Sendable {
 
     private func write(_ items: [Entry]) -> Bool {
         do {
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try FileProtection.createDirectory(directory)
             let data = try JSONSerialization.data(withJSONObject: items.map(\.json))
             try data.write(to: fileURL, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
             return true

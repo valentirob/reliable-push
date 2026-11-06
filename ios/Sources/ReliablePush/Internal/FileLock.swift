@@ -78,12 +78,57 @@ final class FileLock: Sendable {
         return Held(fd: fd)
     }
 
+    /// Opens (creating it and its directory if needed) and sets the protection class every time: a lock file left by
+    /// an earlier version may have the host app's default class (I1).
     private func openFile() -> Int32 {
         var fd = open(url.path, O_CREAT | O_RDWR | O_CLOEXEC, 0o600)
         if fd < 0 {
-            try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try? FileProtection.createDirectory(url.deletingLastPathComponent())
             fd = open(url.path, O_CREAT | O_RDWR | O_CLOEXEC, 0o600)
         }
+        if fd >= 0 { FileProtection.apply(url) }
         return fd
+    }
+}
+
+/// Data Protection class of the queue directory and its lock files: `completeUntilFirstUserAuthentication`, the class
+/// of `events.json`, so an extension can open them while the device is locked (after the first unlock) even when the
+/// host app's default class is `complete` (I1).
+enum FileProtection {
+    /// Test seam: receives every request for the class instead of `FileManager.setAttributes`.
+    typealias Setter = @Sendable (_ path: String, _ attributes: [FileAttributeKey: Any]) throws -> Void
+
+    private static let setter = Locked<Setter?>(nil)
+
+    static var setterForTesting: Setter? {
+        get { setter.withLock { $0 } }
+        set { setter.withLock { $0 = newValue } }
+    }
+
+    static var attributes: [FileAttributeKey: Any] {
+        [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication]
+    }
+
+    /// Sets the class on an existing item. A refusal is not fatal: WARN `file.protection_failed`.
+    static func apply(_ url: URL) {
+        do {
+            if let s = setterForTesting {
+                try s(url.path, attributes)
+            } else {
+                try FileManager.default.setAttributes(attributes, ofItemAtPath: url.path)
+            }
+        } catch {
+            SDKLog.warn("file.protection_failed", ["file": url.lastPathComponent])
+        }
+    }
+
+    /// Creates the directory (and missing parents) with the class.
+    static func createDirectory(_ url: URL) throws {
+        if let s = setterForTesting {
+            try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+            try s(url.path, attributes)
+        } else {
+            try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true, attributes: attributes)
+        }
     }
 }
