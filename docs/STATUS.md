@@ -2,6 +2,20 @@
 
 Newest entry first. Updated at the end of every work session (see `.agents/skills/session-handoff/SKILL.md`).
 
+## 2026-11-06 (4) — Claude Code — release 0.1.0
+
+- **Done:** first release. `release/0.1.0` from `develop` set every component to `0.1.0` and added `CHANGELOG.md`; it was
+  merged into `main` (tag `v0.1.0`) and back into `develop`. `develop` is now `0.2.0-SNAPSHOT` (poms, Android
+  `VERSION_NAME` and `ReliablePush.VERSION`, iOS `ReliablePush.version`); the guides and `client-java/README.md` keep
+  pointing at the released `0.1.0`.
+- **State (verified on `release/0.1.0`):** `cd backend && ./mvnw -B verify -Pimage` OK; `./mvnw -B -pl harness,loadtest
+  -am verify` OK; `cd android && ./gradlew build` OK (release AAR 67,327 bytes); iOS package tests 108 run, 1 skipped, 0
+  failures; `./scripts/e2e.sh`: `17/17 passed`. The Android and iOS emulator/Simulator suites were not rerun for the
+  version-only change (last: `8/8 passed, 1 skipped` each on the cycle 3 tree).
+- **Next:** pick the next scope (none planned yet). Maintainer-only: publish the Android SDK to Maven Central (namespace
+  and signing key), real FCM / APNs delivery checks with the maintainer's credentials.
+- **Open:** as in (3): real-device push delivery unverified; plan 3 minors M7, M12 parked.
+
 ## 2026-11-06 (3) — Claude Code — `develop` (cycle 3 merged)
 
 - **Done:** `feature/cycle3-ios-sdk` merged into `develop` with `--no-ff` (`4e015d8`, merge line `E2E: 17/17 passed`,
