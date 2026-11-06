@@ -38,6 +38,14 @@ config:
   #       private-key-pem-ref: env:RP_DEVICE_KEY_K1
   #       public-key-pem-ref: env:RP_DEVICE_PUB_K1
   apps: {}
+  # Ops dashboard (/admin/): enabled iff at least one key is set. Store only the SHA-256 of each key
+  # (printf %s "$KEY" | shasum -a 256); apps: ["*"] = all apps; permissions: [payload] allows "Show payload".
+  # admin:
+  #   keys:
+  #     - id: ops
+  #       key-sha256: "<64 lowercase hex characters>"
+  #       apps: ["shop"]
+  #       permissions: [payload]
   # apps:
   #   shop:
   #     sender-api-key-sha256: "<64 hex characters>"
