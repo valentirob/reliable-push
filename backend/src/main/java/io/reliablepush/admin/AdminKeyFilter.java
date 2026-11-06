@@ -46,11 +46,11 @@ public class AdminKeyFilter extends OncePerRequestFilter {
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws ServletException, IOException {
-        response.setHeader(HttpHeaders.CACHE_CONTROL, "no-store");
         if (!keys.enabled()) {
-            problems.write(request, response, HttpStatus.NOT_FOUND, "Not Found", "The requested resource was not found.");
+            chain.doFilter(request, response); // nothing is mapped when disabled: the normal not-found handling answers
             return;
         }
+        response.setHeader(HttpHeaders.CACHE_CONTROL, "no-store");
         String key = request.getHeader(ADMIN_KEY_HEADER);
         if (key == null || key.isEmpty()) {
             reject(request, response, "missing_admin_key");

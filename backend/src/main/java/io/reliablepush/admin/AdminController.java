@@ -2,12 +2,14 @@ package io.reliablepush.admin;
 
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.List;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /** Read-only ops dashboard API. {@link AdminKeyFilter} has authenticated every request before it gets here. */
 @RestController
+@ConditionalOnProperty("reliable-push.admin.keys[0].id")
 @RequestMapping("/v1/admin")
 class AdminController {
 

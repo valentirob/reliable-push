@@ -7,11 +7,10 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
-import org.springframework.http.HttpStatus;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 /**
- * Gates the static dashboard page ({@code /admin} and below). Without configured admin keys it answers 404. Otherwise
+ * Gates the static dashboard page ({@code /admin} and below). Without configured admin keys it does nothing (no page is mapped, so it answers like an unknown path). Otherwise
  * it sets the security headers (spec section 5) and forwards {@code /admin} and {@code /admin/} to
  * {@code /admin/index.html}. The page itself needs no key: it holds none and calls the key-protected API.
  */
@@ -38,7 +37,7 @@ public class AdminPageFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws ServletException, IOException {
         if (!keys.enabled()) {
-            problems.write(request, response, HttpStatus.NOT_FOUND, "Not Found", "The requested resource was not found.");
+            chain.doFilter(request, response); // nothing is mapped when disabled: the normal not-found handling answers
             return;
         }
         response.setHeader("Content-Security-Policy", CSP);

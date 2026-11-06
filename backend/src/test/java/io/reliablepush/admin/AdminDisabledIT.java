@@ -2,7 +2,6 @@ package io.reliablepush.admin;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.jayway.jsonpath.JsonPath;
 import io.reliablepush.support.PostgresTestBase;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.ResponseEntity;
@@ -25,23 +24,29 @@ class AdminDisabledIT extends PostgresTestBase {
                 .toEntity(String.class);
     }
 
-    private static void assertNotFoundProblem(ResponseEntity<String> response) {
-        assertThat(response.getStatusCode().value()).isEqualTo(404);
-        assertThat(response.getHeaders().getContentType().toString()).startsWith("application/problem+json");
-        assertThat(JsonPath.<Integer>read(response.getBody(), "$.status")).isEqualTo(404);
-        assertThat(JsonPath.<String>read(response.getBody(), "$.title")).isEqualTo("Not Found");
+    /** Status, content type, caching header and body (with the path-dependent instance blanked) of a response. */
+    private static String fingerprint(ResponseEntity<String> response) {
+        assertThat(response.getHeaders().getCacheControl()).as("no Cache-Control").isNull();
+        String body = response.getBody().replaceAll("\"instance\":\"[^\"]*\"", "\"instance\":\"\"")
+                .replaceAll("No static resource [^.\"]*(\\.[a-z]+)?\\.", "No static resource X.");
+        return response.getStatusCode().value() + "|" + response.getHeaders().getContentType() + "|" + body;
     }
 
     @Test
-    void apiIs404WithAnyKeyOrNone() {
-        assertNotFoundProblem(get("/v1/admin/me", "test-admin-key-all"));
-        assertNotFoundProblem(get("/v1/admin/me", null));
+    void disabledSurfaceAnswersExactlyLikeAnUnknownPath() {
+        String expected = fingerprint(get("/v1/nope", null));
+        assertThat(expected).startsWith("404|application/problem+json");
+        assertThat(fingerprint(get("/nope.html", null))).isEqualTo(expected);
+
+        assertThat(fingerprint(get("/v1/admin/me", "test-admin-key-all"))).isEqualTo(expected);
+        assertThat(fingerprint(get("/v1/admin/me", null))).isEqualTo(expected);
+        assertThat(fingerprint(get("/admin/", null))).isEqualTo(expected);
+        assertThat(fingerprint(get("/admin", null))).isEqualTo(expected);
+        assertThat(fingerprint(get("/admin/index.html", null))).isEqualTo(expected);
     }
 
     @Test
-    void pageIs404() {
-        assertNotFoundProblem(get("/admin/", null));
-        assertNotFoundProblem(get("/admin", null));
-        assertNotFoundProblem(get("/admin/index.html", null));
+    void disabledSurfaceSetsNoSecurityHeaders() {
+        assertThat(get("/admin/", null).getHeaders().getFirst("Content-Security-Policy")).isNull();
     }
 }
