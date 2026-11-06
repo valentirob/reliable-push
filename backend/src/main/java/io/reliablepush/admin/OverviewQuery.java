@@ -41,6 +41,23 @@ class OverviewQuery {
         }
     }
 
+    /**
+     * The backlog per app. Open rows are exactly the rows with {@code due_at} set ({@code DISPATCHING} keeps it; every
+     * close clears it), so {@code due_at is not null} lets the partial index {@code notification_due} serve the query
+     * instead of a scan over the app's closed history (a {@code DELIVERED} row closed by {@code NOT_DELIVERED} keeps
+     * its state).
+     */
+    static final String BACKLOG = """
+            select app_id,
+                   count(*) filter (where state in ('PENDING', 'DELIVERED') and due_at > :now) as pending,
+                   count(*) filter (where state in ('PENDING', 'DELIVERED') and due_at <= :now) as due_unclaimed,
+                   count(*) filter (where state = 'DISPATCHING') as dispatching,
+                   min(due_at) filter (where state in ('PENDING', 'DELIVERED') and due_at <= :now) as oldest_due
+            from notification
+            where app_id = any(:apps) and due_at is not null and state in ('PENDING', 'DELIVERED', 'DISPATCHING')
+            group by app_id
+            """;
+
     record Now(int pending, int dueUnclaimed, int dispatching, Long oldestDueAgeSeconds) {}
 
     record Overview(
@@ -132,16 +149,7 @@ class OverviewQuery {
     private Map<String, Now> backlog(Collection<String> apps, Instant now) {
         Map<String, Now> result = new HashMap<>();
         Timestamp at = Timestamp.from(now);
-        jdbc.sql("""
-                        select app_id,
-                               count(*) filter (where state in ('PENDING', 'DELIVERED') and due_at > :now) as pending,
-                               count(*) filter (where state in ('PENDING', 'DELIVERED') and due_at <= :now) as due_unclaimed,
-                               count(*) filter (where state = 'DISPATCHING') as dispatching,
-                               min(due_at) filter (where state in ('PENDING', 'DELIVERED') and due_at <= :now) as oldest_due
-                        from notification
-                        where app_id = any(:apps) and state in ('PENDING', 'DELIVERED', 'DISPATCHING')
-                        group by app_id
-                        """)
+        jdbc.sql(BACKLOG)
                 .param("apps", apps.toArray(String[]::new))
                 .param("now", at)
                 .query((rs, n) -> {

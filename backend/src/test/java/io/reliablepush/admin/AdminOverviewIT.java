@@ -112,7 +112,13 @@ class AdminOverviewIT extends PostgresTestBase {
     void backlogNow() {
         Instant now = Instant.now();
         notification("shop", "PENDING", now, now.plus(1, ChronoUnit.HOURS), false, false);
-        notification("shop", "DISPATCHING", now, null, false, false);
+        // a claimed row keeps its due_at (claimDue never clears it)
+        notification("shop", "DISPATCHING", now, now.minus(1, ChronoUnit.MINUTES), false, false);
+        // delivered under NOT_DELIVERED: closed, state stays DELIVERED, due_at cleared; in no backlog count
+        notification("shop", "DELIVERED", now.minus(5, ChronoUnit.MINUTES), null, true, false);
+        jdbc.sql("update notification set closed_at = :c where app_id = 'shop' and state = 'DELIVERED'")
+                .param("c", Timestamp.from(now.minus(4, ChronoUnit.MINUTES)))
+                .update();
         // due in one second: a cached worker context cannot claim it before the lock below is held
         UUID due = notification("shop", "PENDING", now.minus(10, ChronoUnit.SECONDS), now.plus(1, ChronoUnit.SECONDS), false, false);
 
@@ -135,6 +141,36 @@ class AdminOverviewIT extends PostgresTestBase {
         String none = get(ALL_KEY, "/v1/admin/overview?app=shop").getBody();
         assertThat((Integer) JsonPath.read(none, "$.items[0].now.dueUnclaimed")).isZero();
         assertThat((Object) JsonPath.read(none, "$.items[0].now.oldestDueAgeSeconds")).isNull();
+    }
+
+    @Test
+    void backlogUsesTheDueIndexNotTheClosedHistory() {
+        // a large closed history (delivered under NOT_DELIVERED: state DELIVERED, due_at null) and a few open rows
+        jdbc.sql("""
+                        insert into notification (id, app_id, user_id, policy, timeout_minutes, fallback_payload,
+                            state, created_at, delivered_at, closed_at)
+                        select gen_random_uuid(), 'shop', 'u-' || g, 'NOT_DELIVERED', 5, cast('{}' as jsonb),
+                               'DELIVERED', now() - interval '1 day', now() - interval '1 day', now() - interval '1 day'
+                        from generate_series(1, 20000) g
+                        """)
+                .update();
+        Instant now = Instant.now();
+        for (int i = 0; i < 3; i++) {
+            notification("shop", "PENDING", now, now.plus(1, ChronoUnit.HOURS), false, false);
+        }
+        jdbc.sql("analyze notification").update();
+
+        String plan = String.join("\n", jdbc.sql("explain " + OverviewQuery.BACKLOG)
+                .param("apps", new String[] {"shop"})
+                .param("now", Timestamp.from(now))
+                .query(String.class)
+                .list());
+
+        assertThat(plan).contains("notification_due");
+        String body = get(ALL_KEY, "/v1/admin/overview?app=shop").getBody();
+        assertThat((Integer) JsonPath.read(body, "$.items[0].now.pending")).isEqualTo(3);
+        assertThat((Integer) JsonPath.read(body, "$.items[0].now.dueUnclaimed")).isZero();
+        assertThat((Integer) JsonPath.read(body, "$.items[0].now.dispatching")).isZero();
     }
 
     @Test
