@@ -43,6 +43,17 @@ class StaticAdminPageTest {
     }
 
     @Test
+    void searchResultLinksUseTheAppOfTheSearchNotTheSelector() {
+        // the selector may have changed since the search: a row's links must point to the app that produced it
+        String src = read("js/views/search.js");
+        int start = src.indexOf("function addRows(");
+        int end = src.indexOf("async function run(", start);
+        assertThat(start).isPositive();
+        String addRows = src.substring(start, end);
+        assertThat(addRows).doesNotContain("app.value").contains("#/devices/").contains("#/n/");
+    }
+
+    @Test
     void noInnerHtml() {
         for (String js : JS) {
             String src = read(js);

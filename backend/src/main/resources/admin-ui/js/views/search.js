@@ -36,16 +36,17 @@ export function render(root, ctx) {
   let lastParams = null;
   let dead = false;
 
-  function addRows(items) {
+  // appId: the app of the search that produced the rows (the selector may have changed since)
+  function addRows(items, appId) {
     for (const n of items) {
       body.append(el('tr', {},
         el('td', { text: fmtTime(n.createdAt) }),
         el('td', {}, chip(n.state)),
-        el('td', { class: 'id' }, link('#/devices/' + encodeURIComponent(app.value) + '/' + encodeURIComponent(n.userId), n.userId)),
+        el('td', { class: 'id' }, link('#/devices/' + encodeURIComponent(appId) + '/' + encodeURIComponent(n.userId), n.userId)),
         el('td', { class: 'id', text: n.externalId === null ? '–' : n.externalId }),
         el('td', { text: n.policy }),
         el('td', { class: 'num', text: n.fallbackAttempts }),
-        el('td', { class: 'id' }, link('#/n/' + encodeURIComponent(n.trackingId) + '?app=' + encodeURIComponent(app.value), n.trackingId))));
+        el('td', { class: 'id' }, link('#/n/' + encodeURIComponent(n.trackingId) + '?app=' + encodeURIComponent(appId), n.trackingId))));
     }
   }
 
@@ -56,7 +57,7 @@ export function render(root, ctx) {
       const page = await searchNotifications(params);
       if (dead) return;
       if (!append) body.replaceChildren();
-      addRows(page.items);
+      addRows(page.items, params.app);
       cursor = page.nextCursor;
       lastParams = params;
       results.hidden = false;
