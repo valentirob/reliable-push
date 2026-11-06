@@ -2,6 +2,22 @@
 
 Newest entry first. Updated at the end of every work session (see `.agents/skills/session-handoff/SKILL.md`).
 
+## Pending maintainer tasks
+
+Tasks only the maintainer can do: they need personal accounts and credentials, which agents never create, enter or
+handle. Agents: remind the maintainer of these at the start of a session, and update this list when one is done.
+
+1. **Real APNs delivery and the locked-device check (iOS).** Needs the paid Apple Developer Program. Steps in
+   `docs/testing.md` ("Real APNs pushes"): App IDs and App Group for the sample, `harness/build/apns/AuthKey.p8`,
+   `harness/build/apns/apns.properties`, `IOS_DEVELOPMENT_TEAM`, then `./scripts/ios-e2e.sh --test apns-real-delivery`
+   (expected: `DELIVERED` within 60 s). Also send one push while a real device is locked, with the app built with Data
+   Protection Complete. This is the on-device check of findings I1 (file protection of the queue and lock files) and M5
+   (Debug-only local-network exception of the NSE), which the Simulator cannot verify.
+2. **Real FCM delivery (Android).** Needs a Firebase project. Steps in `docs/testing.md` ("Real FCM pushes"):
+   `android/sample/google-services.json`, `harness/build/fcm/service-account.json` (`chmod 600`), then
+   `./scripts/android-e2e.sh --test fcm-real-delivery` on an AVD with Google Play services.
+
+
 ## 2026-11-06 (4) — Claude Code — release 0.1.0
 
 - **Done:** first release. `release/0.1.0` from `develop` set every component to `0.1.0` and added `CHANGELOG.md`; it was
