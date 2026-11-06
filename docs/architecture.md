@@ -182,7 +182,8 @@ verified credential. Every device-authenticated request verifies the token stric
 ## Data model
 
 `notification`, `notification_event`, `device`, `fallback_attempt` and `daily_stats`, created by Flyway migrations `V1__init.sql`,
-`V2__event_unique_and_close_invariant.sql`, `V3__lease_until.sql` and `V4__admin.sql` (applied automatically at startup).
+`V2__event_unique_and_close_invariant.sql`, `V3__lease_until.sql`, `V4__admin.sql` and `V5__admin_index.sql` (applied automatically at startup;
+`V5` builds the index `notification_app_created` with `create index concurrently`, so writes continue while it builds).
 `fallback_attempt` holds one row per webhook call, written by the worker in the same transaction as the fenced outcome update;
 `daily_stats` holds one row per app and UTC day, recomputed nightly by `DailyRollupJob` (advisory lock, so one worker runs it)
 and kept for `admin.rollup-retention-days`. `RetentionJob` runs after the rollup and skips its purge when the rollup is missing. The columns, constraints and indexes are listed in spec

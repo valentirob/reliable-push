@@ -17,6 +17,10 @@ spring:
     banner-mode: off
   flyway:
     enabled: true
+    # session-level migration lock instead of a lock held in an open transaction: an open transaction would make
+    # V5's "create index concurrently" wait for it forever (Flyway 9+ default)
+    postgresql:
+      transactional-lock: false
   datasource:
     hikari:
       # milliseconds a request waits for a pooled connection before failing with 503 + Retry-After (Hikari's default is

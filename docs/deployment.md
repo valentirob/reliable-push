@@ -206,6 +206,14 @@ kubectl -n reliable-push rollout status deploy/rp-reliable-push --timeout=180s
   `mode: split` and `worker.strategy: Recreate` (stop all workers, then start the new ones). In combined mode, stop the
   pods first: `kubectl -n reliable-push scale deploy/rp-reliable-push --replicas=0`, wait until they are gone, then
   `helm upgrade` (it sets `api.replicas` again).
+- **V5 (ops dashboard index):** `V5__admin_index.sql` builds `notification_app_created` on `notification (app_id, created_at)`
+  online (`create index concurrently`): sends and device events keep working during the upgrade, but the build time is
+  proportional to the size of `notification` (minutes on tens of millions of rows) and the first new pod is not started
+  until it finishes, while the chart's startup probe allows 180 s (5 s x 36). On a large table build the index beforehand
+  in `psql` with the same statement, `create index concurrently if not exists notification_app_created on notification
+  (app_id, created_at);` (V5 is then a no-op), and upgrade after it completes. If a build is interrupted it leaves an invalid index:
+  drop it (`drop index concurrently notification_app_created;`), delete the failed V5 row from `flyway_schema_history` if
+  there is one, and restart.
 - Add a new app to `config.apps` on all replicas before sending its traffic (one `helm upgrade` does that).
 
 ## Graceful shutdown

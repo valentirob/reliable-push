@@ -76,7 +76,7 @@ key hash of any app; an empty `apps`; `"*"` mixed with app ids; an unknown app i
 Generating a key and its hash is documented in `security.md` next to the sender key procedure (`openssl rand` +
 `sha256sum`). Rotation: add the new key, deploy, remove the old one.
 
-## 3. Data model (Flyway `V4__admin.sql`)
+## 3. Data model (Flyway `V4__admin.sql` and `V5__admin_index.sql`)
 
 ### 3.1 `fallback_attempt`
 
@@ -93,8 +93,13 @@ create table fallback_attempt (
     constraint fallback_attempt_outcome_check check (outcome in ('SUCCESS', 'RETRYABLE', 'FINAL')),
     constraint fallback_attempt_once unique (notification_id, attempt)
 );
-create index notification_app_created on notification (app_id, created_at);
 ```
+
+The window queries (§4) use `notification_app_created`, built online by its own migration `V5__admin_index.sql`, which
+holds only `create index concurrently if not exists notification_app_created on notification (app_id, created_at);`
+(Flyway runs a lone `CONCURRENTLY` statement outside a transaction, so writes to `notification` continue during a rolling
+upgrade; `spring.flyway.postgresql.transactional-lock=false` keeps Flyway's migration lock out of an open transaction, which
+the index build would otherwise wait for forever).
 
 - One row per webhook call the worker makes. `outcome` maps `WebhookResult`: `Success` → `SUCCESS`, `Retryable` →
   `RETRYABLE`, `Final` → `FINAL`. `http_status` is set when the endpoint answered; `reason` is the existing short log

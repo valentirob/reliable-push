@@ -13,7 +13,6 @@ create table fallback_attempt (
     constraint fallback_attempt_outcome_check check (outcome in ('SUCCESS', 'RETRYABLE', 'FINAL')),
     constraint fallback_attempt_once unique (notification_id, attempt)
 );
-create index notification_app_created on notification (app_id, created_at);
 
 -- Per-app, per-UTC-day counters and delivery percentiles, recomputed by the daily rollup job.
 create table daily_stats (
