@@ -560,6 +560,13 @@ apps on real or emulated devices. Credentials are never committed or logged.
 - Multi-agent review: `.agents/skills/review-loop` (correctness, security, tests, mobile policy) run before merging feature branches; Claude subagents in `.claude/agents/`, any other tool runs the roles from the skill.
 - Continuity: `AGENTS.md`, `.agents/rules`, `.agents/skills`, `docs/STATUS.md` updated each session.
 
+## 13. Cycle 4: ops dashboard (0.2.0)
+
+Cycle 4 adds a read-only ops dashboard (FR-16, FR-17) and changes nothing this spec defines: a new backend module `admin`,
+migration `V4__admin.sql` (`fallback_attempt`, `daily_stats`), a static page at `/admin/` and an admin API at
+`/v1/admin`. Design: [`2026-11-06-ops-dashboard-design.md`](2026-11-06-ops-dashboard-design.md); guide:
+[`../admin.md`](../admin.md).
+
 ## 12. Repository layout (end state)
 
 ```

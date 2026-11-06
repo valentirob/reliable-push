@@ -8,6 +8,34 @@ Everything left after `v0.1.0` is in [TODO.md](TODO.md): each item says why it i
 unblocks it. Agents: remind the maintainer of its section 1 (real APNs and the locked-device check, real FCM, Maven
 Central) at the start of a session.
 
+## 2026-11-07 (11) — Claude Code — cycle 4: ops dashboard (0.2.0, on `feature/ops-dashboard`)
+
+- **Done:** the read-only ops dashboard (FR-16, FR-17; spec `docs/specs/2026-11-06-ops-dashboard-design.md`, plan
+  `docs/plans/2026-11-06-cycle4-ops-dashboard.md`):
+  - Backend module `admin`: admin keys (hashed, scoped, `payload` permission), `/v1/admin/**` API, the page at `/admin/`,
+    `fallback_attempt` rows written by the worker, `daily_stats` rollup (`DailyRollupJob`), the retention guard,
+    audit events. Migration `V4__admin.sql`.
+  - Helm `config.admin`; harness: `admin-dashboard` scenario, `AdminSmokeE2E`, per-run admin key (`HARNESS_ADMINKEY`).
+  - Docs (task 9): `docs/admin.md`, `api.md`, `security.md`, `architecture.md`, `deployment.md`, `testing.md`,
+    `getting-started.md`, `overview.md` §5 (sections 5-10 became 6-11), at-a-glance SVG and PNG, presentation slide and
+    status slide, README, CHANGELOG `Unreleased`, TODO 5.1.
+- **Rulings:**
+  - R1 admin ITs get their keys from a test profile `admin`; default test contexts keep admin disabled.
+  - R2 `RetentionJob` asks an optional `RetentionGuard` interface, implemented in `admin`, so `notifications` does not depend on `admin`.
+  - R3 the real page replaces the placeholder `index.html`.
+  - R4 with no admin key, `/v1/admin/**` and `/admin/**` answer exactly like an unknown path.
+  - R5 page files live in `resources/admin-ui/`, mapped to `/admin/**` only when admin is enabled.
+  - R6 admin parameter errors are `400`; the sender and device APIs keep `422`.
+  - R7 `/overview` answers `{items}`, `/stats/daily` `{appId, days}`, `/notifications` `{items, nextCursor}`, `/devices` `{items}`.
+  - R8 the page was checked by fetch and Playwright; signed-in views were not checked by a person.
+  - R9 `#app` is the overview app selector, `<main>` has id `view` (the smoke test contract).
+  - R10 task 8 ran the web E2E only; the controller runs the iOS suite once at the end.
+- **State:** E2E expected `18/18 passed` (the controller runs it at the end; not run by the docs task).
+- **Open:** `scripts/e2e.ps1` was not run on Windows; the signed-in dashboard views were not checked by a person in a
+  browser; the Helm Ingress/Route route `/v1` only, so the `/admin/` page is reached by port-forward or an internal
+  route that the operator adds ([deployment.md](deployment.md#ops-dashboard)); release 0.2.0 is the maintainer's call.
+- **Next:** review loop, full checks, merge `feature/ops-dashboard` into `develop` (`--no-ff`), push, CI.
+
 ## 2026-11-06 (10) — Claude Code — release 0.1.2
 
 - **Done:** release `v0.1.2` (M7 and M12 fixes) through `release/0.1.2`: `main` and tag `v0.1.2`, GitHub release

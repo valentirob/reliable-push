@@ -15,7 +15,7 @@ Your backend registers each notification with reliable-push and puts the returne
   the push (5 s by default).
 
 If the reliable-push backend cannot be reached, your notifications are shown as usual and the events wait in the App
-Group queue. The flow diagram is in [overview.md §7](overview.md#7-ios-sdk).
+Group queue. The flow diagram is in [overview.md §8](overview.md#8-ios-sdk).
 
 > **Status.** Version `0.1.2` (tag `v0.1.2`), tested on the iOS Simulator locally (package tests, end-to-end suite) and
 > in CI (`ios-ci.yml`: package tests, sample builds, size gate). SwiftPM by git tag is the only distribution channel (no

@@ -234,6 +234,33 @@ The chart defaults come from the local load runs: [operations.md, "Measured capa
 [Scaling and capacity](operations.md#scaling-and-capacity). The numbers are relative to the measuring machine: confirm
 them on your cluster, and watch `rp_due_backlog` for the workers.
 
+## Ops dashboard
+
+The [ops dashboard](admin.md) is off until you set `config.admin.keys` in `my-values.yaml`. The entries are the SHA-256
+hashes of the keys, not secrets, so they go in the values file, not in the Secret ([security.md](security.md#admin-keys)).
+
+```yaml
+config:
+  admin:
+    keys:
+      - id: support
+        key-sha256: "<64 lowercase hex characters>"
+        apps: ["shop"]            # or ["*"]
+        permissions: [payload]    # optional: lets this key read the stored fallback payload
+```
+
+Nothing else changes: no new pod, port or Service. Every pod that serves the API also serves `/admin/` and `/v1/admin/`.
+The chart's Ingress and Route route `/v1` only, so `/v1/admin/` is reachable through them while the `/admin/` page is not.
+Choose how people reach the page:
+
+- **Not through the public host (recommended start):** `kubectl -n reliable-push port-forward svc/rp-reliable-push-api 8080:80`,
+  then open `http://127.0.0.1:8080/admin/`.
+- **Through an internal Ingress or Route** that you add yourself for `/admin/` and `/v1/admin/` on an internal host or behind your
+  SSO proxy, with an IP allow-list (for example `nginx.ingress.kubernetes.io/whitelist-source-range`, or the OpenShift Route annotation
+  `haproxy.router.openshift.io/ip_whitelist`).
+- **Block `/v1/admin/` on the public host** with a path rule or a WAF rule at the ingress, if you route the dashboard only
+  internally. The admin key still protects it, and without any key it answers `404`.
+
 ## Per-IP limits at the ingress
 
 The application's rate limits are per instance and only apply to authenticated callers; unauthenticated floods (garbage

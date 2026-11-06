@@ -10,7 +10,7 @@ Spring profiles select the background work of an instance:
 
 | Profile | What it enables |
 |---|---|
-| `worker` | Fallback scheduler, webhook client, retention job, due-backlog gauge |
+| `worker` | Fallback scheduler, webhook client, retention job, daily rollup job, due-backlog gauge |
 | `api` | Marks an API-only instance (activate it without `worker`); the HTTP endpoints are served by every instance |
 | `api,worker` (default when no profile is set) | Both |
 
@@ -23,7 +23,7 @@ flowchart LR
   SB["Sender backend"] -- "POST /v1/notifications<br/>(X-Api-Key)" --> API["api"]
   SDK["Device SDK"] -- "POST /v1/devices<br/>(OIDC ID token)" --> API
   SDK -- "POST /v1/events<br/>(device JWT)" --> API
-  API --> DB[("PostgreSQL<br/>Flyway V1..V3 at startup")]
+  API --> DB[("PostgreSQL<br/>Flyway V1..V4 at startup")]
   WRK["worker"] --> DB
   WRK -- "signed POST" --> FW["Fallback webhook"]
 ```
@@ -43,6 +43,7 @@ repositories.
 | `devices` | Device registration, device-token issue / refresh / revoke, signing keys, identity verification | `DeviceController`, `DeviceService`, `DeviceTokenService`, `SigningKeys`, `identity/*` |
 | `tracking` | Device events to state transitions, per-item outcomes | `EventsController`, `TrackingService` |
 | `fallback` | Claiming loop, trigger-window decision, signed webhook client | `FallbackScheduler`, `FallbackDispatcher`, `FallbackDecision`, `HttpWebhookClient`, `WebhookSigner` |
+| `admin` | Ops dashboard ([admin.md](admin.md)): admin keys, read-only `/v1/admin/**` API, the static page `/admin/**`, queries, nightly rollup. Active only when an admin key is configured | `AdminKeys`, `AdminKeyFilter`, `AdminPageFilter`, `AdminController`, `AdminQueries`, `DailyRollupJob`, `DailyStatsRepository` |
 | `shared` | Servlet filter chain (trace id, access log, body limit, sender key auth, device auth, rate limit), problem+json errors, logging (`EventLog`), metrics (`RpMetrics`), clock and `TimeScale`, secret references | `shared/*` |
 
 There is no ORM and no Spring Security: persistence is plain SQL through `JdbcClient`, authentication is a pair of small
@@ -53,6 +54,10 @@ servlet filters on top of `nimbus-jose-jwt`.
 In order: `TraceIdFilter` (correlation id, `X-Request-Id`) -> `AccessLogFilter` (`api.request`) -> `BodySizeLimitFilter`
 (64 KB on `/v1/**`) -> `SenderApiKeyFilter` for `/v1/notifications/**` or `DeviceAuthFilter` for
 `/v1/devices/token:refresh`, `/v1/devices/me` and `/v1/events` -> `RateLimitFilter` (per sender app or per device).
+`AdminKeyFilter` guards `/v1/admin/**` (header `X-Admin-Key`, rate limit bucket `admin:<keyId>`) and `AdminPageFilter` serves
+`/admin/**` with its security headers. Both are registered only when an admin key is configured, so without one these paths
+answer like any unknown path. The page files live in `backend/src/main/resources/admin-ui/` and are mapped to `/admin/**`
+only when admin is enabled. Admin parameter errors answer `400`; the sender and device APIs keep their `422`.
 `POST /v1/devices` is not behind an authentication filter: it proves identity with the app's credential inside the
 request body and is rate limited per user after that check.
 
@@ -176,8 +181,11 @@ verified credential. Every device-authenticated request verifies the token stric
 
 ## Data model
 
-`notification`, `notification_event` and `device`, created by Flyway migrations `V1__init.sql`, `V2__event_unique_and_close_invariant.sql`
-and `V3__lease_until.sql` (applied automatically at startup). The columns, constraints and indexes are listed in spec
+`notification`, `notification_event`, `device`, `fallback_attempt` and `daily_stats`, created by Flyway migrations `V1__init.sql`,
+`V2__event_unique_and_close_invariant.sql`, `V3__lease_until.sql` and `V4__admin.sql` (applied automatically at startup).
+`fallback_attempt` holds one row per webhook call, written by the worker in the same transaction as the fenced outcome update;
+`daily_stats` holds one row per app and UTC day, recomputed nightly by `DailyRollupJob` (advisory lock, so one worker runs it)
+and kept for `admin.rollup-retention-days`. `RetentionJob` runs after the rollup and skips its purge when the rollup is missing. The columns, constraints and indexes are listed in spec
 section 3; `notification_event.notification_id` cascades on delete and `device_id` is set to null when a device is purged,
 so event history outlives devices. Applied migrations are never edited.
 

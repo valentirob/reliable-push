@@ -2,6 +2,25 @@
 
 All notable changes to this project are documented here. Versions follow [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+### Added
+
+- Ops dashboard (0.2.0, FR-16, FR-17): a read-only page at `/admin/` and API at `/v1/admin` served by the backend, enabled
+  only when an admin key is configured (otherwise both answer `404` like an unknown path). Views: overview with
+  delivery, read and fallback rates and the due backlog; daily trends up to 400 days; search by user, external id,
+  tracking id, state and time; notification timeline with events and webhook attempts; a user's devices.
+- Admin keys in `reliable-push.admin.keys[]` (stored as SHA-256, scoped to all apps or a list, optional `payload`
+  permission), rate limit `admin.rate-limit-per-minute`, audit events `admin.search`, `admin.notification_viewed`,
+  `admin.payload_viewed`.
+- Database migration `V4__admin.sql`: `fallback_attempt` (one row per webhook call) and `daily_stats` (nightly rollup
+  by `DailyRollupJob`, kept `admin.rollup-retention-days`, 400 by default). `RetentionJob` skips its purge when the
+  rollup is missing (`retention.skipped`).
+- Helm: `config.admin` in `values.yaml`.
+- Harness: E2E scenario `admin-dashboard` and `AdminSmokeE2E` (the full run is now 18 entries); a per-run admin key.
+- Docs: `docs/admin.md`, admin sections in `api.md`, `security.md`, `deployment.md`, `testing.md`, a new section in
+  `overview.md`, the at-a-glance picture and a slide.
+
 ## 0.1.2 — 2026-11-06
 
 Bug-fix release: one iOS SDK fix and one harness fix. No change to the API or the database.

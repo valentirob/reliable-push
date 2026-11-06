@@ -9,7 +9,7 @@ with a message naming the key instead of failing the first request.
 | Profile | Effect |
 |---|---|
 | `api` | Marks an API-only instance: activate it **without** `worker` to run no background jobs. The HTTP endpoints themselves are not gated by it: every instance serves them |
-| `worker` | Enables the fallback scheduler (`FallbackScheduler`), the webhook client, `RetentionJob` and `DueBacklogJob` (`rp_due_backlog`) |
+| `worker` | Enables the fallback scheduler (`FallbackScheduler`), the webhook client, `RetentionJob`, `DailyRollupJob` (when admin is enabled) and `DueBacklogJob` (`rp_due_backlog`) |
 | `json` | ECS JSON log lines on stdout (default whenever `local` is not active) |
 | `local` | Human-readable log pattern for development (`%d{ISO8601} %-5level [%t] %c{1.} [trace=...] - %m`) |
 | `e2e`, `demo` | Allow the fast clock (`reliable-push.testing.minute-duration`), used by the local harness only. Also append the same ECS JSON log lines to the file `RP_LOG_FILE` (default `/tmp/rp-logs/backend.json`, append, no rotation; stdout unchanged), which the harness tails from a shared volume |
@@ -127,6 +127,8 @@ Other useful standard settings: `SERVER_PORT` (default 8080), `LOGGING_LEVEL_<LO
 `LOGGING_LEVEL_IO_RELIABLEPUSH=DEBUG`; DEBUG output never contains secrets but is noisy),
 `SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE` (default 10) and `SPRING_DATASOURCE_HIKARI_CONNECTIONTIMEOUT` (milliseconds;
 the application sets 5000 instead of Hikari's 30000, see "Database pool" below).
+
+The ops dashboard ([admin.md](admin.md)) is served by every instance that serves HTTP and exists only when an admin key is configured.
 
 ## Health and metrics
 

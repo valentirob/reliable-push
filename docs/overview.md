@@ -11,7 +11,7 @@ For a slide-style version to present the project, open [presentation.html](prese
 The picture above is the whole system on one page: ① your backend registers the push with reliable-push, ② sends it
 through FCM / APNs as today, ③ the phone receives it, ④ the tracking module reports `DELIVERED` and `READ`, ⑤ when the
 timeout passes without the policy being met the worker calls your signed webhook, and ⑥ your fallback service sends
-the SMS or email. The editable source is [images/reliable-push-at-a-glance.svg](images/reliable-push-at-a-glance.svg).
+the SMS or email. The small "Dashboard /admin" box in the backend is the read-only ops dashboard ([§5](#5-ops-dashboard)). The editable source is [images/reliable-push-at-a-glance.svg](images/reliable-push-at-a-glance.svg).
 
 ## 1. The sidecar principle
 
@@ -74,12 +74,13 @@ flowchart TB
 | Component | Path | What it does | Detail |
 |---|---|---|---|
 | Backend | `backend/` | Stores notifications, receives device events, triggers fallbacks | [§4](#4-backend) |
-| Java sender client | `client-java/` | Optional zero-dependency client for the sender API | [§5](#5-java-sender-client) |
-| Android SDK | `android/` | Reports `DELIVERED` / `READ` from an Android app | [§6](#6-android-sdk) |
-| iOS SDK | `ios/`, `Package.swift` | Reports `DELIVERED` / `READ` from an iOS app and its extension | [§7](#7-ios-sdk) |
-| Harness | `harness/` | Local test stack: simulators, fake receiver, web console, E2E | [§8](#8-harness-and-web-console) |
-| Helm chart | `deploy/helm/` | Installs the backend on Kubernetes / OpenShift | [§9](#9-helm-chart-and-deployment) |
-| Load tests | `loadtest/` | Gatling load tests, run locally | [§10](#10-load-tests) |
+| Ops dashboard | `backend/` (module `admin`) | Read-only web page and API for support, ops and product | [§5](#5-ops-dashboard) |
+| Java sender client | `client-java/` | Optional zero-dependency client for the sender API | [§6](#6-java-sender-client) |
+| Android SDK | `android/` | Reports `DELIVERED` / `READ` from an Android app | [§7](#7-android-sdk) |
+| iOS SDK | `ios/`, `Package.swift` | Reports `DELIVERED` / `READ` from an iOS app and its extension | [§8](#8-ios-sdk) |
+| Harness | `harness/` | Local test stack: simulators, fake receiver, web console, E2E | [§9](#9-harness-and-web-console) |
+| Helm chart | `deploy/helm/` | Installs the backend on Kubernetes / OpenShift | [§10](#10-helm-chart-and-deployment) |
+| Load tests | `loadtest/` | Gatling load tests, run locally | [§11](#11-load-tests) |
 
 ## 3. One notification, end to end
 
@@ -159,7 +160,7 @@ flowchart LR
     RJ["RetentionJob"]
   end
   APPS["apps<br/>per-app configuration"]
-  DB[("PostgreSQL<br/>notification, notification_event, device")]
+  DB[("PostgreSQL<br/>notification, notification_event, device,<br/>fallback_attempt, daily_stats")]
   F --> NC & DC & EC
   NC & DC & EC --> DB
   FS --> DB
@@ -191,7 +192,38 @@ sequenceDiagram
 Reference: [architecture.md](architecture.md), [api.md](api.md), [security.md](security.md),
 [operations.md](operations.md).
 
-## 5. Java sender client
+## 5. Ops dashboard
+
+A read-only page (`/admin/`) and API (`/v1/admin`) served by the backend, for support ("what happened to this push?"), ops
+(rates and backlog now) and product (daily trends). It exists only when an admin key is configured; otherwise both paths
+answer `404`. Guide: [admin.md](admin.md).
+
+```mermaid
+flowchart LR
+  BR["Browser<br/>admin key in sessionStorage"]
+  subgraph be["Backend (every instance)"]
+    PG["/admin/ page<br/>static files, security headers"]
+    AA["/v1/admin API<br/>X-Admin-Key, read-only, audit log"]
+  end
+  subgraph wk["Backend (worker profile)"]
+    WR["FallbackDispatcher<br/>one row per webhook call"]
+    RU["DailyRollupJob<br/>nightly, advisory lock"]
+    RJ["RetentionJob"]
+  end
+  DB[("PostgreSQL<br/>notification, notification_event,<br/>fallback_attempt, daily_stats")]
+  BR -- "loads page" --> PG
+  BR -- "JSON" --> AA
+  AA -- "live windows, search, detail" --> DB
+  AA -- "older days" --> DB
+  WR -- "fallback_attempt" --> DB
+  RU -- "daily_stats" --> DB
+  RJ -- "checks the rollup first" --> DB
+```
+
+Live windows and the last 7 days are computed from `notification`. Older days come from `daily_stats`, which outlives the
+notifications. Retention skips its purge when the rollup did not run, so no day is deleted before it was counted.
+
+## 6. Java sender client
 
 An optional library for Java senders: JDK 17+ and `java.net.http`, no third-party dependency. Any HTTP client can call
 the sender API instead; the contract is [api.md](api.md).
@@ -205,7 +237,7 @@ flowchart LR
 
 Reference: [client-java/README.md](../client-java/README.md).
 
-## 6. Android SDK
+## 7. Android SDK
 
 Kotlin library, minSdk 26, Android platform APIs only. It plugs into the app's own `FirebaseMessagingService` and
 ignores every message without `rp_tid`.
@@ -229,7 +261,7 @@ flowchart TB
 `DELIVERED` is sent only when the notification was really shown. If notifications are blocked, nothing is sent and
 the fallback decides. Reference: [android.md](android.md).
 
-## 7. iOS SDK
+## 8. iOS SDK
 
 Swift package, iOS 15+, Apple frameworks only. The app and its Notification Service Extension (NSE) share the device
 token through a Keychain access group and the event queue through an App Group.
@@ -262,7 +294,7 @@ flowchart TB
 The extension calls the content handler exactly once: after the send, at the send timeout, or when iOS ends the
 extension. Reference: [ios.md](ios.md).
 
-## 8. Harness and web console
+## 9. Harness and web console
 
 The harness is a local test stack. It is never built into the backend image and never deployed. It runs the real
 backend (one API, two workers) with simulated senders, devices and fallback receivers.
@@ -295,7 +327,7 @@ flowchart LR
 
 Reference: [testing.md](testing.md), [getting-started.md](getting-started.md).
 
-## 9. Helm chart and deployment
+## 10. Helm chart and deployment
 
 The chart installs the backend only. PostgreSQL is yours (managed or operator). It runs **combined** (every pod is
 API and worker) or **split** (API pods behind the Service, worker pods with no traffic).
@@ -318,7 +350,7 @@ flowchart LR
 
 Values for GKE and OpenShift are included (non-root, arbitrary UID). Reference: [deployment.md](deployment.md).
 
-## 10. Load tests
+## 11. Load tests
 
 ```mermaid
 flowchart LR

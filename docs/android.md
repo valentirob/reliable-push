@@ -14,7 +14,7 @@ Your backend registers each notification with reliable-push and puts the returne
 - It does all network work on its own background thread, and nothing it throws reaches your app.
 
 If the reliable-push backend cannot be reached, your notifications are shown as usual and the events wait in the
-queue. The flow diagram is in [overview.md §6](overview.md#6-android-sdk).
+queue. The flow diagram is in [overview.md §7](overview.md#7-android-sdk).
 
 > **Status.** Version `0.1.2`, built and tested locally and in CI. It is not on Maven Central yet (`./gradlew
 > :reliablepush:publishToMavenLocal` installs it into `~/.m2`; releasing needs the maintainer's namespace and signing key).
