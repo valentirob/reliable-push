@@ -104,7 +104,8 @@ create index notification_app_created on notification (app_id, created_at);
   scheduled, `FALLBACK_TRIGGERED`, `FALLBACK_FAILED`). If the fence rejects the update (the worker lost its lease),
   nothing is written, so a stale holder never records an attempt. A failed insert rolls the outcome update back; the
   row is then re-claimed exactly as after any failed outcome write today.
-- Outcomes that make no webhook call (`FALLBACK_EXPIRED`, `app_not_configured`) write no attempt row.
+- Outcomes that make no webhook call (an expiry before the call, `app_not_configured`) write no attempt row. An expiry
+  decided after a call (`next_retry_after_trigger_window`) made a call, so it writes its attempt like any other outcome.
 
 ### 3.2 `daily_stats`
 
