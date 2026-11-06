@@ -97,7 +97,10 @@ jobs:
 
       - name: Build the library (no tests)
         working-directory: android
-        run: ./gradlew :reliablepush:assembleRelease
+        # CodeQL only sees code the compiler actually compiles: a warm Gradle build cache
+        # (org.gradle.caching=true, restored by setup-java) turns compileReleaseKotlin into
+        # FROM-CACHE and the analysis fails with "didn't build any of it".
+        run: ./gradlew --no-build-cache --rerun-tasks :reliablepush:assembleRelease
 
       - name: Perform CodeQL analysis
         uses: github/codeql-action/analyze@1fc58d04a4d4374f921bdac573c3811c240f9c26 # v4.39.2
