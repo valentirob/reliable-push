@@ -316,7 +316,7 @@ final class ReliablePushTests: XCTestCase {
         let r = await first.value
         XCTAssertEqual(r, .retryLater)
         let waiting = await second.value
-        XCTAssertEqual(waiting, .skipped, "cancelled while waiting: never took the lock")
+        XCTAssertEqual(waiting, .retryLater, "cancelled while waiting: never took the lock, events kept")
         XCTAssertEqual(StubURLProtocol.requests.filter { $0.url.path == "/v1/events" }.count, 1)
         XCTAssertFalse(fx.secrets.has("app1"))
         XCTAssertEqual(fx.queue.count, 0)

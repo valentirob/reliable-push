@@ -17,7 +17,7 @@ here and record the result in [STATUS.md](STATUS.md).
 | 3.2 | Run the PowerShell scripts on Windows | Maintainer + agent | Action: a Windows machine with PowerShell 7 and Docker |
 | 4.3 | Decide whether the `api` profile gates the HTTP endpoints | Maintainer | Action: a deployment that needs worker-only instances without an HTTP API |
 | 4.4 | Cold-JIT p99 on a burst-only load run | Agent | Action: only if load tests ever run in CI |
-| 5.1 | Pick the rest of the 0.2.0 scope | Maintainer | Action: maintainer decision (only M7 and M12 are done) |
+| 5.1 | Pick the 0.2.0 scope | Maintainer | Action: maintainer decision (M7 and M12 shipped in 0.1.2) |
 
 ## 1. Maintainer-only: needs personal accounts and credentials
 
@@ -112,10 +112,10 @@ Agents never create accounts or keys, sign in, or enter credentials. These steps
 
 ## 5. Next scope
 
-### 5.1 Pick the rest of the 0.2.0 scope
+### 5.1 Pick the 0.2.0 scope
 
-- **What:** after 0.1.1, only the M7 and M12 fixes are on `develop` (2026-11-06). Candidates: items 1.3 and 2.1, or
-  new requirements from [requirements.md](requirements.md) "Out of scope (for now)", for example web push.
+- **What:** 0.1.2 shipped the M7 and M12 fixes (2026-11-06); nothing else is planned. Candidates: items 1.3 and 2.1,
+  or new requirements from [requirements.md](requirements.md) "Out of scope (for now)", for example web push.
 - **Why deferred:** it is a product decision.
 - **Unblocked by:** the maintainer choosing the scope. Then write a spec or plan in `docs/plans/` as for the earlier
   cycles.
