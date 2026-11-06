@@ -8,6 +8,64 @@ Everything left after `v0.1.0` is in [TODO.md](TODO.md): each item says why it i
 unblocks it. Agents: remind the maintainer of its section 1 (real APNs and the locked-device check, real FCM, Maven
 Central) at the start of a session.
 
+## 2026-11-06 (10) — Claude Code — release 0.1.2
+
+- **Done:** release `v0.1.2` (M7 and M12 fixes) through `release/0.1.2`: `main` and tag `v0.1.2`, GitHub release
+  page, `develop` back at `0.2.0-SNAPSHOT`. The release check found `testAppFlushDeniedActivityCancelsAtOnce` flaky:
+  a flush cancelled before it took `flush.lock` returned `.skipped` since the M7 wait. Fixed on the release branch: a
+  cancelled flush returns `.retryLater` on both paths (no caller tells them apart; events stay queued).
+- **State:** backend `verify -Pimage`, root reactor `verify`, Helm `validate.sh` (kubeconform 11/11), Android `build`
+  passed; iOS 112 tests with 1 skipped after the fix, the flaky test and `EventSenderTests` 30 iterations without a
+  failure; size gate 291,928 B. The E2E runs of entry (9) predate the one-line result-code fix.
+- **Next:** pick the 0.2.0 scope ([TODO.md](TODO.md) 5.1).
+
+## 2026-11-06 (9) — Claude Code — backlog fixes M7 and M12 (start of 0.2.0)
+
+- **Done:**
+  - Maintainer chose the backlog fixes as the first 0.2.0 work (TODO 4.1, 4.2; both removed from TODO).
+  - M7, `bugfix/ios-m7-flush-lock-wait`: `EventSender.flush(deadline:)` waits for `flush.lock` until its deadline
+    (`FileLock.lock(until:now:)`, polled every 20 ms, a cancelled task never takes it) instead of skipping; without a
+    deadline it still skips. `testLogoutCancelsEveryInFlightAppFlush` now also checks a flush waiting for the lock.
+  - M12, `bugfix/harness-m12-proxy-bind`: `harness.device-proxy-bind` (`HARNESS_DEVICEPROXYBIND`), default
+    `127.0.0.1`; compose sets `0.0.0.0` inside the container (published on `127.0.0.1:8091` only).
+  - Docs-sync: `ios.md` §9, `testing.md` (device proxy), `overview.md` §7 and §8 diagrams, spec plan 3 block,
+    presentation status slide, CHANGELOG `Unreleased`. At-a-glance picture checked, no change needed.
+- **State:** iOS package tests 112 with 1 skipped, size gate 291,928 B; harness `verify` 238 tests green;
+  `./scripts/ios-e2e.sh`: `iOS E2E: 8/8 passed, 1 skipped`; `./scripts/e2e.sh`: `E2E: 17/17 passed`.
+- **Review loop:** one medium finding fixed: the lock wait polled `tryLock`, which WARNs on every failed open, so an
+  unopenable lock file gave up to ~1250 WARNs; an unopenable file now ends the wait with one WARN. Low, kept:
+  `withLock(timeout:)` (logout, reconfigure) still WARNs per poll in that case, at most 2 s.
+  Low, accepted and documented in `ios.md` §9: an NSE that waits for the lock hands the notification back up to the
+  send timeout (default 5 s) later, never past it.
+- **Next:** the rest of the 0.2.0 scope ([TODO.md](TODO.md) 5.1).
+
+## 2026-11-06 (8) — Claude Code — docs-sync rule
+
+- **Done:** new always-on rule `.agents/rules/docs-sync.md` (maintainer request): every change updates the docs, the
+  Mermaid diagrams, the at-a-glance SVG and PNG and `docs/presentation.html` in the same branch. Linked from
+  `AGENTS.md` (rules index and working agreement), `CONTRIBUTING.md` and the `implement-task` skill (step 8).
+- **State:** process docs only; overview, picture and presentation checked, no change needed.
+- **Next:** the maintainer picks the 0.2.0 scope ([TODO.md](TODO.md) 5.1).
+
+## 2026-11-06 (7) — Claude Code — Dependabot PRs and release 0.1.1
+
+- **Done:**
+  - Dependabot PRs approved and merged: #1 (AGP), #2 (root reactor plugins and JUnit), #5 (exec-maven-plugin), #8
+    (`gradle/actions/wrapper-validation`). #6 (swagger-request-validator-core 3.0.0, tests only) conflicted with #5, so
+    the same bump was applied by hand and the PR closed as superseded.
+  - Closed #3, #4, #7 (Temurin 21 to 24): the project stays on Java 21 LTS. `dependabot.yml` now ignores Temurin major
+    updates and has a 14-day cooldown, the "at least two weeks old" rule of `libs.versions.toml` and `tools.env`.
+  - Consistency fix: AGP back to 9.4.1, because 9.5.1 (from #1) was released on 2026-11-05.
+  - Release `v0.1.1` (docs and dependency updates): `main` and tag `v0.1.1`; `develop` is back at `0.2.0-SNAPSHOT`.
+  - GitHub release page `v0.1.1` created from the CHANGELOG section (Latest).
+  - Closed the next Dependabot PRs: #9 (AGP 9.5.1 again: too new until 2026-11-19; the cooldown did not hold it back)
+    and #10 (backend jre stage to the floating `21-jdk-alpine-3.20`: older, unsupported Alpine and an unpinned tag).
+    Dependabot deleted both branches; only `main` and `develop` remain.
+- **State:** release checks passed locally (backend `verify -Pimage`, root reactor, Helm `validate.sh`, Android
+  `build`, iOS 108 tests with 1 skipped) and CI on `develop` was green before the release merge.
+- **Open:** the "Dependency review" job fails on every Dependabot PR because the repository's dependency graph is off
+  (Settings → Security → Dependency graph); only the maintainer can enable it. See also [TODO.md](TODO.md).
+
 ## 2026-11-06 (6) — Claude Code — docs: "at a glance" picture
 
 - **Done:** `docs/images/reliable-push-at-a-glance.svg` (editable source) and `.png` (2x render): your backend, FCM /

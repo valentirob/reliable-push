@@ -4,11 +4,11 @@ import Foundation
 enum FlushResult: Sendable {
     /// The queue is empty.
     case done
-    /// Events remain; try again at the next launch / NSE run.
+    /// Events remain (also when the flush was cancelled); try again at the next launch / NSE run.
     case retryLater
     /// No usable registration (never registered, or a refresh was answered 401).
     case notRegistered
-    /// Not attempted: another flush holds the lock, or a 429 `Retry-After` has not elapsed yet.
+    /// Not attempted: another flush held the lock (until the deadline, if any), or a 429 `Retry-After` has not elapsed.
     case skipped
 }
 
@@ -48,7 +48,16 @@ final class EventSender: Sendable {
                 return .skipped
             }
         }
-        guard let held = flushLock.tryLock() else { return .skipped }
+        // With a deadline (every app and extension flush has one), wait for a lock held by the other process: its flush
+        // may end before reaching an event queued during its last request (M7). Without one, skip at once.
+        let acquired: FileLock.Held?
+        if let deadline {
+            acquired = await flushLock.lock(until: deadline, now: now)
+        } else {
+            acquired = flushLock.tryLock()
+        }
+        // cancelled (logout, an expired or refused activity): events stay queued, as for a cancel between batches
+        guard let held = acquired else { return Task.isCancelled ? .retryLater : .skipped }
         defer { held.release() }
 
         if queue.count == 0 { return .done }

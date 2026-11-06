@@ -17,7 +17,7 @@ Your backend registers each notification with reliable-push and puts the returne
 If the reliable-push backend cannot be reached, your notifications are shown as usual and the events wait in the App
 Group queue. The flow diagram is in [overview.md §7](overview.md#7-ios-sdk).
 
-> **Status.** Version `0.1.1` (tag `v0.1.1`), tested on the iOS Simulator locally (package tests, end-to-end suite) and
+> **Status.** Version `0.1.2` (tag `v0.1.2`), tested on the iOS Simulator locally (package tests, end-to-end suite) and
 > in CI (`ios-ci.yml`: package tests, sample builds, size gate). SwiftPM by git tag is the only distribution channel (no
 > XCFramework, no CocoaPods). Real APNs delivery on a device has not been verified yet.
 
@@ -28,7 +28,7 @@ enter the repository URL, pick the `ReliablePush` library and add it to **both**
 a `Package.swift`:
 
 ```swift
-.package(url: "https://github.com/valentirob/reliable-push.git", from: "0.1.1"),
+.package(url: "https://github.com/valentirob/reliable-push.git", from: "0.1.2"),
 // target dependency: .product(name: "ReliablePush", package: "reliable-push")
 ```
 
@@ -242,6 +242,11 @@ Your backend sends a normal alert push with the tracking id at the top level (sp
   the server never acknowledges (two truncated answers) is dropped with a WARN, as on Android.
 - The app-side flush runs inside `ProcessInfo.performExpiringActivity` and is bounded to 25 s, so a flush never holds
   its lock when iOS suspends the app.
+- One flush runs at a time across the app and the NSE (`flush.lock`). A flush that finds another one running waits for
+  it, within its own time limit (the NSE send timeout, 25 s in the app), and then sends what is left. So a burst of
+  pushes does not leave a `DELIVERED` queued until the next launch. In the NSE that wait is part of the send timeout
+  (`extensionSendTimeout`, default 5 s): the notification is never handed back later than before, but when the app is
+  flushing at the same moment it can take up to that timeout instead of appearing at once.
 
 Known limits:
 

@@ -62,20 +62,47 @@ final class FileLock: Sendable {
         return body()
     }
 
+    /// Polls the lock every 20 ms until it is taken, `now()` reaches `deadline` or the task is cancelled (then nil).
+    /// A cancelled task never takes the lock. A lock file that cannot be opened ends the wait at once (one WARN): that
+    /// is not contention. Never blocks a thread: the wait is a task sleep.
+    func lock(until deadline: Date, now: () -> Date) async -> Held? {
+        while !Task.isCancelled {
+            switch attempt() {
+            case .held(let held): return held
+            case .unavailable: return nil
+            case .busy: break
+            }
+            if now() >= deadline { return nil }
+            try? await Task.sleep(nanoseconds: 20_000_000)
+        }
+        return nil
+    }
+
     /// Takes the lock without blocking; nil when somebody else holds it (or the file cannot be opened).
     func tryLock() -> Held? {
+        if case .held(let held) = attempt() { return held }
+        return nil
+    }
+
+    private enum Attempt {
+        case held(Held)
+        case busy
+        case unavailable
+    }
+
+    private func attempt() -> Attempt {
         let fd = openFile()
         guard fd >= 0 else {
             SDKLog.warn("lock.unavailable", ["file": url.lastPathComponent])
-            return nil
+            return .unavailable
         }
         var result: Int32
         repeat { result = flock(fd, LOCK_EX | LOCK_NB) } while result != 0 && errno == EINTR
         guard result == 0 else {
             close(fd)
-            return nil
+            return .busy
         }
-        return Held(fd: fd)
+        return .held(Held(fd: fd))
     }
 
     /// Opens (creating it and its directory if needed) and sets the protection class every time: a lock file left by

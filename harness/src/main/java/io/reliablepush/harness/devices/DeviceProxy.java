@@ -17,7 +17,7 @@ import org.apache.logging.log4j.Logger;
  * are relayed to the backend. {@link #setOnline(boolean) Offline} closes every open connection and accepts-then-closes new
  * ones, so a client sees a transport error and never an HTTP status. Blocking sockets on virtual threads; the relay uses
  * fixed 8 KiB buffers, upstream connects time out, at most {@link #MAX_CONNECTIONS} connections are open. Bytes are never
- * logged.
+ * logged. It listens on loopback unless a bind address is given (compose passes {@code 0.0.0.0} inside the container).
  */
 public final class DeviceProxy implements AutoCloseable {
 
@@ -29,6 +29,7 @@ public final class DeviceProxy implements AutoCloseable {
     private static final int BUFFER = 8 * 1024;
     private static final Logger LOG = LogManager.getLogger(DeviceProxy.class);
 
+    private final String bindAddress;
     private final int listenPort;
     private final String targetHost;
     private final int targetPort;
@@ -38,11 +39,17 @@ public final class DeviceProxy implements AutoCloseable {
     private volatile ServerSocket server;
     private final java.util.concurrent.atomic.AtomicLong lastWarn = new java.util.concurrent.atomic.AtomicLong();
 
+    /** A proxy on loopback. */
     public DeviceProxy(int listenPort, String targetHost, int targetPort) {
-        this(listenPort, targetHost, targetPort, true);
+        this("127.0.0.1", listenPort, targetHost, targetPort, true);
     }
 
-    private DeviceProxy(int listenPort, String targetHost, int targetPort, boolean enabled) {
+    public DeviceProxy(String bindAddress, int listenPort, String targetHost, int targetPort) {
+        this(bindAddress, listenPort, targetHost, targetPort, true);
+    }
+
+    private DeviceProxy(String bindAddress, int listenPort, String targetHost, int targetPort, boolean enabled) {
+        this.bindAddress = bindAddress;
         this.listenPort = listenPort;
         this.targetHost = targetHost;
         this.targetPort = targetPort;
@@ -51,7 +58,7 @@ public final class DeviceProxy implements AutoCloseable {
 
     /** A proxy without a target: it never listens, but still reports and remembers the online switch. */
     public static DeviceProxy disabled() {
-        return new DeviceProxy(0, "", 0, false);
+        return new DeviceProxy("127.0.0.1", 0, "", 0, false);
     }
 
     /** Test hook: lower the connection cap. */
@@ -79,16 +86,29 @@ public final class DeviceProxy implements AutoCloseable {
         return s == null ? 0 : s.getLocalPort();
     }
 
+    /** The bound listen address (null when not listening). */
+    public InetAddress bindAddress() {
+        ServerSocket s = server;
+        return s == null ? null : s.getInetAddress();
+    }
+
     public synchronized void start() throws IOException {
         if (!enabled || server != null) {
             return;
         }
+        InetAddress address = InetAddress.getByName(bindAddress); // UnknownHostException is an IOException
         ServerSocket s = new ServerSocket();
-        s.setReuseAddress(true);
-        s.bind(new InetSocketAddress(InetAddress.getByName("0.0.0.0"), listenPort), 128);
+        try {
+            s.setReuseAddress(true);
+            s.bind(new InetSocketAddress(address, listenPort), 128);
+        } catch (IOException e) {
+            s.close();
+            throw e;
+        }
         server = s;
         Thread.ofVirtual().name("device-proxy-accept").start(() -> acceptLoop(s));
-        LOG.info("device proxy listening on port {} -> {}:{}", s.getLocalPort(), targetHost, targetPort);
+        LOG.info("device proxy listening on {}:{} -> {}:{}", address.getHostAddress(), s.getLocalPort(), targetHost,
+                targetPort);
     }
 
     /** Offline closes every open connection now and makes new ones close at once; online forwards again. */

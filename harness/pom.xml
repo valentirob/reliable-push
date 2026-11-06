@@ -14,7 +14,7 @@
 
     <groupId>io.reliablepush</groupId>
     <artifactId>reliable-push-harness</artifactId>
-    <version>0.1.1</version>
+    <version>0.1.2</version>
     <name>reliable-push-harness</name>
     <description>Local test/demo harness (fallback receiver, device simulator, fake sender, console). Never deployed.</description>
 

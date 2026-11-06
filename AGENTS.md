@@ -44,6 +44,7 @@ sending pushes itself.
 |---|---|
 | `.agents/rules/gitflow.md` | Always |
 | `.agents/rules/handoff.md` | Always |
+| `.agents/rules/docs-sync.md` | Always: docs, diagrams and presentation updated with every change |
 | `.agents/rules/security.md` | Auth, tokens, APIs, webhooks, secrets |
 | `.agents/rules/backend-java.md` | `backend/**`, `harness/**` |
 | `.agents/rules/mobile-sdk.md` | `android/**`, `ios/**` |
@@ -62,6 +63,7 @@ sending pushes itself.
 - Branching is **gitflow** (see rule). Never commit directly to `main`.
 - Test first: no production code without a failing test that requires it.
 - Never claim "done" without running the verification commands and reading their output.
+- A change is done only when the docs, the diagrams (`docs/overview.md`, the at-a-glance picture) and `docs/presentation.html` match it (see the `docs-sync` rule).
 - Keep files small and single-purpose; follow the existing package structure.
 - English for code, comments, commits and docs.
 - No secrets in the repo. Use `.env.example` / `application-example.yml` with placeholders.

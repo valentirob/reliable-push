@@ -112,6 +112,8 @@ services:
       HARNESS_MINUTESECONDS: "${HARNESS_MINUTESECONDS:-1}"
       # TCP proxy for the iOS Simulator (no airplane mode): 127.0.0.1:8091 -> api:8080, switched from the console
       HARNESS_DEVICEPROXYTARGET: http://api:8080
+      # all interfaces inside the container: Docker forwards the published port to its eth0 (host side: 127.0.0.1 only)
+      HARNESS_DEVICEPROXYBIND: 0.0.0.0
     ports:
       - "127.0.0.1:8090:8090"
       - "127.0.0.1:8091:8091"

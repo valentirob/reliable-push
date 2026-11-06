@@ -13,7 +13,7 @@
 
     <groupId>io.reliablepush</groupId>
     <artifactId>reliable-push-backend</artifactId>
-    <version>0.1.1</version>
+    <version>0.1.2</version>
     <name>reliable-push-backend</name>
     <description>Reliable push delivery/read tracking service with webhook fallback</description>
 

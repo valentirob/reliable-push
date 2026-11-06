@@ -20,7 +20,11 @@ public record HarnessProperties(
         @NotEmpty Map<String, @NotNull @Valid HarnessApp> apps,
         @Positive Integer minuteSeconds,
         URI deviceProxyTarget,
-        @Positive Integer deviceProxyPort) {
+        @Positive Integer deviceProxyPort,
+        String deviceProxyBind) {
+
+    /** Address the device-traffic proxy binds when none is set: loopback, so it is never reachable from the LAN (M12). */
+    public static final String DEFAULT_DEVICE_PROXY_BIND = "127.0.0.1";
 
     /** Port the device-traffic proxy listens on inside the container. */
     public static final int DEFAULT_DEVICE_PROXY_PORT = 8091;
@@ -33,11 +37,17 @@ public record HarnessProperties(
     }
 
     public HarnessProperties(URI backendUrl, Path backendLogDir, Map<String, HarnessApp> apps) {
-        this(backendUrl, backendLogDir, apps, null, null, null);
+        this(backendUrl, backendLogDir, apps, null, null, null, null);
     }
 
     public HarnessProperties(URI backendUrl, Path backendLogDir, Map<String, HarnessApp> apps, Integer minuteSeconds) {
-        this(backendUrl, backendLogDir, apps, minuteSeconds, null, null);
+        this(backendUrl, backendLogDir, apps, minuteSeconds, null, null, null);
+    }
+
+    /** Address the proxy listens on: {@code harness.device-proxy-bind}, loopback when unset or blank. Compose sets
+     *  {@code 0.0.0.0} because Docker forwards the published port to the container's own interface. */
+    public String proxyBindAddress() {
+        return deviceProxyBind == null || deviceProxyBind.isBlank() ? DEFAULT_DEVICE_PROXY_BIND : deviceProxyBind.strip();
     }
 
     public int proxyListenPort() {

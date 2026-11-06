@@ -2,6 +2,23 @@
 
 All notable changes to this project are documented here. Versions follow [Semantic Versioning](https://semver.org/).
 
+## 0.1.2 — 2026-11-06
+
+Bug-fix release: one iOS SDK fix and one harness fix. No change to the API or the database.
+
+### Fixed
+
+- iOS SDK: a flush that finds another one running (the app or the Notification Service Extension) now waits for it
+  within its own time limit instead of skipping, so a burst of pushes no longer leaves a `DELIVERED` queued until the
+  next launch (M7).
+- Harness: the device proxy listens on `127.0.0.1` unless `HARNESS_DEVICEPROXYBIND` is set; compose sets `0.0.0.0`
+  inside the container, still published on `127.0.0.1:8091` only (M12).
+
+### Process
+
+- New rule `.agents/rules/docs-sync.md`: every change updates the docs, the diagrams and the presentation in the same
+  branch.
+
 ## 0.1.1 — 2026-11-06
 
 Maintenance release: documentation and dependency updates. No change to the API, the SDK behaviour or the database.

@@ -304,8 +304,9 @@ final class ReliablePushTests: XCTestCase {
         XCTAssertTrue(inFlight)
         let sdk = try XCTUnwrap(SDK.current)
         let first = try XCTUnwrap(sdk.lastFlushForTesting)
-        let second = await sdk.startFlush().value // a later flush skips: the first holds the lock
-        XCTAssertEqual(second, .skipped)
+        let second = sdk.startFlush() // a later flush waits for the lock the first one holds (M7)
+        try await Task.sleep(nanoseconds: 100_000_000)
+        XCTAssertEqual(StubURLProtocol.requests.filter { $0.url.path == "/v1/events" }.count, 1, "the second is waiting")
 
         let start = Date()
         let confirmed = await withCheckedContinuation { c in ReliablePush.logout { c.resume(returning: $0) } }
@@ -314,6 +315,9 @@ final class ReliablePushTests: XCTestCase {
         XCTAssertFalse(fx.log.messages.contains { $0.contains("event=lock.unavailable") }, "\(fx.log.messages)")
         let r = await first.value
         XCTAssertEqual(r, .retryLater)
+        let waiting = await second.value
+        XCTAssertEqual(waiting, .retryLater, "cancelled while waiting: never took the lock, events kept")
+        XCTAssertEqual(StubURLProtocol.requests.filter { $0.url.path == "/v1/events" }.count, 1)
         XCTAssertFalse(fx.secrets.has("app1"))
         XCTAssertEqual(fx.queue.count, 0)
     }
