@@ -147,4 +147,20 @@ class AdminApiIT extends PostgresTestBase {
             assertThat(response.getHeaders().getFirst("X-Content-Type-Options")).isEqualTo("nosniff");
         }
     }
+
+    @Test
+    void pageAssetsAreServedWithTheRightContentType() {
+        List<String> scripts = List.of("/admin/js/main.js", "/admin/js/api.js", "/admin/js/dom.js",
+                "/admin/js/views/signin.js", "/admin/js/views/overview.js", "/admin/js/views/trends.js",
+                "/admin/js/views/search.js", "/admin/js/views/notification.js", "/admin/js/views/devices.js");
+        for (String path : scripts) {
+            ResponseEntity<String> response = get(path, "X-None", null);
+            assertThat(response.getStatusCode().value()).as(path).isEqualTo(200);
+            assertThat(response.getHeaders().getContentType().toString()).as(path).containsAnyOf("javascript", "ecmascript");
+            assertThat(response.getHeaders().getFirst("Content-Security-Policy")).as(path).isEqualTo(CSP);
+        }
+        ResponseEntity<String> css = get("/admin/admin.css", "X-None", null);
+        assertThat(css.getStatusCode().value()).isEqualTo(200);
+        assertThat(css.getHeaders().getContentType().toString()).startsWith("text/css");
+    }
 }
