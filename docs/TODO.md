@@ -15,11 +15,9 @@ here and record the result in [STATUS.md](STATUS.md).
 | 2.1 | Android mode v2 (`AndroidConfigV2`) | Agent | Date: Google ships `onNotificationReceived` as GA (check quarterly, next 2027-02-01) |
 | 3.1 | Install the Helm chart on a real GKE and OpenShift cluster | Maintainer + agent | Action: access to a cluster |
 | 3.2 | Run the PowerShell scripts on Windows | Maintainer + agent | Action: a Windows machine with PowerShell 7 and Docker |
-| 4.1 | iOS minor M7: a burst can leave one `DELIVERED` queued | Agent | Action: the next iOS SDK change (0.2.0 scope) |
-| 4.2 | Harness minor M12: the device proxy binds all interfaces | Agent | Action: the next harness change (0.2.0 scope) |
 | 4.3 | Decide whether the `api` profile gates the HTTP endpoints | Maintainer | Action: a deployment that needs worker-only instances without an HTTP API |
 | 4.4 | Cold-JIT p99 on a burst-only load run | Agent | Action: only if load tests ever run in CI |
-| 5.1 | Pick the 0.2.0 scope | Maintainer | Action: maintainer decision (nothing is planned after 0.1.0) |
+| 5.1 | Pick the rest of the 0.2.0 scope | Maintainer | Action: maintainer decision (only M7 and M12 are done) |
 
 ## 1. Maintainer-only: needs personal accounts and credentials
 
@@ -95,21 +93,6 @@ Agents never create accounts or keys, sign in, or enter credentials. These steps
 
 ## 4. Technical backlog (low impact, deliberately parked)
 
-### 4.1 iOS minor M7: a burst can leave one `DELIVERED` queued
-
-- **What:** when many pushes arrive together, one `DELIVERED` event can stay in the queue until the next flush (the next
-  push, app launch or open).
-- **Why deferred:** it is not lost, only late. The fallback timeouts are minutes, so the impact is small. It was parked
-  in the cycle 3 fix wave (ruling R21).
-- **Unblocked by:** the next change to the iOS SDK (0.2.0 scope).
-
-### 4.2 Harness minor M12: the device proxy binds all interfaces
-
-- **What:** inside the harness container the device proxy listens on every interface. Compose publishes it on
-  `127.0.0.1:8091` only, so it is not reachable from other machines.
-- **Why deferred:** the harness is a local test tool that is never deployed. It was parked in the cycle 3 fix wave.
-- **Unblocked by:** the next change to the harness (0.2.0 scope).
-
 ### 4.3 Decide whether the `api` profile gates the HTTP endpoints
 
 - **What:** today only `worker` enables beans. Every instance serves the HTTP API, and `api` only marks an API-only
@@ -129,10 +112,10 @@ Agents never create accounts or keys, sign in, or enter credentials. These steps
 
 ## 5. Next scope
 
-### 5.1 Pick the 0.2.0 scope
+### 5.1 Pick the rest of the 0.2.0 scope
 
-- **What:** nothing is planned after 0.1.0. Candidates: items 1.3, 2.1, 4.1 and 4.2, or new requirements from
-  [requirements.md](requirements.md) "Out of scope (for now)", for example web push.
+- **What:** after 0.1.1, only the M7 and M12 fixes are on `develop` (2026-11-06). Candidates: items 1.3 and 2.1, or
+  new requirements from [requirements.md](requirements.md) "Out of scope (for now)", for example web push.
 - **Why deferred:** it is a product decision.
 - **Unblocked by:** the maintainer choosing the scope. Then write a spec or plan in `docs/plans/` as for the earlier
   cycles.

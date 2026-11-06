@@ -255,7 +255,7 @@ flowchart TB
   DR -- "send, at most 5 s" --> API
   DR -- "contentHandler, exactly once" --> SHOW["System shows the notification"]
   TO --> AG
-  AG -- "flush" --> API
+  AG -- "flush, one at a time<br/>(waits for the other process)" --> API
   KC -.-> DR
 ```
 
@@ -280,7 +280,7 @@ flowchart LR
       DS["Device simulator"]
       RCV["Fallback receiver<br/>(signature check)"]
       SR["Scenario runner"]
-      DP["Device proxy :8091<br/>online / offline switch"]
+      DP["Device proxy :8091<br/>online / offline switch<br/>loopback unless configured"]
       RS["Optional real FCM / APNs senders"]
     end
   end

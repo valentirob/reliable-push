@@ -231,6 +231,10 @@ in the harness container, published on `127.0.0.1:8091` only (to `api:8080`; `HA
 free on the host). `GET /console/api/device-network` returns `{online, enabled}` and `POST /console/api/device-network
 {"online": false}` switches it: offline closes every open connection and closes new ones at once, so clients see a transport
 error, not an HTTP status. The Devices screen has the same switch. Without the target (plain `mvn` runs) nothing listens.
+The proxy listens on `127.0.0.1` unless `HARNESS_DEVICEPROXYBIND` (`harness.device-proxy-bind`) says otherwise. Compose sets
+`0.0.0.0` inside the container, because Docker forwards the published port to the container's interface; on the host it
+is still published on `127.0.0.1` only. Do not set `0.0.0.0` on a harness started outside a container: that would expose
+the backend to your network.
 
 ## Load tests (local only)
 

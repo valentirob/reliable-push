@@ -242,6 +242,11 @@ Your backend sends a normal alert push with the tracking id at the top level (sp
   the server never acknowledges (two truncated answers) is dropped with a WARN, as on Android.
 - The app-side flush runs inside `ProcessInfo.performExpiringActivity` and is bounded to 25 s, so a flush never holds
   its lock when iOS suspends the app.
+- One flush runs at a time across the app and the NSE (`flush.lock`). A flush that finds another one running waits for
+  it, within its own time limit (the NSE send timeout, 25 s in the app), and then sends what is left. So a burst of
+  pushes does not leave a `DELIVERED` queued until the next launch. In the NSE that wait is part of the send timeout
+  (`extensionSendTimeout`, default 5 s): the notification is never handed back later than before, but when the app is
+  flushing at the same moment it can take up to that timeout instead of appearing at once.
 
 Known limits:
 
