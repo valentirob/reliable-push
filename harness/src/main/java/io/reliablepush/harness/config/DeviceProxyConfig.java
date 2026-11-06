@@ -5,7 +5,10 @@ import java.net.URI;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
-/** The device-traffic proxy: it listens only when {@code harness.device-proxy-target} is set (compose sets it). */
+/**
+ * The device-traffic proxy: it listens only when {@code harness.device-proxy-target} is set (compose sets it), on
+ * {@code harness.device-proxy-bind} (loopback by default).
+ */
 @Configuration(proxyBeanMethods = false)
 class DeviceProxyConfig {
 
@@ -23,6 +26,6 @@ class DeviceProxyConfig {
             host = host.substring(1, host.length() - 1);
         }
         int port = target.getPort() > 0 ? target.getPort() : 80;
-        return new DeviceProxy(properties.proxyListenPort(), host, port);
+        return new DeviceProxy(properties.proxyBindAddress(), properties.proxyListenPort(), host, port);
     }
 }

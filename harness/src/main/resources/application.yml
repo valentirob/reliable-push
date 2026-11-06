@@ -30,3 +30,5 @@ harness:
   # At least one app is required. Pinned by HarnessPropertiesEnvBindingTest.
   # Optional: HARNESS_DEVICEPROXYTARGET (harness.device-proxy-target, e.g. http://api:8080) starts the TCP proxy the iOS
   # Simulator uses to reach the backend (HARNESS_DEVICEPROXYPORT, default 8091). Unset: no proxy, the switch only remembers.
+  # HARNESS_DEVICEPROXYBIND (default 127.0.0.1): the proxy's listen address; compose sets 0.0.0.0 inside the container,
+  # where Docker publishes it on 127.0.0.1:8091 only. Never 0.0.0.0 outside a container: it would expose the backend.
