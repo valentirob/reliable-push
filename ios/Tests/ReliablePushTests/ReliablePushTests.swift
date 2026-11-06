@@ -139,6 +139,20 @@ final class ReliablePushTests: XCTestCase {
         fx.secrets.force(nil)
     }
 
+    func testFirstConfigureWithLockedKeychainKeepsRecordAndPersistsNothing() async throws {
+        // a background launch before the first unlock after a reboot: the App Group defaults read as empty and the
+        // Keychain is locked; that is not a fresh install
+        fx.register()
+        fx.state.clearRegistration()
+        fx.secrets.force(.unavailable)
+        try configure()
+        await awaitFlush()
+        XCTAssertNil(fx.state.config, "nothing persisted while the storage is locked")
+        fx.secrets.force(nil)
+        XCTAssertTrue(fx.secrets.has("app1"), "the registration survives")
+        XCTAssertTrue(fx.log.messages.contains { $0.contains("event=sdk.reconfigured") && $0.contains("reason=storage_locked") })
+    }
+
     // MARK: register / logout
 
     func testRegisterStoresTokenAndCallsBackOnMain() async throws {
@@ -278,6 +292,30 @@ final class ReliablePushTests: XCTestCase {
         XCTAssertFalse(fx.secrets.has("app1"))
         XCTAssertEqual(fx.queue.count, 0)
         XCTAssertEqual(fx.state.config?.appId, "app2")
+    }
+
+    func testLogoutCancelsEveryInFlightAppFlush() async throws {
+        fx.storeConfig()
+        fx.register()
+        fx.queue.add(event("t1"))
+        StubURLProtocol.reset { req in req.url?.path == "/v1/events" ? .hang : .response(status: 204) }
+        try configure() // the launch flush takes flush.lock and hangs in the send
+        let inFlight = await waitUntilAsync { StubURLProtocol.requests.contains { $0.url.path == "/v1/events" } }
+        XCTAssertTrue(inFlight)
+        let sdk = try XCTUnwrap(SDK.current)
+        let first = try XCTUnwrap(sdk.lastFlushForTesting)
+        let second = await sdk.startFlush().value // a later flush skips: the first holds the lock
+        XCTAssertEqual(second, .skipped)
+
+        let start = Date()
+        let confirmed = await withCheckedContinuation { c in ReliablePush.logout { c.resume(returning: $0) } }
+        XCTAssertTrue(confirmed)
+        XCTAssertLessThan(Date().timeIntervalSince(start), 1.5, "the lock holder was cancelled, no 2 s lock wait")
+        XCTAssertFalse(fx.log.messages.contains { $0.contains("event=lock.unavailable") }, "\(fx.log.messages)")
+        let r = await first.value
+        XCTAssertEqual(r, .retryLater)
+        XCTAssertFalse(fx.secrets.has("app1"))
+        XCTAssertEqual(fx.queue.count, 0)
     }
 
     // MARK: trackOpen

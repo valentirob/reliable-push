@@ -40,7 +40,14 @@ final class EventSender: Sendable {
     }
 
     func flush(deadline: Date?) async -> FlushResult {
-        if let notBefore = state.retryNotBefore, now() < notBefore { return .skipped }
+        if let notBefore = state.retryNotBefore {
+            // further away than any Retry-After we store: set under a wrong clock, so expired
+            if notBefore.timeIntervalSince(now()) > TimeInterval(Self.maxRetryAfter) {
+                state.retryNotBefore = nil
+            } else if now() < notBefore {
+                return .skipped
+            }
+        }
         guard let held = flushLock.tryLock() else { return .skipped }
         defer { held.release() }
 

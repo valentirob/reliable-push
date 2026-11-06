@@ -241,6 +241,23 @@ final class EventSenderTests: XCTestCase {
         XCTAssertEqual(r, .done)
     }
 
+    func testRetryNotBeforeFurtherThanTheCapIsExpiredAndCleared() async {
+        // stored while the device clock was days ahead; the clock was corrected since
+        add(1)
+        state.retryNotBefore = now.addingTimeInterval(2 * 86_400)
+        StubURLProtocol.reset { _ in Self.items([("t0", "ACCEPTED")]) }
+        let r = await makeSender().flush(deadline: nil)
+        XCTAssertEqual(r, .done)
+        XCTAssertNil(state.retryNotBefore)
+
+        // within the cap (3600 s) it is honoured
+        add(1, prefix: "u")
+        state.retryNotBefore = now.addingTimeInterval(3600)
+        let skipped = await makeSender().flush(deadline: nil)
+        XCTAssertEqual(skipped, .skipped)
+        XCTAssertEqual(state.retryNotBefore, now.addingTimeInterval(3600))
+    }
+
     func testFlushDropsBatchOnOther4xx() async {
         add(3)
         StubURLProtocol.reset { _ in .response(status: 400) }

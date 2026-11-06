@@ -81,7 +81,14 @@ final class SDK: Sendable {
     let tokens: TokenStore
     let queue: EventQueue
     let flushLock: FileLock
-    private let lastFlush = Locked<Task<FlushResult, Never>?>(nil)
+    private let flushes = Locked(Flushes())
+
+    /// The app-side flushes still running (all are cancelled by logout and reconfigure: M9), and the most recent one.
+    private struct Flushes: Sendable {
+        var next = 0
+        var running: [Int: Task<FlushResult, Never>] = [:]
+        var last: Task<FlushResult, Never>?
+    }
 
     init(baseURL: URL, appId: String, env: SDKEnvironment) {
         self.baseURL = baseURL
@@ -139,9 +146,12 @@ final class SDK: Sendable {
 
     /// Persists the config. A different stored one: clears its registration, the queue and the back-off, under
     /// `flush.lock` (waiting at most `lockWait`) so a flush still running here or in the extension cannot save a token
-    /// afterwards. No stored
-    /// config (fresh install or reinstall: the App Group defaults are gone, the Keychain item is not): clears this app
-    /// id's Keychain record, which may belong to another user (Android parity).
+    /// afterwards.
+    ///
+    /// No stored config (fresh install or reinstall: the App Group defaults are gone, the Keychain item is not): clears
+    /// this app id's Keychain record, which may belong to another user (R17, Android parity). Unless the Keychain is
+    /// locked (M8): then this is a launch in the background before the first unlock after a reboot, when the App Group
+    /// defaults also read as empty, so nothing is cleared or persisted; the next launch after the unlock does it.
     private func applyConfig() {
         let state = env.state
         if let stored = state.config {
@@ -154,6 +164,10 @@ final class SDK: Sendable {
             }
             SDKLog.info("sdk.reconfigured")
         } else {
+            if env.secrets.read(account: appId) == .unavailable {
+                SDKLog.info("sdk.reconfigured", ["reason": "storage_locked", "outcome": "deferred"])
+                return
+            }
             tokens.clear()
             SDKLog.info("sdk.reconfigured", ["reason": "no_stored_config"])
         }
@@ -244,8 +258,10 @@ final class SDK: Sendable {
         queue.add(QueuedEvent(trackingId: trackingId, type: type, occurredAt: env.now()))
     }
 
-    /// Cancels the most recent app-side flush, if still running (it unwinds and releases `flush.lock`).
-    func cancelFlush() { lastFlush.withLock { $0 }?.cancel() }
+    /// Cancels every app-side flush still running (each unwinds and releases `flush.lock` if it holds it).
+    func cancelFlush() {
+        for task in flushes.withLock({ Array($0.running.values) }) { task.cancel() }
+    }
 
     /// One flush bounded by `timeout`, by cancellation: a sleeping task cancels the flush at the deadline, which also
     /// cancels its in-flight request. Returns once the sender has unwound, so `flush.lock` is released. Cancelling the
@@ -269,11 +285,21 @@ final class SDK: Sendable {
     @discardableResult
     func startFlush(timeout: TimeInterval = SDK.appFlushTimeout) -> Task<FlushResult, Never> {
         let finished = DispatchSemaphore(value: 0)
-        let task = Task<FlushResult, Never> {
-            defer { finished.signal() }
-            return await self.boundedFlush(timeout: timeout)
+        // created under the lock, so the task's own removal (same lock) always comes after its insertion
+        let task = flushes.withLock { f -> Task<FlushResult, Never> in
+            let id = f.next
+            f.next += 1
+            let task = Task<FlushResult, Never> {
+                defer {
+                    _ = self.flushes.withLock { $0.running.removeValue(forKey: id) }
+                    finished.signal()
+                }
+                return await self.boundedFlush(timeout: timeout)
+            }
+            f.running[id] = task
+            f.last = task
+            return task
         }
-        lastFlush.withLock { $0 = task }
         env.activity.perform(reason: "io.reliablepush.flush") { expired in
             if expired {
                 task.cancel()
@@ -286,5 +312,5 @@ final class SDK: Sendable {
     }
 
     /// Test hook: the most recent app-side flush.
-    var lastFlushForTesting: Task<FlushResult, Never>? { lastFlush.withLock { $0 } }
+    var lastFlushForTesting: Task<FlushResult, Never>? { flushes.withLock { $0.last } }
 }
