@@ -18,6 +18,10 @@ Central) at the start of a session.
     updates and has a 14-day cooldown, the "at least two weeks old" rule of `libs.versions.toml` and `tools.env`.
   - Consistency fix: AGP back to 9.4.1, because 9.5.1 (from #1) was released on 2026-11-05.
   - Release `v0.1.1` (docs and dependency updates): `main` and tag `v0.1.1`; `develop` is back at `0.2.0-SNAPSHOT`.
+  - GitHub release page `v0.1.1` created from the CHANGELOG section (Latest).
+  - Closed the next Dependabot PRs: #9 (AGP 9.5.1 again: too new until 2026-11-19; the cooldown did not hold it back)
+    and #10 (backend jre stage to the floating `21-jdk-alpine-3.20`: older, unsupported Alpine and an unpinned tag).
+    Dependabot deleted both branches; only `main` and `develop` remain.
 - **State:** release checks passed locally (backend `verify -Pimage`, root reactor, Helm `validate.sh`, Android
   `build`, iOS 108 tests with 1 skipped) and CI on `develop` was green before the release merge.
 - **Open:** the "Dependency review" job fails on every Dependabot PR because the repository's dependency graph is off
