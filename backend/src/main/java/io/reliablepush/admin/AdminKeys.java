@@ -24,6 +24,7 @@ public class AdminKeys {
 
     private static final Pattern ID = Pattern.compile("[a-z0-9-]{1,40}");
     private static final Pattern HASH = Pattern.compile("[0-9a-f]{64}");
+    private static final String RESERVED_ID = "false";
     private static final String ALL_APPS = "*";
     private static final String PERMISSION_PAYLOAD = "payload";
 
@@ -44,6 +45,11 @@ public class AdminKeys {
             String where = "reliable-push.admin.keys[" + id + "]";
             if (id == null || !ID.matcher(id).matches()) {
                 throw new IllegalStateException("reliable-push.admin.keys: id '" + id + "' must match " + ID.pattern());
+            }
+            if (RESERVED_ID.equalsIgnoreCase(id)) {
+                // the admin beans are gated by @ConditionalOnProperty on keys[0].id, which reads "false" as off
+                throw new IllegalStateException(
+                        "reliable-push.admin.keys: id 'false' is reserved (it would switch the admin beans off)");
             }
             if (!ids.add(id)) {
                 throw new IllegalStateException("reliable-push.admin.keys: duplicate id " + id);

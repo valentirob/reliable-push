@@ -46,7 +46,7 @@ under `reliable-push.admin.keys[]` as `{id, key-sha256, apps, permissions}`; wit
   printf %s "$KEY" | shasum -a 256                  # configure the hash (first column) as key-sha256 (Linux: sha256sum)
   ```
 
-- `id` (`[a-z0-9-]{1,40}`) names the key in audit logs instead of the key. `apps` is `["*"]` (every app) or a list of app ids;
+- `id` (`[a-z0-9-]{1,40}`, not `false`, which would switch the admin beans off) names the key in audit logs instead of the key. `apps` is `["*"]` (every app) or a list of app ids;
   a key cannot see an app outside its list (`404`). `permissions` can hold `payload`, which allows reading the stored
   fallback payload; without it the payload route answers `404`.
 - Lookup is by SHA-256 in constant time, as for sender keys. Startup fails on a duplicate id or hash, a malformed hash, an

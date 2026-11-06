@@ -95,6 +95,10 @@ class AdminKeysTest {
         return Stream.of(
                 Arguments.of("duplicate id", List.of(key("dup-id", h1, all, List.of()), key("dup-id", h2, all, List.of())), "dup-id"),
                 Arguments.of("bad id", List.of(key("Bad_Id", h1, all, List.of())), "Bad_Id"),
+                // @ConditionalOnProperty would read the id "false" as off while AdminKeys is enabled
+                Arguments.of("id false", List.of(key("false", h1, all, List.of())), "'false' is reserved"),
+                Arguments.of("id false not first", List.of(key("first", h1, all, List.of()), key("false", h2, all, List.of())),
+                        "'false' is reserved"),
                 Arguments.of("short hash", List.of(key("short-hash", h1.substring(1), all, List.of())), "short-hash"),
                 Arguments.of("upper-case hash", List.of(key("upper-hash", h1.toUpperCase(), all, List.of())), "upper-hash"),
                 Arguments.of("same hash twice", List.of(key("same-a", h1, all, List.of()), key("same-b", h1, all, List.of())), "same-b"),
