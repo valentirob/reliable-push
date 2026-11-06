@@ -62,6 +62,17 @@ final class FileLock: Sendable {
         return body()
     }
 
+    /// Polls `tryLock` every 20 ms until it succeeds, `now()` reaches `deadline` or the task is cancelled (then nil).
+    /// A cancelled task never takes the lock. Never blocks a thread: the wait is a task sleep.
+    func lock(until deadline: Date, now: () -> Date) async -> Held? {
+        while !Task.isCancelled {
+            if let held = tryLock() { return held }
+            if now() >= deadline { return nil }
+            try? await Task.sleep(nanoseconds: 20_000_000)
+        }
+        return nil
+    }
+
     /// Takes the lock without blocking; nil when somebody else holds it (or the file cannot be opened).
     func tryLock() -> Held? {
         let fd = openFile()
