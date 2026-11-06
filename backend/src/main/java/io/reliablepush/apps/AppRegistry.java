@@ -84,6 +84,15 @@ public class AppRegistry {
         return Optional.ofNullable(found);
     }
 
+    /** Whether the SHA-256 is the sender key hash of any app (no early exit, like {@link #bySenderApiKey}). */
+    public boolean isSenderKeyHash(byte[] sha256) {
+        boolean found = false;
+        for (Entry entry : entries) {
+            found |= MessageDigest.isEqual(sha256, entry.senderKeyHash());
+        }
+        return found;
+    }
+
     public Collection<AppConfig> all() {
         return entries.stream().map(Entry::app).toList();
     }
