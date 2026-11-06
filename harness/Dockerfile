@@ -1,6 +1,6 @@
 # Local test/demo harness image. Build context = repo root: docker build -f harness/Dockerfile .
 # ---- build stage: builds client-java and the harness in one reactor, then splits the jar into layers ----
-FROM eclipse-temurin:21.0.13_9-jdk AS build
+FROM eclipse-temurin:24.0.2_12-jdk AS build
 WORKDIR /build
 COPY .mvn/ .mvn/
 COPY mvnw pom.xml ./
@@ -13,7 +13,7 @@ RUN ./mvnw -B -q -pl harness -am -Dmaven.test.skip=true package \
     && chmod -R g=u /build/extracted
 
 # ---- runtime stage: non-root, OpenShift-style arbitrary UID (group 0); full JRE is fine for a local tool ----
-FROM eclipse-temurin:21.0.13_9-jre-alpine-3.24
+FROM eclipse-temurin:24-jre-alpine-3.22
 
 LABEL org.opencontainers.image.title="reliable-push-harness" \
       org.opencontainers.image.description="Local test/demo harness for reliable-push (never deployed)" \
