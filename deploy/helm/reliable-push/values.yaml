@@ -40,6 +40,7 @@ config:
   apps: {}
   # Ops dashboard (/admin/): enabled iff at least one key is set. Store only the SHA-256 of each key
   # (printf %s "$KEY" | shasum -a 256); apps: ["*"] = all apps; permissions: [payload] allows "Show payload".
+  # With keys set, the Ingress also routes /admin and OpenShift gets a second Route for /admin (route.host is then required).
   # admin:
   #   keys:
   #     - id: ops
@@ -125,7 +126,7 @@ ingress:               # Kubernetes Ingress (GKE: className gce)
   annotations: {}
   hosts:
     - host: push.example.com
-      paths: [/v1]     # each path must be /v1 or below it
+      paths: [/v1]     # each path must be /v1, /admin or below them
   tls: []              # [{ secretName: rp-tls, hosts: [push.example.com] }]
 route:                 # OpenShift Route (route.openshift.io/v1), path /v1
   enabled: false
