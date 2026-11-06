@@ -17,6 +17,9 @@ here and record the result in [STATUS.md](STATUS.md).
 | 3.2 | Run the PowerShell scripts on Windows | Maintainer + agent | Action: a Windows machine with PowerShell 7 and Docker |
 | 4.3 | Decide whether the `api` profile gates the HTTP endpoints | Maintainer | Action: a deployment that needs worker-only instances without an HTTP API |
 | 4.4 | Cold-JIT p99 on a burst-only load run | Agent | Action: only if load tests ever run in CI |
+| 4.5 | Oldest live trend day undercounts with `retention-days` of 7 or less | Agent | Action: a spec line for the stored-or-live rule, or an install with `retention-days <= 7` |
+| 4.6 | No backfill of pre-upgrade history into `daily_stats` | Agent | Action: a maintainer or user asking for trends before the 0.2.0 upgrade |
+| 4.7 | Live-query cost of the 7-day overview and the trends on large tables | Agent | Action: a load run or install with tens of millions of notifications showing slow admin queries |
 | 5.1 | 0.2.0 release | Maintainer | Action: maintainer decision to release (the ops dashboard is built on `feature/ops-dashboard`) |
 
 ## 1. Maintainer-only: needs personal accounts and credentials
@@ -109,6 +112,39 @@ Agents never create accounts or keys, sign in, or enter credentials. These steps
 - **Why deferred:** the built-in warm-up (`LOAD_BURST_WARMUP`) and `--simulation all` avoid it, and load tests are
   local only.
 - **Unblocked by:** only if load tests ever run in CI.
+
+### 4.5 Oldest live trend day undercounts with `retention-days` of 7 or less (ops dashboard)
+
+- **What:** the trends compute the days from `today - W` (`W = min(7, retention-days)`) through today live from
+  `notification`. With `retention-days` of 7 or less, retention has already purged part of day `today - W`, so its live number is too
+  low, while the stored `daily_stats` row from the night before retention ran is complete ([admin.md](admin.md)
+  "Limits"). Suggested rule: for day `today - W` use the stored row when its `computed_at` is on or after today 00:00 UTC
+  (tonight's rollup, computed before tonight's retention), else compute it live.
+- **Why deferred:** it affects only installs with `retention-days <= 7` (the default is 30) and only the oldest day of
+  the window; the rule changes the spec's trends definition (spec §4), which needs a spec line first.
+- **Unblocked by:** a spec line for the rule in `docs/specs/2026-11-06-ops-dashboard-design.md` §4 (then a test in
+  `DailyRollupIT.trendsRoute` and the change in the trends route), or an install that runs with `retention-days <= 7`.
+
+### 4.6 No backfill of pre-upgrade history into `daily_stats` (ops dashboard)
+
+- **What:** `daily_stats` starts with the first nightly rollup after the 0.2.0 upgrade, which covers only the last
+  `min(7, retention-days)` days. Days older than that, still present in `notification` at upgrade time, never get a
+  stored row, so long trends start empty a week before the upgrade.
+- **Why deferred:** the upgrade gap shrinks to nothing within `retention-days`, and nobody has asked for the older
+  trends; a backfill (a one-off rollup of every day still in `notification`) is a long-running job to design (lock,
+  chunking, duration on large tables).
+- **Unblocked by:** a maintainer or user asking for trends that reach before the upgrade. Then add a one-off command or
+  an `admin.rollup.backfill-days` setting, with a spec line.
+
+### 4.7 Live-query cost of the 7-day overview and the trends on large tables (ops dashboard)
+
+- **What:** the overview's `7d` window and the live days of the trends aggregate `notification` on every request
+  (through `notification_app_created`), so their cost grows with the traffic of the last 7 days. The page refreshes the
+  overview every 30 s.
+- **Why deferred:** the admin API is low-traffic (a few operators, rate-limited per key) and the load tests (NFR-2)
+  did not include admin queries; no measurement shows a problem yet.
+- **Unblocked by:** a load run or an install with tens of millions of notifications in 7 days showing slow admin
+  queries. Then serve the closed days of the 7-day window from `daily_stats` (only today live) and measure again.
 
 ## 5. Next scope
 

@@ -8,6 +8,26 @@ Everything left after `v0.1.0` is in [TODO.md](TODO.md): each item says why it i
 unblocks it. Agents: remind the maintainer of its section 1 (real APNs and the locked-device check, real FCM, Maven
 Central) at the start of a session.
 
+## 2026-11-07 (12) — Claude Code — cycle 4: final-review fix wave (on `feature/ops-dashboard`)
+
+- **Done:** the findings of the final whole-branch review, each test-first:
+  - Retention no longer stops for good behind a long rollup: `RollupRetentionGuard` takes the rollup's advisory lock
+    (blocking, `lock_timeout = 30min`) before reading `max(computed_at)`; a wait that runs out skips with
+    `retention.skipped reason=rollup_running`. `RetentionGuard` now returns the veto reason (`veto()`).
+  - Overview backlog query adds `due_at is not null`, so `notification_due` serves it (closed `DELIVERED` rows no longer
+    scanned).
+  - `notification_app_created` moved from `V4__admin.sql` (unreleased) to `V5__admin_index.sql`
+    (`create index concurrently`); `spring.flyway.postgresql.transactional-lock=false`, because the index build
+    otherwise hangs on Flyway's open lock transaction (observed: wait on `virtualxid`). Upgrade note in `deployment.md`.
+  - Devices lookup audit-logged (`admin.devices_viewed`, `rp.user_hash`).
+  - Search result links use the app of the search that produced them.
+  - R13: `rollup.failed` also logs the stack trace at ERROR; `/admin/**` sends `Cache-Control: no-cache`; admin key id
+    `false` rejected at startup; TODO 4.5-4.7 (oldest live day with `retention-days <= 7`, no backfill, live-query cost).
+- **State:** `cd backend && ./mvnw -B verify` passed (unit 272, IT 265, 0 failures; coverage gate met); E2E not run by this wave (the controller runs it).
+- **Docs:** `operations.md`, `admin.md`, `security.md`, `api.md`, `deployment.md`, `architecture.md`, spec §3, §3.2, §4,
+  §5, `openapi.yaml`, CHANGELOG, TODO. Diagrams and presentation checked: no change needed (no new component or flow).
+- **Next:** controller E2E run, then merge `feature/ops-dashboard` into `develop`.
+
 ## 2026-11-07 (11) — Claude Code — cycle 4: ops dashboard (0.2.0, on `feature/ops-dashboard`)
 
 - **Done:** the read-only ops dashboard (FR-16, FR-17; spec `docs/specs/2026-11-06-ops-dashboard-design.md`, plan
