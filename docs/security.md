@@ -59,7 +59,8 @@ under `reliable-push.admin.keys[]` as `{id, key-sha256, apps, permissions}`; wit
   Failed sign-ins log `auth.failed` (`missing_admin_key`, `unknown_admin_key`); a key over its rate limit logs
   `rate_limit.exceeded` with scope `admin`.
 - **Page headers** on `/admin/**`: `Content-Security-Policy: default-src 'self'; frame-ancestors 'none'; base-uri 'none';
-  form-action 'none'`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `X-Content-Type-Options: nosniff`. Server
+  form-action 'none'`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `X-Content-Type-Options: nosniff`, and
+  `Cache-Control: no-cache` (files revalidated on every load). Server
   values are inserted as text, never as HTML. API answers carry `Cache-Control: no-store`. The page keeps the key in
   `sessionStorage` only and sends it in a header, never in a URL.
 - The `userId` is visible to every admin key; treat an admin key like access to personal data.

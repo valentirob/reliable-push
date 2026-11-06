@@ -11,7 +11,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
 
 /**
  * Gates the static dashboard page ({@code /admin} and below). Without configured admin keys it does nothing (no page is mapped, so it answers like an unknown path). Otherwise
- * it sets the security headers (spec section 5) and forwards {@code /admin} and {@code /admin/} to
+ * it sets the security headers (spec section 5) and {@code Cache-Control: no-cache}, and forwards {@code /admin} and {@code /admin/} to
  * {@code /admin/index.html}. The page itself needs no key: it holds none and calls the key-protected API.
  */
 public class AdminPageFilter extends OncePerRequestFilter {
@@ -44,6 +44,8 @@ public class AdminPageFilter extends OncePerRequestFilter {
         response.setHeader("X-Frame-Options", "DENY");
         response.setHeader("Referrer-Policy", "no-referrer");
         response.setHeader("X-Content-Type-Options", "nosniff");
+        // revalidate on every load (ETag / Last-Modified): after an upgrade a tab never mixes old and new modules
+        response.setHeader("Cache-Control", "no-cache");
         String path = request.getServletPath();
         if ("/admin".equals(path) || "/admin/".equals(path)) {
             request.getRequestDispatcher(INDEX).forward(request, response);

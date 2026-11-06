@@ -212,7 +212,8 @@ percent-encoded). Light and dark themes; usable from 360 px wide.
 
 Security headers on `/admin/**` (set by `AdminPageFilter`): `Content-Security-Policy: default-src 'self';
 frame-ancestors 'none'; base-uri 'none'; form-action 'none'`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`,
-`X-Content-Type-Options: nosniff`. Every server value is inserted with `textContent` (never `innerHTML`), so a crafted
+`X-Content-Type-Options: nosniff`, and `Cache-Control: no-cache` (revalidated on every load, so a tab never mixes old and
+new modules after an upgrade). Every server value is inserted with `textContent` (never `innerHTML`), so a crafted
 `userId` or payload cannot run script. A `429` waits for `Retry-After`; a network error or `503` shows a banner and
 retries.
 

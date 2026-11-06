@@ -92,7 +92,9 @@ Field details: [`operations.md`](operations.md#event-catalogue).
 ## Page security
 
 `/admin/**` answers with `Content-Security-Policy: default-src 'self'; frame-ancestors 'none'; base-uri 'none';
-form-action 'none'`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer` and `X-Content-Type-Options: nosniff`.
+form-action 'none'`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer` and `X-Content-Type-Options: nosniff`, plus
+`Cache-Control: no-cache` (the browser revalidates the files on every load, so after an upgrade a tab never mixes old and new
+modules).
 Every server value is inserted with `textContent`, so a crafted `userId` or payload cannot run script. API answers
 carry `Cache-Control: no-store`. To limit who can reach the page at all, restrict `/admin/` and `/v1/admin/` to an
 internal network at the Ingress or Route ([`deployment.md`](deployment.md#ops-dashboard)).

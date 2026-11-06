@@ -145,6 +145,8 @@ class AdminApiIT extends PostgresTestBase {
             assertThat(response.getHeaders().getFirst("X-Frame-Options")).isEqualTo("DENY");
             assertThat(response.getHeaders().getFirst("Referrer-Policy")).isEqualTo("no-referrer");
             assertThat(response.getHeaders().getFirst("X-Content-Type-Options")).isEqualTo("nosniff");
+            // revalidated on every load: a tab never mixes old and new modules after an upgrade
+            assertThat(response.getHeaders().getFirst("Cache-Control")).as(path).isEqualTo("no-cache");
         }
     }
 
@@ -158,10 +160,12 @@ class AdminApiIT extends PostgresTestBase {
             assertThat(response.getStatusCode().value()).as(path).isEqualTo(200);
             assertThat(response.getHeaders().getContentType().toString()).as(path).containsAnyOf("javascript", "ecmascript");
             assertThat(response.getHeaders().getFirst("Content-Security-Policy")).as(path).isEqualTo(CSP);
+            assertThat(response.getHeaders().getFirst("Cache-Control")).as(path).isEqualTo("no-cache");
         }
         ResponseEntity<String> css = get("/admin/admin.css", "X-None", null);
         assertThat(css.getStatusCode().value()).isEqualTo(200);
         assertThat(css.getHeaders().getContentType().toString()).startsWith("text/css");
+        assertThat(css.getHeaders().getFirst("Cache-Control")).isEqualTo("no-cache");
     }
 
     @Test
