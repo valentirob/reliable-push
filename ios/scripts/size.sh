@@ -18,4 +18,7 @@ strip -x "$OUT/libReliablePush.dylib"
 
 BYTES=$(stat -f %z "$OUT/libReliablePush.dylib")
 echo "ReliablePush stripped arm64 dylib: $BYTES bytes (limit $LIMIT)"
-[ "$BYTES" -lt "$LIMIT" ] || exit 1
+if [ "$BYTES" -ge "$LIMIT" ]; then
+  echo "size gate FAILED: $BYTES bytes is not under the $LIMIT-byte limit (spec 9.2); shrink the SDK or record a ruling" >&2
+  exit 1
+fi

@@ -49,6 +49,10 @@ jobs:
           sudo xcode-select -s /Applications/Xcode_26.6.app
           xcodebuild -version
 
+      # Diagnostic: the Simulators this image offers (a missing "iPhone 17" makes the next steps fail).
+      - name: List the available Simulators
+        run: xcrun simctl list devices available
+
       - name: Lint the privacy manifest
         run: plutil -lint ios/Sources/ReliablePush/PrivacyInfo.xcprivacy
 
