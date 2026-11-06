@@ -1,6 +1,6 @@
 # Every version: latest stable release at least two weeks old on 2026-11-05. Nothing dynamic.
 [versions]
-agp = "9.5.1"                 # released 2026-09-18
+agp = "9.4.1"                 # released 2026-09-18
 firebaseMessaging = "26.0.1"  # 2026-10-21
 junit = "4.13.2"              # 2021-02-13
 robolectric = "4.17"          # 2026-09-10
