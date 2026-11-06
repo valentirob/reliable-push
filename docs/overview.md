@@ -6,6 +6,13 @@ The reference documents linked from each section have the full contracts and set
 
 For a slide-style version to present the project, open [presentation.html](presentation.html) in a browser.
 
+![reliable-push at a glance](images/reliable-push-at-a-glance.png)
+
+The picture above is the whole system on one page: ① your backend registers the push with reliable-push, ② sends it
+through FCM / APNs as today, ③ the phone receives it, ④ the tracking module reports `DELIVERED` and `READ`, ⑤ when the
+timeout passes without the policy being met the worker calls your signed webhook, and ⑥ your fallback service sends
+the SMS or email. The editable source is [images/reliable-push-at-a-glance.svg](images/reliable-push-at-a-glance.svg).
+
 ## 1. The sidecar principle
 
 reliable-push is a **sidecar**. It watches your push notifications and acts only when one is not confirmed in time. It

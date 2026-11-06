@@ -10,6 +10,8 @@ webhook (`userId`, message, `trackingId`) that routes to SMS, email or any other
 channel. It runs as a sidecar: your existing backend keeps sending pushes itself
 and keeps the FCM/APNs credentials.
 
+![reliable-push at a glance: your backend, FCM/APNs, an iPhone and an Android phone with the tracking module, the reliable-push backend, the fallback clock and your SMS service](docs/images/reliable-push-at-a-glance.png)
+
 ## A sidecar, not a push gateway
 
 reliable-push sits **next to** your push path, not on it. The backend and the mobile SDKs only observe and react, so
