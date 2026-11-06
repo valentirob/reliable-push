@@ -8,6 +8,16 @@ Everything left after `v0.1.0` is in [TODO.md](TODO.md): each item says why it i
 unblocks it. Agents: remind the maintainer of its section 1 (real APNs and the locked-device check, real FCM, Maven
 Central) at the start of a session.
 
+## 2026-11-06 (6) — Claude Code — docs: "at a glance" picture
+
+- **Done:** `docs/images/reliable-push-at-a-glance.svg` (editable source) and `.png` (2x render): your backend, FCM /
+  APNs, an iPhone and an Android phone with the tracking module, the reliable-push backend, the fallback clock and
+  timeline, and your fallback service sending the SMS. Shown in the README, at the top of `overview.md` and as slide 3
+  of `presentation.html` (19 slides, which now loads `images/` next to it).
+- **State:** the PNG is rendered with headless Chrome from the SVG. To refresh it after editing the SVG, open the SVG at
+  1600x1100 in Chrome with device scale factor 2 and save a screenshot. Docs only, no code change.
+- **Next / Open:** see [TODO.md](TODO.md).
+
 ## 2026-11-06 (5) — Claude Code — docs: diagrams, guides, presentation
 
 - **Done:**
