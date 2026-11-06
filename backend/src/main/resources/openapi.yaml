@@ -327,6 +327,51 @@ paths:
           $ref: '#/components/responses/TooManyRequests'
 
 
+  /v1/admin/overview:
+    get:
+      tags: [admin]
+      operationId: adminOverview
+      summary: Counts, rates and the current backlog, per app
+      description: |
+        One entry per app (sorted by id): every visible app, or the one named by `app` (which must be visible,
+        otherwise `404`). The counts cover the notifications created in the last `window`. A rate is
+        `count / (registered - cancelled)` and `null` when that denominator is zero. `now` is the current state,
+        independent of the window: `pending` = `PENDING`/`DELIVERED` rows not yet due, `dueUnclaimed` = such rows
+        already due and not yet claimed by a worker, `dispatching` = rows with a fallback call in flight or waiting for
+        a retry, `oldestDueAgeSeconds` = age of the oldest `dueUnclaimed` row (`null` when there is none).
+      security:
+        - AdminKey: []
+      parameters:
+        - name: app
+          in: query
+          schema:
+            type: string
+        - name: window
+          in: query
+          schema:
+            type: string
+            enum: [1h, 24h, 7d]
+            default: 24h
+      responses:
+        '200':
+          description: The overview of each app.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminOverviews'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
   /v1/admin/notifications:
     get:
       tags: [admin]
@@ -721,6 +766,63 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/AdminDevice'
+
+    AdminOverviews:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminOverview'
+
+    AdminOverview:
+      type: object
+      required: [appId, window, registered, cancelled, delivered, read, fallbackTriggered, fallbackFailed,
+                 fallbackExpired, deliveryRate, readRate, fallbackRate, now]
+      properties:
+        appId:
+          type: string
+        window:
+          type: string
+          enum: [1h, 24h, 7d]
+        registered:
+          type: integer
+        cancelled:
+          type: integer
+        delivered:
+          type: integer
+        read:
+          type: integer
+        fallbackTriggered:
+          type: integer
+        fallbackFailed:
+          type: integer
+        fallbackExpired:
+          type: integer
+        deliveryRate:
+          type: number
+          nullable: true
+        readRate:
+          type: number
+          nullable: true
+        fallbackRate:
+          type: number
+          nullable: true
+        now:
+          type: object
+          required: [pending, dueUnclaimed, dispatching, oldestDueAgeSeconds]
+          properties:
+            pending:
+              type: integer
+            dueUnclaimed:
+              type: integer
+            dispatching:
+              type: integer
+            oldestDueAgeSeconds:
+              type: integer
+              format: int64
+              nullable: true
 
     AdminMe:
       type: object

@@ -35,10 +35,33 @@ class AdminController {
 
     record Me(String keyId, List<String> apps, List<String> permissions) {}
 
-    private final AdminQueries queries;
+    record Overviews(List<OverviewQuery.Overview> items) {}
 
-    AdminController(AdminQueries queries) {
+    private final AdminQueries queries;
+    private final OverviewQuery overviews;
+
+    AdminController(AdminQueries queries, OverviewQuery overviews) {
         this.queries = queries;
+        this.overviews = overviews;
+    }
+
+    @GetMapping("/overview")
+    Overviews overview(
+            HttpServletRequest request,
+            @RequestParam(required = false) String app,
+            @RequestParam(required = false) String window) {
+        AdminPrincipal principal = principal(request);
+        List<String> apps;
+        if (app == null) {
+            apps = principal.apps().stream().sorted().toList();
+        } else {
+            apps = List.of(visibleApp(principal, app));
+        }
+        OverviewQuery.Window parsed = window == null ? OverviewQuery.Window.H24 : OverviewQuery.Window.parse(window);
+        if (parsed == null) {
+            throw new BadParameterException("window", "must be one of 1h, 24h, 7d");
+        }
+        return new Overviews(overviews.overview(apps, parsed));
     }
 
     @GetMapping("/me")
