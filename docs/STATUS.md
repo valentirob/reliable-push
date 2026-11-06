@@ -2,6 +2,22 @@
 
 Newest entry first. Updated at the end of every work session (see `.agents/skills/session-handoff/SKILL.md`).
 
+## 2026-11-06 (3) — Claude Code — `develop` (cycle 3 merged)
+
+- **Done:** `feature/cycle3-ios-sdk` merged into `develop` with `--no-ff` (`4e015d8`, merge line `E2E: 17/17 passed`,
+  `Android E2E: 8/8 passed, 1 skipped`, `iOS E2E: 8/8 passed, 1 skipped`) and pushed. The merged tree is identical to
+  the reviewed branch head; package tests rerun on it: 108 run, 1 skipped, 0 failures; size 291,920 bytes. First GitHub
+  runs: iOS CI, CodeQL Swift and Client and harness CI green. The CodeQL Android job failed ("didn't build any of it"):
+  `org.gradle.caching=true` plus the cache restored by setup-java made `compileReleaseKotlin` FROM-CACHE, so CodeQL saw
+  no compilation. Fixed in `bugfix/codeql-android-build-cache` (`--no-build-cache --rerun-tasks` in that step only),
+  merged (`8cfc92c`) and pushed; CodeQL then green on all three jobs (backend, Android, Swift).
+- **State:** all three cycles of the spec (backend + harness, Android SDK, iOS SDK) are on `develop`; nothing is
+  released (`main` has no release from these cycles, no tag).
+- **Next:** cut the first release (`release/<semver>` from `develop`, merged into `main`, tag `v<semver>`, back into
+  `develop`); the tag also makes the SwiftPM URL snippet in `docs/ios.md` real.
+- **Open:** real APNs delivery and the locked-device check (I1, M5) need an Apple Developer Program account; real FCM
+  delivery needs the Firebase files (maintainer steps, `docs/testing.md`). Parked minors of plan 3: M7, M12.
+
 ## 2026-11-06 (2) — Claude Code — `feature/cycle3-ios-sdk` (plan 3, final fix wave)
 
 - **Done:** the final whole-branch review's fix wave (ruling R21): I1 Data Protection class
