@@ -282,31 +282,44 @@ $1"
 if [ "$RUN_CONSOLE" = 1 ]; then
     EXPECTED=$((EXPECTED + 1))
     rp_log "console-smoke: driving the console with headless Chromium (first run downloads the browser); output in harness/build/e2e/logs/console-smoke.log"
-    report="$RP_ROOT/harness/target/failsafe-reports/TEST-io.reliablepush.harness.console.ConsoleSmokeE2E.xml"
-    rm -f "$report"
+    report_dir="$RP_ROOT/harness/target/failsafe-reports"
+    report="$report_dir/TEST-io.reliablepush.harness.console.ConsoleSmokeE2E.xml"
+    admin_report="$report_dir/TEST-io.reliablepush.harness.console.AdminSmokeE2E.xml"
+    rm -f "$report" "$admin_report"
+    # the admin smoke test signs in with the per-run admin key: it goes to Maven's environment only (never an argument)
+    admin_key="$(sed -n 's/^HARNESS_ADMINKEY=//p' "$RP_OUT/secrets.env" | head -n 1)"
+    [ -n "$admin_key" ] || rp_die "HARNESS_ADMINKEY missing in harness/build/e2e/secrets.env"
     started=$(date +%s)
     mvn_rc=0
-    (cd "$RP_ROOT" && ./mvnw -B -pl harness -am verify -Pconsole-smoke "-Dconsole.url=$RP_HARNESS_URL") \
+    (cd "$RP_ROOT" && HARNESS_ADMINKEY="$admin_key" ./mvnw -B -pl harness -am verify -Pconsole-smoke "-Dconsole.url=$RP_HARNESS_URL" "-Dadmin.url=$RP_API_URL") \
         >"$RP_OUT/logs/console-smoke.log" 2>&1 || mvn_rc=$?
+    unset admin_key
     duration_ms=$((($(date +%s) - started) * 1000))
     [ -f "$report" ] && cp "$report" "$RP_OUT/junit/console-smoke.xml"
-    if [ "$mvn_rc" = 0 ] && [ -f "$report" ] && grep -qE '<testsuite [^>]*tests="[1-9]' "$report" \
-        && grep -qE '<testsuite [^>]*failures="0"' "$report" && grep -qE '<testsuite [^>]*errors="0"' "$report" \
-        && grep -qE '<testsuite [^>]*skipped="0"' "$report" && ! grep -qE '<(failure|error|skipped)[ >/]' "$report"; then
+    [ -f "$admin_report" ] && cp "$admin_report" "$RP_OUT/junit/admin-smoke.xml"
+    # a report passes when it ran at least one test and has no failure, error or skip
+    report_ok() {
+        [ -f "$1" ] && grep -qE '<testsuite [^>]*tests="[1-9]' "$1" \
+            && grep -qE '<testsuite [^>]*failures="0"' "$1" && grep -qE '<testsuite [^>]*errors="0"' "$1" \
+            && grep -qE '<testsuite [^>]*skipped="0"' "$1" && ! grep -qE '<(failure|error|skipped)[ >/]' "$1"
+    }
+    if [ "$mvn_rc" = 0 ] && report_ok "$report" && report_ok "$admin_report"; then
         rp_log "console-smoke: PASSED (${duration_ms} ms)"
         entry='{
   "scenario" : "console-smoke",
   "status" : "PASSED",
   "durationMs" : '"$duration_ms"',
   "failure" : null,
-  "logs" : [ "ConsoleSmokeE2E.registerDeviceSendPushSeeDeliveredAndFallback" ]
+  "logs" : [ "ConsoleSmokeE2E.registerDeviceSendPushSeeDeliveredAndFallback", "AdminSmokeE2E.signInSeeOverviewSearchUserOpenTimeline" ]
 }'
     else
-        if [ -f "$report" ] && grep -qE '<(failure|error)[ >]' "$report"; then
-            what="$(grep -oE '<(failure|error) message="[^"]*"' "$report" | head -n 1 | sed -e 's/^[^"]*"//' -e 's/"$//' \
+        failed_report="$report"
+        [ -f "$report" ] && grep -qE '<(failure|error)[ >]' "$report" || failed_report="$admin_report"
+        if [ -f "$failed_report" ] && grep -qE '<(failure|error)[ >]' "$failed_report"; then
+            what="$(grep -oE '<(failure|error) message="[^"]*"' "$failed_report" | head -n 1 | sed -e 's/^[^"]*"//' -e 's/"$//' \
                 | sed -e 's/&#10;/ /g' -e 's/&quot;/'"'"'/g' -e 's/&lt;/</g' -e 's/&gt;/>/g' -e 's/&amp;/\&/g' | cut -c1-600)"
-        elif [ -f "$report" ] && [ "$mvn_rc" = 0 ]; then
-            what="the console test was skipped or did not run (failures, errors and skipped must all be 0)"
+        elif [ -f "$report" ] && [ -f "$admin_report" ] && [ "$mvn_rc" = 0 ]; then
+            what="a console or admin smoke test was skipped or did not run (failures, errors and skipped must all be 0)"
         else
             what="maven exited $mvn_rc without a test report (build, Playwright download or startup problem)"
         fi
@@ -316,9 +329,9 @@ if [ "$RUN_CONSOLE" = 1 ]; then
   "status" : "FAILED",
   "durationMs" : '"$duration_ms"',
   "failure" : {
-    "expected" : "the console registers a device, shows the push DELIVERED and the fallback webhook with a valid signature",
+    "expected" : "the console registers a device, shows the push DELIVERED and the fallback webhook with a valid signature; the admin dashboard signs in, shows the overview, finds the scenario user and opens the timeline",
     "actual" : "'"$(json_escape "$what")"'",
-    "hint" : "harness/build/e2e/logs/console-smoke.log and harness/build/e2e/junit/console-smoke.xml; Playwright call log shows the element that was awaited"
+    "hint" : "harness/build/e2e/logs/console-smoke.log and harness/build/e2e/junit/console-smoke.xml and admin-smoke.xml; Playwright call log shows the element that was awaited"
   },
   "logs" : [ ]
 }'

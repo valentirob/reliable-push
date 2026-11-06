@@ -94,6 +94,7 @@
                 <configuration>
                     <testExcludes>
                         <testExclude>**/console/ConsoleSmokeE2E.java</testExclude>
+                        <testExclude>**/console/AdminSmokeE2E.java</testExclude>
                     </testExcludes>
                 </configuration>
             </plugin>
@@ -196,6 +197,7 @@
             <id>console-smoke</id>
             <properties>
                 <console.url>http://127.0.0.1:8090</console.url>
+                <admin.url>http://127.0.0.1:8080</admin.url>
                 <jacoco.skip>true</jacoco.skip>
                 <argLine></argLine>
             </properties>
@@ -230,9 +232,11 @@
                             <groups>console</groups>
                             <includes>
                                 <include>**/ConsoleSmokeE2E.java</include>
+                                <include>**/AdminSmokeE2E.java</include>
                             </includes>
                             <systemPropertyVariables>
                                 <console.url>${console.url}</console.url>
+                                <admin.url>${admin.url}</admin.url>
                             </systemPropertyVariables>
                         </configuration>
                     </plugin>
