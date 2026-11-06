@@ -1,6 +1,7 @@
 package io.reliablepush.admin;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
 
 import com.jayway.jsonpath.JsonPath;
 import io.reliablepush.notifications.RetentionJob;
@@ -10,6 +11,7 @@ import io.reliablepush.support.OpenApiAssert;
 import io.reliablepush.support.PostgresTestBase;
 import java.net.URI;
 import java.sql.Timestamp;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
@@ -166,7 +168,7 @@ class DailyRollupIT extends PostgresTestBase {
         assertThat(EventCapture.data(events("rollup.completed").get(0))).containsEntry("count", 7);
 
         Object before = stats("shop", "2026-11-03").get("computed_at");
-        clock.advance(java.time.Duration.ofSeconds(5));
+        clock.advance(Duration.ofSeconds(5));
         assertThat(job.run()).isEqualTo(7);
         Map<String, Object> after = stats("shop", "2026-11-03");
         assertThat(after.get("computed_at")).isNotEqualTo(before);
@@ -280,9 +282,89 @@ class DailyRollupIT extends PostgresTestBase {
                 .isZero();
 
         // a rollup older than 20 hours no longer counts
-        clock.advance(java.time.Duration.ofHours(21));
+        clock.advance(Duration.ofHours(21));
         assertThat(retention.purge()).isZero();
         assertThat(events("retention.skipped")).hasSize(2);
+    }
+
+    /** Holds the rollup lock in another connection until {@code release}, then commits a fresh rollup row. */
+    private CompletableFuture<Void> runningRollup(CountDownLatch locked, CountDownLatch release, boolean commitFresh) {
+        return CompletableFuture.runAsync(() -> transactions.executeWithoutResult(status -> {
+            jdbc.sql("select pg_advisory_xact_lock(:key)").param("key", DailyRollupJob.LOCK_KEY).query().listOfRows();
+            locked.countDown();
+            try {
+                release.await(30, TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            if (commitFresh) {
+                jdbc.sql("""
+                                insert into daily_stats
+                                values ('2026-11-05', 'shop', 0, 0, 0, 0, 0, 0, 0, 0, 0, null, null, :at)
+                                """)
+                        .param("at", Timestamp.from(NOW))
+                        .update();
+            }
+        }));
+    }
+
+    private long waitingForAdvisoryLock() {
+        return jdbc.sql("select count(*) from pg_locks where locktype = 'advisory' and not granted")
+                .query(Long.class)
+                .single();
+    }
+
+    @Test
+    void retentionWaitsForARunningRollup() throws Exception {
+        UUID old = row("shop", "READ", Instant.parse("2026-01-01T00:00:00Z"), 1L, 1L);
+        CountDownLatch locked = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        CompletableFuture<Void> rollup = runningRollup(locked, release, true);
+        assertThat(locked.await(10, TimeUnit.SECONDS)).isTrue();
+        CompletableFuture<Integer> purge;
+        try {
+            purge = CompletableFuture.supplyAsync(retention::purge);
+            // the guard waits on the lock instead of reading the stale (here: missing) computed_at at once
+            await().atMost(Duration.ofSeconds(10)).until(() -> waitingForAdvisoryLock() > 0 || purge.isDone());
+            assertThat(purge).isNotDone();
+        } finally {
+            release.countDown();
+            rollup.get(10, TimeUnit.SECONDS);
+        }
+
+        assertThat(purge.get(10, TimeUnit.SECONDS)).isGreaterThanOrEqualTo(1);
+        assertThat(jdbc.sql("select count(*) from notification where id = :id").param("id", old).query(Long.class).single())
+                .isZero();
+        assertThat(events("retention.skipped")).isEmpty();
+    }
+
+    @Autowired
+    AdminProperties adminProperties;
+
+    @Autowired
+    DailyStatsRepository dailyStats;
+
+    @Test
+    void retentionSkipsWhileTheRollupOutlastsTheWait() throws Exception {
+        RollupRetentionGuard guard =
+                new RollupRetentionGuard(adminProperties, dailyStats, clock, transactions, Duration.ofSeconds(1));
+        jdbc.sql("""
+                        insert into daily_stats values ('2026-11-04', 'shop', 0, 0, 0, 0, 0, 0, 0, 0, 0, null, null, :at)
+                        """)
+                .param("at", Timestamp.from(NOW))
+                .update();
+        CountDownLatch locked = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        CompletableFuture<Void> rollup = runningRollup(locked, release, false);
+        assertThat(locked.await(10, TimeUnit.SECONDS)).isTrue();
+        try {
+            assertThat(guard.veto()).contains("rollup_running");
+        } finally {
+            release.countDown();
+            rollup.get(10, TimeUnit.SECONDS);
+        }
+        // lock free again and a fresh row: purge allowed
+        assertThat(guard.veto()).isEmpty();
     }
 
     private ResponseEntity<String> get(String path) {

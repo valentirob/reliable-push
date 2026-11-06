@@ -203,7 +203,7 @@ below, all top-level. ThreadContext entries `trace.id` and `rp.*` are top-level;
 | `fallback.failed` (WARN) | Final failure or attempts exhausted, `FALLBACK_FAILED` | `reason`, `rp.attempt`, `event.duration` |
 | `fallback.expired` (WARN) | Closed as `FALLBACK_EXPIRED` | `reason` = `trigger_window_passed`, `next_retry_after_trigger_window` or `app_not_configured` |
 | `retention.purged` | Retention job finished | `count` (also 0) |
-| `retention.skipped` (WARN) | Retention did not run: admin is enabled, the rollup schedule is on and `daily_stats` has no row computed in the last 20 hours | `reason` = `rollup_missing` |
+| `retention.skipped` (WARN) | Retention did not run: admin is enabled, the rollup schedule is on and either `daily_stats` has no row computed in the last 20 hours, or a rollup was still running after the 30-minute wait | `reason` = `rollup_missing` or `rollup_running` |
 | `rollup.completed` | `DailyRollupJob` wrote the daily statistics | `count` = days written (not logged when another worker held the lock) |
 | `rollup.failed` (WARN) | The rollup failed and rolled back | `reason` = exception class name |
 
@@ -230,8 +230,13 @@ Ordering with the rollup: `DailyRollupJob` (worker role, `admin.rollup.cron`, 03
 daily trends survive the notification retention. It recomputes the last `min(7, retention-days)` complete UTC days of every
 configured app (zero rows included) under a PostgreSQL advisory lock (a second worker finds it taken and does nothing), deletes
 `daily_stats` rows older than `admin.rollup-retention-days` and logs `rollup.completed` (or WARN `rollup.failed`). When admin
-is enabled and `admin.rollup.cron` is not `-`, `RetentionJob` first requires a `daily_stats` row computed in the last 20 hours; otherwise
-it deletes nothing and logs WARN `retention.skipped` with `reason=rollup_missing`, and the next night retries both. With
+is enabled and `admin.rollup.cron` is not `-`, `RetentionJob` first waits for a rollup that is still running (it takes the
+rollup's advisory lock with `lock_timeout = 30min`, because the rollup's rows become visible only when it commits), then
+requires a `daily_stats` row computed in the last 20 hours. Otherwise it deletes nothing and logs WARN `retention.skipped`
+with `reason=rollup_missing` (no fresh row) or `reason=rollup_running` (the rollup still held the lock after 30 minutes),
+and the next night retries both. The wait holds one database connection of the worker for its duration. A rollup that
+regularly takes longer than about 40 minutes (10 minutes to 03:17 plus the 30-minute wait) skips retention every night:
+move `reliable-push.retention.cron` later. With
 admin disabled, or the rollup schedule `-`, retention behaves as before.
 
 ## Scaling and capacity

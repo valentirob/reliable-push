@@ -6,6 +6,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
+import java.util.Optional;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.annotation.Profile;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -56,8 +57,9 @@ public class RetentionJob {
      */
     public int purge() {
         RetentionGuard veto = guard.getIfAvailable();
-        if (veto != null && !veto.allowPurge()) {
-            EventLog.warn("retention.skipped", Map.of("reason", "rollup_missing"));
+        Optional<String> reason = veto == null ? Optional.empty() : veto.veto();
+        if (reason.isPresent()) {
+            EventLog.warn("retention.skipped", Map.of("reason", reason.get()));
             return 0;
         }
         Instant cutoff = clock.instant().minus(retention);

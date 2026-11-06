@@ -4,6 +4,7 @@ import io.reliablepush.apps.AppConfig;
 import io.reliablepush.apps.AppRegistry;
 import java.sql.Timestamp;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
@@ -101,6 +102,16 @@ class DailyStatsRepository {
         return jdbc.sql("delete from daily_stats where day < cast(:day as date)")
                 .param("day", day.toString())
                 .update();
+    }
+
+    /**
+     * Waits up to {@code wait} for the rollup's advisory lock ({@link DailyRollupJob#LOCK_KEY}), so a running rollup
+     * finishes and commits first. Must run inside a transaction: the lock is transaction-scoped and released at its
+     * end. A wait that runs out throws a {@code DataAccessException} caused by SQLSTATE {@code 55P03}.
+     */
+    void awaitRollupLock(Duration wait) {
+        jdbc.sql("set local lock_timeout = '" + wait.toMillis() + "ms'").update();
+        jdbc.sql("select pg_advisory_xact_lock(:key)").param("key", DailyRollupJob.LOCK_KEY).query().listOfRows();
     }
 
     Optional<Instant> lastComputedAt() {

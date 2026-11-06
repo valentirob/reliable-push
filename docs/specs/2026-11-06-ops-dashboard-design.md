@@ -150,10 +150,13 @@ the device of the `DELIVERED` event, else of the `READ` event; a confirmation wh
 4. Logs `rollup.completed` (`count` = days written) or WARN `rollup.failed` (`reason`).
 
 Ordering with retention: `RetentionJob` runs after the rollup (03:17 vs 03:07 by default). When admin is enabled and
-`admin.rollup.cron` is not `-`, `RetentionJob` first checks `max(computed_at)` of `daily_stats`: when it is missing or
-older than 20 hours (tonight's rollup did not succeed on any worker), it skips its run with WARN
-`retention.skipped reason=rollup_missing`, and the next night retries both. The check reads the database, so it holds
-with several workers. With admin disabled, or the rollup schedule disabled, retention behaves as today.
+`admin.rollup.cron` is not `-`, `RetentionJob` first waits for a running rollup: in a short transaction it sets
+`lock_timeout = 30min` and takes the rollup's advisory lock with the blocking `pg_advisory_xact_lock` (a rollup computes
+its window in one transaction, so its `computed_at` values become visible only at commit), then reads
+`max(computed_at)` of `daily_stats`. When it is missing or older than 20 hours (tonight's rollup did not succeed on any
+worker), it skips its run with WARN `retention.skipped reason=rollup_missing`; when the rollup still holds the lock after
+30 minutes, it skips with `reason=rollup_running`. The next night retries both. The check reads the database, so it
+holds with several workers; it holds the lock only for the instant of that read. With admin disabled, or the rollup schedule disabled, retention behaves as today.
 
 ### 3.3 Rates
 

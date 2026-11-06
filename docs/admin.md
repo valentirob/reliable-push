@@ -83,7 +83,8 @@ Field details: [`operations.md`](operations.md#event-catalogue).
   rollup (before the first run, or while the rollup failed) is missing from the chart.
 - With `retention-days` of 7 or less, the oldest live day can undercount: rows are already purged. The rollup window
   is `min(7, retention-days)` days, and a day older than that keeps its last complete computation.
-- If tonight's rollup did not run, `RetentionJob` skips its purge (`retention.skipped`) until it succeeds. This guard applies only while the rollup schedule is on (`admin.rollup.cron` is not `-`).
+- If tonight's rollup did not run, `RetentionJob` skips its purge (`retention.skipped`) until it succeeds; a rollup still
+  running when retention starts is waited for up to 30 minutes. This guard applies only while the rollup schedule is on (`admin.rollup.cron` is not `-`).
 - The page needs a modern browser with ES modules (current Chrome, Firefox, Safari, Edge). It loads no third-party
   code and no CDN.
 - Rate limit: `admin.rate-limit-per-minute` (600) per key and instance; the page waits for `Retry-After` on `429`.
