@@ -31,7 +31,7 @@ class ContainerImageIT {
 
     /** Spec 9 budget: uncompressed image size (sum of layer sizes), decimal megabytes. */
     private static final long MAX_IMAGE_BYTES = 250_000_000L;
-    private static final String IMAGE = System.getProperty("image.name", "reliable-push-backend:0.1.2");
+    private static final String IMAGE = System.getProperty("image.name", "reliable-push-backend:0.2.0-SNAPSHOT");
 
     private static Network network;
     private static PostgreSQLContainer postgres;
