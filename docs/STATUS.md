@@ -2,6 +2,51 @@
 
 Newest entry first. Updated at the end of every work session (see `.agents/skills/session-handoff/SKILL.md`).
 
+## Remaining work
+
+Everything left after `v0.1.0` is in [TODO.md](TODO.md): each item says why it is deferred and which action or date
+unblocks it. Agents: remind the maintainer of its section 1 (real APNs and the locked-device check, real FCM, Maven
+Central) at the start of a session.
+
+## 2026-11-06 (6) — Claude Code — docs: "at a glance" picture
+
+- **Done:** `docs/images/reliable-push-at-a-glance.svg` (editable source) and `.png` (2x render): your backend, FCM /
+  APNs, an iPhone and an Android phone with the tracking module, the reliable-push backend, the fallback clock and
+  timeline, and your fallback service sending the SMS. Shown in the README, at the top of `overview.md` and as slide 3
+  of `presentation.html` (19 slides, which now loads `images/` next to it).
+- **State:** the PNG is rendered with headless Chrome from the SVG. To refresh it after editing the SVG, open the SVG at
+  1600x1100 in Chrome with device scale factor 2 and save a screenshot. Docs only, no code change.
+- **Next / Open:** see [TODO.md](TODO.md).
+
+## 2026-11-06 (5) — Claude Code — docs: diagrams, guides, presentation
+
+- **Done:**
+  - `docs/TODO.md`: the remaining work, with the reason each item is deferred and what unblocks it.
+  - `docs/overview.md`: Mermaid diagrams, with the sidecar principle and a failure table, the components, the end-to-end
+    flow and states, and one detail diagram per component.
+  - `docs/getting-started.md`: run and test each component step by step, including the demo tour and the sample apps.
+  - `docs/presentation.html`: self-contained HTML slides, offline, keyboard navigation, light and dark themes.
+  - README, `architecture.md` and `integration-guide.md`: the ASCII diagrams are now Mermaid, and the sidecar framing is
+    explicit. `android.md` and `ios.md` have a sidecar note.
+  - Plan 1A Steps 1 and 2 ticked.
+- **State:** all 16 Mermaid blocks parse and render with Mermaid 11.4.1. The slides were checked in a browser at
+  1280x800, in light and dark. Docs only, no code change.
+- **Next / Open:** see [TODO.md](TODO.md).
+
+## 2026-11-06 (4) — Claude Code — release 0.1.0
+
+- **Done:** first release. `release/0.1.0` from `develop` set every component to `0.1.0` and added `CHANGELOG.md`; it was
+  merged into `main` (tag `v0.1.0`) and back into `develop`. `develop` is now `0.2.0-SNAPSHOT` (poms, Android
+  `VERSION_NAME` and `ReliablePush.VERSION`, iOS `ReliablePush.version`); the guides and `client-java/README.md` keep
+  pointing at the released `0.1.0`.
+- **State (verified on `release/0.1.0`):** `cd backend && ./mvnw -B verify -Pimage` OK; `./mvnw -B -pl harness,loadtest
+  -am verify` OK; `cd android && ./gradlew build` OK (release AAR 67,327 bytes); iOS package tests 108 run, 1 skipped, 0
+  failures; `./scripts/e2e.sh`: `17/17 passed`. The Android and iOS emulator/Simulator suites were not rerun for the
+  version-only change (last: `8/8 passed, 1 skipped` each on the cycle 3 tree).
+- **Next:** pick the next scope (none planned yet). Maintainer-only: publish the Android SDK to Maven Central (namespace
+  and signing key), real FCM / APNs delivery checks with the maintainer's credentials.
+- **Open:** as in (3): real-device push delivery unverified; plan 3 minors M7, M12 parked.
+
 ## 2026-11-06 (3) — Claude Code — `develop` (cycle 3 merged)
 
 - **Done:** `feature/cycle3-ios-sdk` merged into `develop` with `--no-ff` (`4e015d8`, merge line `E2E: 17/17 passed`,

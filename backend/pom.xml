@@ -13,7 +13,7 @@
 
     <groupId>io.reliablepush</groupId>
     <artifactId>reliable-push-backend</artifactId>
-    <version>0.1.0</version>
+    <version>0.1.1</version>
     <name>reliable-push-backend</name>
     <description>Reliable push delivery/read tracking service with webhook fallback</description>
 
@@ -24,8 +24,8 @@
         <jacoco.version>0.8.16</jacoco.version>
         <bucket4j.version>8.21.0</bucket4j.version>
         <nimbus-jose-jwt.version>10.10</nimbus-jose-jwt.version>
-        <swagger-request-validator.version>2.46.1</swagger-request-validator.version>
-        <exec-maven-plugin.version>3.6.1</exec-maven-plugin.version>
+        <swagger-request-validator.version>3.0.0</swagger-request-validator.version>
+        <exec-maven-plugin.version>3.6.4</exec-maven-plugin.version>
         <!-- JUnit tags: the default build never builds or runs the container image (profile "image" flips these). -->
         <it.groups></it.groups>
         <it.excludedGroups>image</it.excludedGroups>

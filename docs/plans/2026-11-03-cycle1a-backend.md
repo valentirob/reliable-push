@@ -38,13 +38,13 @@
 
 **Files:** none (environment only; record result in `docs/STATUS.md`).
 
-- [ ] **Step 1: Install JDK 21, Maven (only to generate the wrapper) and a Docker runtime** — needs maintainer approval on the machine:
+- [x] **Step 1: Install JDK 21, Maven (only to generate the wrapper) and a Docker runtime** — needs maintainer approval on the machine:
 ```bash
 brew install openjdk@21 maven colima docker docker-compose
 colima start --cpu 4 --memory 6
 ```
 (Docker Desktop or Podman are equally fine.)
-- [ ] **Step 2: Verify**
+- [x] **Step 2: Verify**
 Run: `/opt/homebrew/opt/openjdk@21/bin/java -version && docker info --format '{{.ServerVersion}}'`
 Expected: `openjdk version "21...` and a server version. Export `JAVA_HOME=/opt/homebrew/opt/openjdk@21` for all later commands.
 

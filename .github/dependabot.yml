@@ -3,6 +3,8 @@ updates:
   - package-ecosystem: maven
     directory: /backend
     target-branch: develop
+    cooldown:
+      default-days: 14  # only releases at least two weeks old, as the pinned versions (libs.versions.toml, tools.env)
     schedule:
       interval: weekly
     commit-message:
@@ -17,6 +19,8 @@ updates:
   - package-ecosystem: gradle
     directory: /android
     target-branch: develop
+    cooldown:
+      default-days: 14  # only releases at least two weeks old, as the pinned versions (libs.versions.toml, tools.env)
     schedule:
       interval: weekly
     commit-message:
@@ -31,6 +35,8 @@ updates:
   - package-ecosystem: maven
     directory: /
     target-branch: develop
+    cooldown:
+      default-days: 14  # only releases at least two weeks old, as the pinned versions (libs.versions.toml, tools.env)
     schedule:
       interval: weekly
     commit-message:
@@ -45,6 +51,13 @@ updates:
   - package-ecosystem: docker
     directory: /backend
     target-branch: develop
+    cooldown:
+      default-days: 14  # only releases at least two weeks old, as the pinned versions (libs.versions.toml, tools.env)
+    ignore:
+      # stay on the Java 21 LTS line: moving to the next LTS is a deliberate change, not a weekly bump
+      - dependency-name: eclipse-temurin
+        update-types:
+          - version-update:semver-major
     schedule:
       interval: weekly
     commit-message:
@@ -59,6 +72,13 @@ updates:
   - package-ecosystem: docker
     directory: /harness
     target-branch: develop
+    cooldown:
+      default-days: 14  # only releases at least two weeks old, as the pinned versions (libs.versions.toml, tools.env)
+    ignore:
+      # stay on the Java 21 LTS line: moving to the next LTS is a deliberate change, not a weekly bump
+      - dependency-name: eclipse-temurin
+        update-types:
+          - version-update:semver-major
     schedule:
       interval: weekly
     commit-message:
@@ -73,6 +93,13 @@ updates:
   - package-ecosystem: docker
     directory: /loadtest
     target-branch: develop
+    cooldown:
+      default-days: 14  # only releases at least two weeks old, as the pinned versions (libs.versions.toml, tools.env)
+    ignore:
+      # stay on the Java 21 LTS line: moving to the next LTS is a deliberate change, not a weekly bump
+      - dependency-name: eclipse-temurin
+        update-types:
+          - version-update:semver-major
     schedule:
       interval: weekly
     commit-message:
@@ -86,6 +113,8 @@ updates:
   - package-ecosystem: github-actions
     directory: /
     target-branch: develop
+    cooldown:
+      default-days: 14  # only releases at least two weeks old, as the pinned versions (libs.versions.toml, tools.env)
     schedule:
       interval: weekly
     commit-message:
