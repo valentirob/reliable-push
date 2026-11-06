@@ -9,9 +9,9 @@ is about 292 KB (CI gate: under 307,200 bytes).
 Your backend registers each notification with reliable-push and puts the returned `trackingId` into the APNs payload as
 `rp_tid`: see [integration-guide.md](integration-guide.md) §1 and §2. This page is the app side.
 
-> **Status.** Version `0.1.0-SNAPSHOT`, built and tested locally (package tests, Simulator end-to-end suite); the CI
-> workflow `ios-ci.yml` exists but has not run on GitHub yet. There is no release tag yet: SwiftPM by git tag is the only
-> distribution channel (no XCFramework, no CocoaPods).
+> **Status.** Version `0.1.0` (tag `v0.1.0`), tested on the iOS Simulator locally (package tests, end-to-end suite) and
+> in CI (`ios-ci.yml`: package tests, sample builds, size gate). SwiftPM by git tag is the only distribution channel (no
+> XCFramework, no CocoaPods). Real APNs delivery on a device has not been verified yet.
 
 ## 1. Add the package
 
@@ -20,7 +20,7 @@ enter the repository URL, pick the `ReliablePush` library and add it to **both**
 a `Package.swift`:
 
 ```swift
-.package(url: "https://github.com/valentirob/reliable-push.git", from: "0.1.0"),   // once a tag exists
+.package(url: "https://github.com/valentirob/reliable-push.git", from: "0.1.0"),
 // target dependency: .product(name: "ReliablePush", package: "reliable-push")
 ```
 

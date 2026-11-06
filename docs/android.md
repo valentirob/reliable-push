@@ -8,7 +8,7 @@ coroutines); `firebase-messaging` is a `compileOnly` dependency, so your app sup
 Your backend registers each notification with reliable-push and puts the returned `trackingId` into the FCM message as
 `rp_tid`: see [integration-guide.md](integration-guide.md) §1 and §2. This page is the app side.
 
-> **Status.** Version `0.1.0-SNAPSHOT`, built and tested locally and in CI. It is not on Maven Central yet (`./gradlew
+> **Status.** Version `0.1.0`, built and tested locally and in CI. It is not on Maven Central yet (`./gradlew
 > :reliablepush:publishToMavenLocal` installs it into `~/.m2`; releasing needs the maintainer's namespace and signing key).
 
 ## 1. Add the library
@@ -16,7 +16,7 @@ Your backend registers each notification with reliable-push and puts the returne
 ```kotlin
 // settings.gradle.kts: mavenLocal() until the library is on Maven Central
 dependencies {
-    implementation("io.reliablepush:reliable-push-android:0.1.0-SNAPSHOT")
+    implementation("io.reliablepush:reliable-push-android:0.1.0")
     implementation("com.google.firebase:firebase-messaging:<your version>")
 }
 ```

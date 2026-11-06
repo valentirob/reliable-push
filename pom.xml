@@ -5,7 +5,7 @@
 
     <groupId>io.reliablepush</groupId>
     <artifactId>reliable-push-parent</artifactId>
-    <version>0.1.0-SNAPSHOT</version>
+    <version>0.1.0</version>
     <packaging>pom</packaging>
     <name>reliable-push-parent</name>
     <description>Aggregator for the reliable-push modules (the backend has its own build).</description>

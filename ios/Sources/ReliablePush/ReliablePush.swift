@@ -12,7 +12,7 @@ import UserNotifications
 /// registration also the host's ID token. Never notification content.
 public enum ReliablePush {
     /// The SDK version, sent as `User-Agent: reliable-push-ios/<version>`.
-    public static let version = "0.1.0-SNAPSHOT"
+    public static let version = "0.1.0"
 
     /// Configures the SDK. Call it in `application(_:didFinishLaunchingWithOptions:)` on every launch, before any
     /// other method.
