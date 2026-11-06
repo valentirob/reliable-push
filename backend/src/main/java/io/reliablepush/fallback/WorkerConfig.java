@@ -19,6 +19,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
 import org.springframework.scheduling.annotation.EnableScheduling;
+import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.databind.json.JsonMapper;
 
 /** The {@code worker} role: scheduling and the fallback worker (spec 1). */
@@ -45,14 +46,17 @@ class WorkerConfig {
             ReliablePushProperties properties,
             WebhookClient webhookClient,
             JsonMapper json,
-            RpMetrics metrics) {
+            RpMetrics metrics,
+            FallbackAttemptRepository attempts,
+            TransactionTemplate transactions) {
         // the lease is a product duration (2 "minutes"): scaled by the fast clock like backoff and trigger window
         Duration lease = timeScale.scale(properties.worker().lease());
         boolean fastClock = !timeScale.minuteDuration().equals(Duration.ofMinutes(1));
         checkLease(lease, fastClock, apps.all()).ifPresent(LOG::warn);
 
         FallbackDispatcher dispatcher =
-                new FallbackDispatcher(notifications, apps, timeScale, clock, webhookClient, json, metrics, lease);
+                new FallbackDispatcher(notifications, apps, timeScale, clock, webhookClient, json, metrics, lease,
+                        attempts, transactions);
         return new FallbackScheduler(notifications, dispatcher, clock, lease, properties.worker().batchSize(),
                 properties.worker().maxConcurrency());
     }

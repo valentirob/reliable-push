@@ -46,6 +46,16 @@ class SchemaIT extends PostgresTestBase {
     }
 
     @Test
+    void adminTablesAndIndexExist() {
+        List<String> tables = jdbc.sql("select table_name from information_schema.tables where table_schema = current_schema()")
+                .query(String.class)
+                .list();
+
+        assertThat(tables).contains("fallback_attempt", "daily_stats");
+        assertThat(indexDef("notification_app_created")).contains("app_id").contains("created_at");
+    }
+
+    @Test
     void dueIndexIsPartial() {
         assertThat(indexDef("notification_due")).contains("WHERE (due_at IS NOT NULL)");
     }
