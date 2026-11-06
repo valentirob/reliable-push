@@ -2,6 +2,27 @@
 
 All notable changes to this project are documented here. Versions follow [Semantic Versioning](https://semver.org/).
 
+## 0.1.1 — 2026-11-06
+
+Maintenance release: documentation and dependency updates. No change to the API, the SDK behaviour or the database.
+
+### Documentation
+
+- `docs/overview.md`: Mermaid diagrams of every component, starting from the sidecar principle and a failure table.
+- `docs/getting-started.md`: run and test each component step by step.
+- `docs/presentation.html`: HTML slides to present the project, with light and dark themes.
+- `docs/images/reliable-push-at-a-glance.svg` (and `.png`): the whole system on one picture, in the README.
+- `docs/TODO.md`: the remaining work, with why each item waits and what unblocks it.
+
+### Dependencies and tooling
+
+- Root reactor (client, harness, loadtest): JUnit 6.1.3, Maven compiler 3.16.0, install 3.2.0, Surefire and Failsafe
+  3.6.1.
+- Backend: exec-maven-plugin 3.6.4; swagger-request-validator-core 3.0.0 (tests only).
+- CI: `gradle/actions/wrapper-validation` 6.4.1.
+- Dependabot: proposes only releases at least two weeks old, and keeps the Temurin images on Java 21 LTS.
+- The Helm chart's version and `appVersion` are 0.1.1.
+
 ## 0.1.0 — 2026-11-06
 
 First release. reliable-push tracks whether each push notification was delivered and read on the device and, when a
