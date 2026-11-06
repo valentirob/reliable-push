@@ -18,10 +18,10 @@ final class IOSE2ETests: XCTestCase {
     func testDeliveredIsReported() async throws {
         let sample = try await registeredSample()
         let tid = try await sample.harness.push(appId: sample.appId, userId: sample.userId, title: "Delivered",
-                                                body: "iOS E2E delivered", policy: "NOT_DELIVERED", timeoutMinutes: 5)
+                                                body: "iOS E2E delivered", policy: "NOT_DELIVERED", timeoutMinutes: 10)
         try await sample.debugPush(tid, title: "Delivered")
         try await sample.awaitState(tid, "DELIVERED", 5)
-        try await Task.sleep(nanoseconds: 7_000_000_000) // past the 5 s (fast-clock) timeout
+        try await Task.sleep(nanoseconds: 12_000_000_000) // past the 10 s timeout (fast clock: 1 min = 1 s)
         let state = try await sample.harness.state(tid)
         XCTAssertEqual(state, "DELIVERED")
         let webhooks = try await sample.harness.webhookCount(tid)

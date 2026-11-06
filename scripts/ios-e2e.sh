@@ -11,7 +11,8 @@
 # backend through the harness's device proxy (http://127.0.0.1:8091, switched offline by the offline test) and the
 # harness at http://127.0.0.1:8090.
 # Simulator: IOS_SIMULATOR (default "iPhone 17"); it is booted unless already booted, and shut down at the end only if
-# this run booted it. Its language is set to en-US (the tests tap the notification prompt's "Allow" / "Don't Allow").
+# this run booted it. Its language is set to en-US (the tests tap the notification prompt's "Allow" / "Don't Allow");
+# on a Simulator this run did not boot, the previous AppleLanguages / AppleLocale are restored at the end.
 # Builds are signed to run locally (no Apple Developer team); the App Group entitlement applies on the Simulator.
 # Phases (the app is uninstalled before each, so the notification prompt shows again):
 #   blocked: NotificationsBlockedUITests, answers "Don't Allow"  -> notifications-blocked-means-fallback
@@ -23,8 +24,8 @@
 # harness/build/apns/apns.properties and exported IOS_DEVELOPMENT_TEAM (a paid team with Push Notifications; the app is
 # then built with RP_APNS=1); otherwise it is SKIPPED, which counts as neither passed nor failed. Never created by a
 # script. See docs/testing.md, "Real APNs pushes".
-# Prints "iOS E2E: 8/8 passed, 1 skipped" (without the APNs files); exit code 0 only if no entry FAILED and at least one
-# PASSED.
+# Prints "iOS E2E: 8/8 passed, 1 skipped" (without the APNs files); exit code 0 only if every entry that ran PASSED
+# (none FAILED or missing) and at least one entry PASSED or was SKIPPED.
 # Environment: IOS_SIMULATOR, E2E_READY_TIMEOUT (stack readiness, default 120 s), RP_BUNDLE_ID (sample bundle id,
 # default io.reliablepush.sample).
 set -euo pipefail
@@ -140,6 +141,9 @@ rm -rf "$RP_OUT/logs" "$RP_OUT/junit" "$RP_OUT/summary.json" "$RP_OUT"/*.xcresul
 mkdir -p "$RP_OUT/logs" "$RP_OUT/junit"
 
 SIM_STARTED=0
+LANG_RESTORE=0 # 1: restore OLD_LANGS / OLD_LOCALE in finish (a Simulator this run did not boot)
+OLD_LANGS=""
+OLD_LOCALE=""
 XCB_PID=""
 LOG_SINCE="$(date '+%Y-%m-%d %H:%M:%S')"
 
@@ -165,6 +169,9 @@ finish() {
             rp_compose down -v --remove-orphans >/dev/null 2>&1
         fi
     fi
+    if [ "$LANG_RESTORE" = 1 ]; then
+        restore_language
+    fi
     if [ "$SIM_STARTED" = 1 ]; then
         rp_log "shutting down the Simulator this run booted ($SIM_NAME)"
         xcrun simctl shutdown "$UDID" >/dev/null 2>&1
@@ -172,6 +179,22 @@ finish() {
     rp_log "outputs: harness/build/ios-e2e (summary.json, junit/, *.xcresult, logs/)"
     if [ "$rc" = 0 ]; then rp_log "RESULT: no entry failed"; else rp_log "RESULT: FAILED (exit $rc)"; fi
     exit "$rc"
+}
+# Puts back the language of a Simulator this run did not boot (values read before the en-US write; empty = unset).
+restore_language() {
+    local langs=()
+    if [ -n "$OLD_LANGS" ]; then
+        IFS=, read -r -a langs <<<"$OLD_LANGS"
+        xcrun simctl spawn "$UDID" defaults write -g AppleLanguages -array "${langs[@]}"
+    else
+        xcrun simctl spawn "$UDID" defaults delete -g AppleLanguages >/dev/null 2>&1
+    fi
+    if [ -n "$OLD_LOCALE" ]; then
+        xcrun simctl spawn "$UDID" defaults write -g AppleLocale -string "$OLD_LOCALE"
+    else
+        xcrun simctl spawn "$UDID" defaults delete -g AppleLocale >/dev/null 2>&1
+    fi
+    rp_log "restored the Simulator's language (AppleLanguages ${OLD_LANGS:-unset}, AppleLocale ${OLD_LOCALE:-unset})"
 }
 trap finish EXIT
 trap 'exit 130' INT
@@ -194,7 +217,13 @@ else
     boot_sim
 fi
 # en-US for the system alert's button labels
-if ! xcrun simctl spawn "$UDID" defaults read -g AppleLanguages 2>/dev/null | tr -d ' \n"()' | grep -q '^en-US'; then
+CURRENT_LANGS="$(xcrun simctl spawn "$UDID" defaults read -g AppleLanguages 2>/dev/null | tr -d ' \n"()' || true)"
+if ! printf '%s\n' "$CURRENT_LANGS" | grep -q '^en-US'; then
+    if [ "$SIM_STARTED" = 0 ]; then
+        OLD_LANGS="$CURRENT_LANGS"
+        OLD_LOCALE="$(xcrun simctl spawn "$UDID" defaults read -g AppleLocale 2>/dev/null || true)"
+        LANG_RESTORE=1
+    fi
     xcrun simctl spawn "$UDID" defaults write -g AppleLanguages -array en-US
     xcrun simctl spawn "$UDID" defaults write -g AppleLocale -string en_US
     if [ "$SIM_STARTED" = 1 ]; then
@@ -202,7 +231,7 @@ if ! xcrun simctl spawn "$UDID" defaults read -g AppleLanguages 2>/dev/null | tr
         xcrun simctl shutdown "$UDID" >/dev/null 2>&1 || true
         boot_sim
     else
-        rp_warn "the booted Simulator's language was not en-US: set now, applies after its next restart (the tests fall back to the prompt's button order)"
+        rp_warn "the booted Simulator's language was not en-US: set for this run (the system prompt applies it only after a restart, so the tests fall back to its button order) and restored at the end"
     fi
 fi
 

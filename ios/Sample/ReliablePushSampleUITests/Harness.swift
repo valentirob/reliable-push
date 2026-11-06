@@ -196,7 +196,7 @@ final class SampleUnderTest {
             "RP_RESET": reset ? "1" : "0",
         ]
         app.launch()
-        // a later relaunch with this environment (e.g. by XCUIApplication.open) must not wipe the registration again
+        // a later launch that reuses this environment without launch(reset:) must not wipe the registration again
         app.launchEnvironment["RP_RESET"] = "0"
         XCTAssertTrue(app.buttons["register"].waitForExistence(timeout: 20), "the sample's main screen")
     }

@@ -11,6 +11,17 @@ final class BaseURLTests: XCTestCase {
         }
     }
 
+    func testRejectsHostsThatOnlyLookLocal() {
+        let spoofs = ["http://localhost.evil.com", "http://127.0.0.1.nip.io", "http://localhost@evil.com",
+                      "http://localhost.evil.com:8080/api"]
+        for spoof in spoofs {
+            XCTAssertThrowsError(try BaseURL.validate(spoof), spoof) {
+                let error = $0 as? ReliablePushError
+                XCTAssertTrue(error == .insecureBaseURL || error == .invalidBaseURL, "\(spoof): \($0)")
+            }
+        }
+    }
+
     func testNormalisesTrailingSlashAndWhitespace() throws {
         XCTAssertEqual(try BaseURL.validate("  https://x.example/api/// ").absoluteString, "https://x.example/api")
     }
