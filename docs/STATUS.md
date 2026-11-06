@@ -2,6 +2,30 @@
 
 Newest entry first. Updated at the end of every work session (see `.agents/skills/session-handoff/SKILL.md`).
 
+## 2026-11-06 (2) — Claude Code — `feature/cycle3-ios-sdk` (plan 3, final fix wave)
+
+- **Done:** the final whole-branch review's fix wave (ruling R21): I1 Data Protection class
+  `completeUntilFirstUserAuthentication` on the queue directory and on `events.lock` / `flush.lock` (set on every open,
+  WARN `file.protection_failed` if refused); I2 `ReliablePush.deviceId` from the Keychain record (nil after a restore);
+  I3 `willPresent` guidance and known limit; M1 doc fix; M2 WARN `token.unavailable status=<OSStatus>`; M3 a
+  retry-not-before more than 3600 s ahead counts as expired; M4 async-NSE and foreign-delegate docs; M5 Debug-only ATS
+  local-networking exception for the sample NSE (plist split per configuration); M6 `ios-e2e.sh` restores the language
+  of a Simulator it did not boot; M8 no clear / persist on a locked first launch; M9 every in-flight app flush is
+  cancelled by logout / reconfigure; R19 public log keys `reason status count outcome type call`; R20 User ID in
+  `PrivacyInfo.xcprivacy`; the review's "fix now" items (spoof-host tests, size.sh stderr, doc tidy-ups, delivered-test
+  timing, Harness comment, `ios-e2e.sh` header, CI `simctl list` step). Spec plan 3 block updated. M7, M12 stay parked.
+- **State (not merged, not pushed):** package tests on the Simulator: 108 run, 1 skipped, 0 failures, no warnings;
+  `ios/scripts/size.sh`: 291,920 bytes (limit 307,200; was 272,736, one more 16 KB page); `plutil -lint` OK (privacy
+  manifest, NSE plists); sample Debug and Release builds OK (`CODE_SIGNING_ALLOWED=NO`); `./scripts/ios-e2e.sh`:
+  `iOS E2E: 8/8 passed, 1 skipped`; the M6 restore was checked with `--test notifications-blocked-means-fallback` on a
+  booted de-DE Simulator (`1/1 passed`, language restored); actionlint 1.7.12 clean. No harness, backend or Android
+  change, so `e2e.sh` / `android-e2e.sh` were not rerun (last: 17/17, 8/8 + 1 skipped).
+- **Next:** the maintainer decides the merge into `develop` (`--no-ff`; merge line `E2E: 17/17 passed`, `Android E2E:
+  8/8 passed, 1 skipped`, `iOS E2E: 8/8 passed, 1 skipped`); before that, ideally push the branch / open a draft PR so
+  `ios-ci.yml` and the CodeQL Swift job run once.
+- **Open:** I1 and M5 need an on-device check (the Simulator does not enforce Data Protection): run `apns-real-delivery`
+  with a push while the device is locked, in an app built with Data Protection Complete. Size headroom is now about 15 KB.
+
 ## 2026-11-06 (1) — Claude Code — `feature/cycle3-ios-sdk` (plan 3, iOS SDK, Task 8 and handoff)
 
 - **Done:** all plan 3 tasks (0 to 8) are implemented and ticked: the iOS SDK (root `Package.swift`, `ios/Sources/ReliablePush`,
