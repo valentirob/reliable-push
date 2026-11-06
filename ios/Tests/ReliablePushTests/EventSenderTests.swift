@@ -430,7 +430,7 @@ final class EventSenderTests: XCTestCase {
         XCTAssertEqual(log.messages.filter { $0.contains("event=lock.unavailable") }.count, 1, "\(log.messages)")
     }
 
-    func testCancellingAFlushThatWaitsForTheLockReturnsSkipped() async {
+    func testCancellingAFlushThatWaitsForTheLockKeepsTheEventsForLater() async {
         add(1)
         let other = FileLock(url: dir.appendingPathComponent("flush.lock"))
         let held = other.tryLock()
@@ -441,8 +441,9 @@ final class EventSenderTests: XCTestCase {
         try? await Task.sleep(nanoseconds: 100_000_000)
         flush.cancel()
         let r = await flush.value
-        XCTAssertEqual(r, .skipped)
+        XCTAssertEqual(r, .retryLater)
         XCTAssertTrue(StubURLProtocol.requests.isEmpty)
+        XCTAssertEqual(queue.count, 1)
         held?.release()
     }
 

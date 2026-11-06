@@ -4,7 +4,7 @@ import Foundation
 enum FlushResult: Sendable {
     /// The queue is empty.
     case done
-    /// Events remain; try again at the next launch / NSE run.
+    /// Events remain (also when the flush was cancelled); try again at the next launch / NSE run.
     case retryLater
     /// No usable registration (never registered, or a refresh was answered 401).
     case notRegistered
@@ -56,7 +56,8 @@ final class EventSender: Sendable {
         } else {
             acquired = flushLock.tryLock()
         }
-        guard let held = acquired else { return .skipped }
+        // cancelled (logout, an expired or refused activity): events stay queued, as for a cancel between batches
+        guard let held = acquired else { return Task.isCancelled ? .retryLater : .skipped }
         defer { held.release() }
 
         if queue.count == 0 { return .done }
