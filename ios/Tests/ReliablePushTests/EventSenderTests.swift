@@ -379,6 +379,60 @@ final class EventSenderTests: XCTestCase {
         XCTAssertEqual(again, .done)
     }
 
+    // M7: a flush with a deadline waits for a held lock instead of skipping, so an event queued while another process
+    // flushes is sent by this run, not left for the next push or launch.
+    func testFlushWithDeadlineWaitsForHeldLockThenSends() async {
+        let other = FileLock(url: dir.appendingPathComponent("flush.lock"))
+        let held = Locked<FileLock.Held?>(other.tryLock())
+        XCTAssertNotNil(held.withLock { $0 })
+        add(1) // queued while the other holder is busy
+        StubURLProtocol.reset { _ in Self.items([("t0", "ACCEPTED")]) }
+        let sender = makeSender()
+        let deadline = now.addingTimeInterval(5)
+        let flush = Task { await sender.flush(deadline: deadline) }
+        try? await Task.sleep(nanoseconds: 150_000_000)
+        XCTAssertTrue(StubURLProtocol.requests.isEmpty, "nothing is sent while the lock is held")
+        held.withLock { $0?.release(); $0 = nil }
+        let r = await flush.value
+        XCTAssertEqual(r, .done)
+        XCTAssertEqual(eventRequests().count, 1)
+        XCTAssertEqual(queue.count, 0)
+    }
+
+    func testFlushWithDeadlineSkipsWhenLockIsHeldPastTheDeadline() async {
+        add(1)
+        let other = FileLock(url: dir.appendingPathComponent("flush.lock"))
+        let held = other.tryLock()
+        XCTAssertNotNil(held)
+        let c = clock
+        let sender = makeSender()
+        let deadline = now.addingTimeInterval(5)
+        let flush = Task { await sender.flush(deadline: deadline) }
+        try? await Task.sleep(nanoseconds: 100_000_000)
+        c.withLock { $0 = $0.addingTimeInterval(10) } // the deadline passes while the lock is still held
+        let r = await flush.value
+        XCTAssertEqual(r, .skipped)
+        XCTAssertTrue(StubURLProtocol.requests.isEmpty)
+        XCTAssertEqual(queue.count, 1)
+        held?.release()
+    }
+
+    func testCancellingAFlushThatWaitsForTheLockReturnsSkipped() async {
+        add(1)
+        let other = FileLock(url: dir.appendingPathComponent("flush.lock"))
+        let held = other.tryLock()
+        XCTAssertNotNil(held)
+        let sender = makeSender()
+        let deadline = now.addingTimeInterval(5)
+        let flush = Task { await sender.flush(deadline: deadline) }
+        try? await Task.sleep(nanoseconds: 100_000_000)
+        flush.cancel()
+        let r = await flush.value
+        XCTAssertEqual(r, .skipped)
+        XCTAssertTrue(StubURLProtocol.requests.isEmpty)
+        held?.release()
+    }
+
     func testDeadlineStopsBetweenBatches() async {
         add(120)
         let c = clock
