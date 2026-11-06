@@ -5,13 +5,26 @@ You add two things: (1) register each notification with reliable-push and put it
 a **fallback receiver**, an HTTPS endpoint that reliable-push calls when a push was not delivered or read in time. Mobile
 apps embed the SDK (Android and iOS, later cycles), which reports `DELIVERED` and `READ`.
 
+```mermaid
+sequenceDiagram
+  autonumber
+  participant BE as Your backend
+  participant RP as reliable-push
+  participant PP as FCM / APNs
+  participant SDK as Device SDK
+  participant FR as Your fallback receiver
+  BE->>RP: POST /v1/notifications
+  RP-->>BE: trackingId
+  BE->>PP: send the push with rp_tid = trackingId
+  PP->>SDK: push arrives, the notification is shown
+  SDK->>RP: DELIVERED / READ
+  Note over RP: due and policy unmet?
+  RP->>FR: signed webhook (SMS, email, ...)
 ```
-your backend ── 1. POST /v1/notifications ──► reliable-push ◄── 4. DELIVERED / READ ── device SDK
-     │ ◄── trackingId                                │
-     └─ 2. send push with rp_tid = trackingId ──► FCM / APNs ──► device
-                                                      │ 5. due and policy unmet
-your fallback receiver ◄── 6. signed webhook ─────────┘      (SMS, email, ...)
-```
+
+**Your push path does not depend on reliable-push.** Step 1 is a separate call before the send. If it fails, you can
+still send the push, untracked. The SDK never hides or delays a notification beyond the iOS extension's send timeout
+(5 s by default). Failure cases: [overview.md](overview.md#1-the-sidecar-principle).
 
 ## Prerequisites (operator side)
 

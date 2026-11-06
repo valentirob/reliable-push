@@ -1,0 +1,832 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>reliable-push</title>
+<meta name="description" content="reliable-push in slides: delivery and read tracking for push notifications, with a signed fallback webhook. A sidecar next to your existing push stack.">
+<style>
+  :root {
+    --bg: #f5f7fb;
+    --slide: #ffffff;
+    --ink: #172033;
+    --muted: #5b6478;
+    --line: #d6dbe6;
+    --main: #3d4a63;        /* your existing push path */
+    --main-soft: #e9edf4;
+    --side: #0e8a7e;        /* reliable-push sidecar */
+    --side-soft: #e1f4f1;
+    --fall: #c77a0a;        /* fallback */
+    --fall-soft: #fdf1dc;
+    --ok: #2f8a3a;
+    --ok-soft: #e4f3e6;
+    --bad: #b8433a;
+    --bad-soft: #f8e5e3;
+    --code-bg: #f0f2f7;
+    --shadow: 0 10px 30px rgba(23, 32, 51, .08);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f1420; --slide: #161d2c; --ink: #e8ecf4; --muted: #9aa4b8; --line: #2c3548;
+      --main: #9fb0cf; --main-soft: #222b3d; --side: #3cc4b4; --side-soft: #15322f;
+      --fall: #f0a63a; --fall-soft: #3a2c14; --ok: #5cc46a; --ok-soft: #183320;
+      --bad: #ee7b70; --bad-soft: #3a1d1b; --code-bg: #0f1522; --shadow: none;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0f1420; --slide: #161d2c; --ink: #e8ecf4; --muted: #9aa4b8; --line: #2c3548;
+    --main: #9fb0cf; --main-soft: #222b3d; --side: #3cc4b4; --side-soft: #15322f;
+    --fall: #f0a63a; --fall-soft: #3a2c14; --ok: #5cc46a; --ok-soft: #183320;
+    --bad: #ee7b70; --bad-soft: #3a1d1b; --code-bg: #0f1522; --shadow: none;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg); color: var(--ink);
+    font: 18px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    overflow: hidden;
+  }
+  code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .82em; }
+  code { background: var(--code-bg); padding: .08em .35em; border-radius: 4px; }
+  pre { background: var(--code-bg); padding: 14px 16px; border-radius: 8px; overflow: auto; margin: 0; line-height: 1.4; }
+  pre code { background: none; padding: 0; }
+
+  /* deck */
+  .deck { position: fixed; inset: 0 0 56px 0; display: grid; place-items: center; padding: 20px; }
+  .slide {
+    display: none; width: min(1200px, 100%); height: min(720px, 100%);
+    background: var(--slide); border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow);
+    padding: 40px 56px; overflow: auto; position: relative;
+  }
+  .slide.active { display: flex; flex-direction: column; animation: fade .25s ease; }
+  @keyframes fade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+  .kicker { color: var(--side); font-weight: 700; letter-spacing: .08em; text-transform: uppercase; font-size: .72em; margin: 0 0 6px; }
+  h1 { font-size: 2.6em; line-height: 1.1; margin: 0 0 12px; }
+  h2 { font-size: 1.7em; line-height: 1.15; margin: 0 0 18px; }
+  h3 { font-size: 1.02em; margin: 0 0 6px; }
+  p { margin: 0 0 12px; }
+  .lead { font-size: 1.2em; color: var(--muted); max-width: 46em; }
+  .muted { color: var(--muted); }
+  .small { font-size: .82em; }
+  .grow { flex: 1; min-height: 0; display: flex; flex-direction: column; justify-content: center; }
+  .cols { display: grid; gap: 18px; }
+  .c2 { grid-template-columns: repeat(2, 1fr); }
+  .c3 { grid-template-columns: repeat(3, 1fr); }
+  .c4 { grid-template-columns: repeat(4, 1fr); }
+  .card { border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; background: var(--slide); }
+  .card.side { border-color: var(--side); background: var(--side-soft); }
+  .card.main { border-color: var(--main); background: var(--main-soft); }
+  .card.fall { border-color: var(--fall); background: var(--fall-soft); }
+  .card.ok { border-color: var(--ok); background: var(--ok-soft); }
+  .card.bad { border-color: var(--bad); background: var(--bad-soft); }
+  .card p:last-child { margin-bottom: 0; }
+  .big { font-size: 2.1em; font-weight: 800; line-height: 1; margin-bottom: 6px; }
+  .icon { font-size: 1.6em; line-height: 1; margin-bottom: 8px; }
+  ul.clean { margin: 0; padding-left: 1.1em; }
+  ul.clean li { margin: 4px 0; }
+  .pill { display: inline-block; border-radius: 999px; padding: 2px 10px; font-size: .78em; font-weight: 600; border: 1px solid var(--line); margin: 2px 4px 2px 0; }
+  .pill.side { color: var(--side); border-color: var(--side); }
+  .pill.fall { color: var(--fall); border-color: var(--fall); }
+  .pill.ok { color: var(--ok); border-color: var(--ok); }
+  .pill.bad { color: var(--bad); border-color: var(--bad); }
+  .pill.main { color: var(--main); border-color: var(--main); }
+  table { border-collapse: collapse; width: 100%; font-size: .86em; }
+  th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: .9em; }
+  .legend { display: flex; gap: 18px; flex-wrap: wrap; font-size: .8em; color: var(--muted); margin-top: 10px; }
+  .legend span::before { content: ""; display: inline-block; width: 22px; height: 0; border-top: 3px solid; vertical-align: middle; margin-right: 6px; }
+  .legend .l-main::before { border-color: var(--main); }
+  .legend .l-side::before { border-color: var(--side); border-top-style: dashed; }
+  .legend .l-fall::before { border-color: var(--fall); border-top-style: dashed; }
+
+  /* flows */
+  .flow { display: flex; align-items: stretch; gap: 0; }
+  .flow .step { flex: 1; border: 1px solid var(--line); border-radius: 12px; padding: 14px; position: relative; background: var(--slide); }
+  .flow .arrow { width: 34px; display: grid; place-items: center; color: var(--muted); font-size: 1.4em; flex: none; }
+  .step .n { display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--side); color: #fff; font-weight: 700; font-size: .85em; margin-bottom: 8px; }
+  .step.main .n { background: var(--main); }
+  .step.fall .n { background: var(--fall); }
+  .vflow { display: flex; flex-direction: column; gap: 6px; }
+  .vflow .row { display: flex; align-items: center; gap: 10px; border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; background: var(--slide); }
+  .vflow .row.side { border-color: var(--side); background: var(--side-soft); }
+  .vflow .row.main { border-color: var(--main); background: var(--main-soft); }
+  .vflow .row.ok { border-color: var(--ok); background: var(--ok-soft); }
+  .vflow .down { text-align: center; color: var(--muted); line-height: .9; }
+
+  /* svg diagrams */
+  svg.dia { width: 100%; height: auto; max-height: 100%; display: block; }
+  svg.dia text { fill: var(--ink); font: 15px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  svg.dia .t-muted { fill: var(--muted); font-size: 13px; }
+  svg.dia .t-lane { fill: var(--muted); font-size: 13px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+  svg.dia .t-b { font-weight: 700; }
+  svg.dia .box { fill: var(--slide); stroke: var(--line); stroke-width: 1.5; }
+  svg.dia .box.main { fill: var(--main-soft); stroke: var(--main); }
+  svg.dia .box.side { fill: var(--side-soft); stroke: var(--side); }
+  svg.dia .box.fall { fill: var(--fall-soft); stroke: var(--fall); }
+  svg.dia .box.ok { fill: var(--ok-soft); stroke: var(--ok); }
+  svg.dia .box.bad { fill: var(--bad-soft); stroke: var(--bad); }
+  svg.dia .lane { fill: none; stroke: var(--line); stroke-width: 1.5; stroke-dasharray: 6 6; }
+  svg.dia .e { fill: none; stroke-width: 2.2; }
+  svg.dia .e.main { stroke: var(--main); marker-end: url(#a-main); }
+  svg.dia .e.side { stroke: var(--side); stroke-dasharray: 7 5; marker-end: url(#a-side); }
+  svg.dia .e.fall { stroke: var(--fall); stroke-dasharray: 7 5; marker-end: url(#a-fall); }
+  svg.dia .e.plain { stroke: var(--muted); marker-end: url(#a-muted); }
+  svg.dia .zone-ok { fill: var(--ok-soft); }
+  svg.dia .zone-fall { fill: var(--fall-soft); }
+  svg.dia .zone-bad { fill: var(--bad-soft); }
+  .m-main { fill: var(--main); } .m-side { fill: var(--side); } .m-fall { fill: var(--fall); } .m-muted { fill: var(--muted); }
+
+  /* chrome */
+  .bar { position: fixed; left: 0; right: 0; bottom: 0; height: 56px; display: flex; align-items: center; gap: 10px; padding: 0 16px; color: var(--muted); font-size: .8em; }
+  .bar button { background: var(--slide); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; height: 34px; min-width: 38px; padding: 0 10px; font: inherit; cursor: pointer; }
+  .bar button:hover { border-color: var(--side); }
+  .progress { flex: 1; height: 4px; background: var(--line); border-radius: 4px; overflow: hidden; }
+  .progress i { display: block; height: 100%; width: 0; background: var(--side); transition: width .25s; }
+  .counter { min-width: 56px; text-align: center; font-variant-numeric: tabular-nums; }
+  .hint { white-space: nowrap; }
+  .index { position: fixed; inset: 0; background: color-mix(in srgb, var(--bg) 94%, transparent); display: none; overflow: auto; padding: 36px 24px 90px; z-index: 5; }
+  .index.open { display: block; }
+  .index h2 { max-width: 1100px; margin: 0 auto 18px; }
+  .index ol { max-width: 1100px; margin: 0 auto; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
+  .index a { display: block; padding: 14px 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--slide); color: var(--ink); text-decoration: none; height: 100%; }
+  .index a:hover, .index a.current { border-color: var(--side); }
+  .index a small { display: block; color: var(--muted); font-size: .75em; margin-bottom: 2px; }
+  a { color: var(--side); }
+
+  @media (max-width: 820px) {
+    body { font-size: 15px; overflow: auto; }
+    .deck { position: static; display: block; padding: 16px 16px 72px; }
+    .slide { display: flex !important; flex-direction: column; height: auto; margin: 0 0 16px; padding: 24px 18px; animation: none; }
+    .c2, .c3, .c4 { grid-template-columns: 1fr; }
+    .flow { flex-direction: column; }
+    .flow .arrow { width: auto; height: 26px; transform: rotate(90deg); }
+    h1 { font-size: 2em; } h2 { font-size: 1.4em; }
+    .hint { display: none; }
+    .bar { background: var(--bg); border-top: 1px solid var(--line); }
+  }
+  @media print {
+    body { overflow: visible; background: #fff; }
+    .bar, .index { display: none !important; }
+    .deck { position: static; display: block; padding: 0; }
+    .slide { display: flex !important; flex-direction: column; page-break-after: always; box-shadow: none; height: auto; min-height: 90vh; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Arrow markers shared by every diagram -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <marker id="a-main" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="m-main"/></marker>
+    <marker id="a-side" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="m-side"/></marker>
+    <marker id="a-fall" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="m-fall"/></marker>
+    <marker id="a-muted" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="m-muted"/></marker>
+  </defs>
+</svg>
+
+<main class="deck" id="deck">
+
+<!-- 1 -->
+<section class="slide" data-title="reliable-push">
+  <div class="grow">
+    <p class="kicker">Open source · MIT · v0.1.0</p>
+    <h1>reliable-push</h1>
+    <p class="lead">Know whether each push notification was <b>delivered</b> and <b>read</b>. When it was not, in time,
+      trigger a <b>fallback</b> (SMS, email, anything) through a signed webhook.</p>
+    <div class="cols c3" style="margin-top:28px">
+      <div class="card side"><div class="icon">📬</div><h3>Track</h3><p>The SDKs in your apps report <code>DELIVERED</code> and <code>READ</code>, also when the app is not running.</p></div>
+      <div class="card fall"><div class="icon">⏱️</div><h3>Decide</h3><p>A policy per notification: fall back if it is <i>not delivered</i> or <i>not read</i> within N minutes.</p></div>
+      <div class="card ok"><div class="icon">🔁</div><h3>Fall back</h3><p>One HMAC-signed webhook to your receiver, which routes the message to another channel.</p></div>
+    </div>
+  </div>
+  <p class="muted small">Use ← → or Space to move · <b>O</b> for the slide index · <b>F</b> for full screen · <b>T</b> to switch theme</p>
+</section>
+
+<!-- 2 -->
+<section class="slide" data-title="The problem">
+  <p class="kicker">Why</p>
+  <h2>A push is fire-and-forget</h2>
+  <div class="grow">
+    <div class="cols c2">
+      <div>
+        <p class="lead" style="font-size:1.05em">FCM and APNs accept the message, and then you know nothing. Many pushes
+          never reach the user, or reach them and stay unread.</p>
+        <ul class="clean">
+          <li>The device is offline, or the app was force-stopped.</li>
+          <li>Notifications are disabled: permission, channel, Focus mode.</li>
+          <li>The token is stale, or the device has no Google Play services.</li>
+          <li>The notification arrived, but nobody opened it.</li>
+        </ul>
+      </div>
+      <div class="cols" style="align-content:center">
+        <div class="card bad"><h3>For critical messages this is not enough</h3>
+          <p>One-time codes, order and delivery updates, security alerts, appointments: the user must get them, on some channel.</p></div>
+        <div class="card side"><h3>reliable-push closes the loop</h3>
+          <p>It confirms each push from the device and calls your fallback only when the confirmation is missing.</p></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 3 -->
+<section class="slide" data-title="A sidecar">
+  <p class="kicker">Key principle</p>
+  <h2>A sidecar, not a push gateway</h2>
+  <div class="grow">
+    <svg class="dia" viewBox="0 0 960 420" role="img" aria-label="Your push path stays unchanged; reliable-push sits beside it">
+      <rect class="lane" x="20" y="30" width="920" height="150" rx="14"/>
+      <text class="t-lane" x="40" y="58">Your push path · unchanged</text>
+      <rect class="lane" x="20" y="240" width="920" height="160" rx="14"/>
+      <text class="t-lane" x="40" y="268">reliable-push · the sidecar</text>
+
+      <rect class="box main" x="40" y="80" width="220" height="70" rx="10"/>
+      <text class="t-b" x="150" y="110" text-anchor="middle">Your backend</text>
+      <text class="t-muted" x="150" y="132" text-anchor="middle">keeps your FCM / APNs keys</text>
+      <rect class="box main" x="370" y="80" width="220" height="70" rx="10"/>
+      <text class="t-b" x="480" y="120" text-anchor="middle">FCM / APNs</text>
+      <rect class="box main" x="700" y="80" width="220" height="70" rx="10"/>
+      <text class="t-b" x="810" y="110" text-anchor="middle">Device</text>
+      <text class="t-muted" x="810" y="132" text-anchor="middle">notification shown</text>
+      <path class="e main" d="M260 115 H366"/>
+      <path class="e main" d="M590 115 H696"/>
+
+      <rect class="box side" x="370" y="300" width="220" height="70" rx="10"/>
+      <text class="t-b" x="480" y="330" text-anchor="middle">reliable-push</text>
+      <text class="t-muted" x="480" y="352" text-anchor="middle">tracking + fallback</text>
+      <rect class="box fall" x="700" y="300" width="220" height="70" rx="10"/>
+      <text class="t-b" x="810" y="330" text-anchor="middle">Your fallback receiver</text>
+      <text class="t-muted" x="810" y="352" text-anchor="middle">SMS, email, …</text>
+
+      <path class="e side" d="M150 150 V335 H366"/>
+      <text x="162" y="230">① register → trackingId</text>
+      <path class="e side" d="M790 150 L560 297"/>
+      <text x="690" y="215">② DELIVERED / READ</text>
+      <path class="e fall" d="M590 335 H696"/>
+      <text class="t-muted" x="600" y="392">③ only if unconfirmed in time</text>
+    </svg>
+    <div class="legend"><span class="l-main">existing push path</span><span class="l-side">added by reliable-push</span><span class="l-fall">fallback</span></div>
+  </div>
+</section>
+
+<!-- 4 -->
+<section class="slide" data-title="Sidecar guarantees">
+  <p class="kicker">Key principle</p>
+  <h2>It never gets in the way of your pushes</h2>
+  <div class="grow">
+    <div class="cols c3">
+      <div class="card main"><div class="icon">🚀</div><h3>You keep sending</h3><p>Your backend sends every push with its own credentials. reliable-push never sends a push and never sees your FCM / APNs keys.</p></div>
+      <div class="card ok"><div class="icon">🛟</div><h3>Down? Pushes still go out</h3><p>If reliable-push is down, only tracking and fallbacks pause. Device events wait in the SDK queue and are sent later.</p></div>
+      <div class="card side"><div class="icon">🫥</div><h3>SDKs only observe</h3><p>Pushes without <code>rp_tid</code> are left alone. A tracked notification is never hidden, and SDK errors never reach the app.</p></div>
+    </div>
+    <table style="margin-top:22px">
+      <tr><th>If this fails…</th><th>Your pushes</th><th>reliable-push</th></tr>
+      <tr><td>reliable-push backend down</td><td><span class="pill ok">sent and shown</span></td><td>Tracking pauses; events are queued on the device; due fallbacks are sent late, inside the trigger window</td></tr>
+      <tr><td>Device offline</td><td><span class="pill ok">delivered later, as today</span></td><td><code>DELIVERED</code> is queued; if the timeout passes first, the fallback fires</td></tr>
+      <tr><td>SDK cannot reach the backend</td><td><span class="pill ok">shown</span></td><td>Retried from the on-disk queue</td></tr>
+      <tr><td>Fallback receiver down</td><td><span class="pill ok">not affected</span></td><td>Retried with backoff, then <code>FALLBACK_FAILED</code> / <code>FALLBACK_EXPIRED</code></td></tr>
+    </table>
+  </div>
+</section>
+
+<!-- 5 -->
+<section class="slide" data-title="Components">
+  <p class="kicker">Big picture</p>
+  <h2>Components and how they talk</h2>
+  <div class="grow">
+    <svg class="dia" viewBox="0 0 960 470" role="img" aria-label="Component diagram">
+      <rect class="lane" x="10" y="20" width="240" height="440" rx="14"/>
+      <text class="t-lane" x="28" y="46">You own</text>
+      <rect class="lane" x="300" y="20" width="360" height="440" rx="14"/>
+      <text class="t-lane" x="318" y="46">reliable-push</text>
+      <rect class="lane" x="710" y="20" width="240" height="440" rx="14"/>
+      <text class="t-lane" x="728" y="46">Providers</text>
+
+      <rect class="box main" x="30" y="66" width="200" height="72" rx="10"/>
+      <text class="t-b" x="130" y="96" text-anchor="middle">Sender backend</text>
+      <text class="t-muted" x="130" y="118" text-anchor="middle">(+ client-java, optional)</text>
+      <rect class="box main" x="30" y="226" width="200" height="72" rx="10"/>
+      <text class="t-b" x="130" y="256" text-anchor="middle">Mobile app</text>
+      <text class="t-muted" x="130" y="278" text-anchor="middle">+ Android / iOS SDK</text>
+      <rect class="box fall" x="30" y="370" width="200" height="72" rx="10"/>
+      <text class="t-b" x="130" y="402" text-anchor="middle">Fallback receiver</text>
+      <text class="t-muted" x="130" y="424" text-anchor="middle">HTTPS endpoint</text>
+
+      <rect class="box side" x="350" y="66" width="260" height="72" rx="10"/>
+      <text class="t-b" x="480" y="96" text-anchor="middle">API role</text>
+      <text class="t-muted" x="480" y="118" text-anchor="middle">REST /v1/* · Java 21, Spring Boot</text>
+      <rect class="box side" x="380" y="218" width="200" height="72" rx="36"/>
+      <text class="t-b" x="480" y="250" text-anchor="middle">PostgreSQL</text>
+      <text class="t-muted" x="480" y="272" text-anchor="middle">only stateful dependency</text>
+      <rect class="box side" x="350" y="370" width="260" height="72" rx="10"/>
+      <text class="t-b" x="480" y="400" text-anchor="middle">Worker role</text>
+      <text class="t-muted" x="480" y="422" text-anchor="middle">fallback scheduler</text>
+
+      <rect class="box main" x="730" y="66" width="200" height="72" rx="10"/>
+      <text class="t-b" x="830" y="108" text-anchor="middle">FCM / APNs</text>
+      <rect class="box" x="730" y="226" width="200" height="72" rx="10"/>
+      <text class="t-b" x="830" y="256" text-anchor="middle">Identity provider</text>
+      <text class="t-muted" x="830" y="278" text-anchor="middle">OIDC (or signed grant)</text>
+
+      <path class="e side" d="M230 92 H346"/>
+      <text class="t-muted" x="240" y="84">register</text>
+      <path class="e main" d="M130 66 V36 H830 V62"/>
+      <text class="t-muted" x="560" y="32">push with rp_tid</text>
+      <path class="e main" d="M830 138 V180 H180 V222"/>
+      <text class="t-muted" x="640" y="198">push arrives</text>
+      <path class="e side" d="M230 252 L376 128"/>
+      <text class="t-muted" x="238" y="215">devices, events</text>
+      <path class="e plain" d="M610 110 L728 240"/>
+      <text class="t-muted" x="640" y="150" text-anchor="end">JWKS</text>
+      <path class="e plain" d="M480 138 V214"/>
+      <path class="e plain" d="M480 370 V294"/>
+      <path class="e fall" d="M350 406 H234"/>
+      <text class="t-muted" x="246" y="398">signed webhook</text>
+    </svg>
+  </div>
+</section>
+
+<!-- 6 -->
+<section class="slide" data-title="End to end">
+  <p class="kicker">How it works</p>
+  <h2>One notification, end to end</h2>
+  <div class="grow">
+    <div class="flow">
+      <div class="step side"><div class="n">1</div><h3>Register</h3><p class="small">Your backend calls <code>POST /v1/notifications</code> with <code>userId</code>, policy, timeout and fallback text, and gets a <code>trackingId</code>.</p></div>
+      <div class="arrow">→</div>
+      <div class="step main"><div class="n">2</div><h3>Send</h3><p class="small">Your backend sends the push through FCM / APNs as today, adding <code>rp_tid = trackingId</code>.</p></div>
+      <div class="arrow">→</div>
+      <div class="step side"><div class="n">3</div><h3>Delivered</h3><p class="small">The SDK reports <code>DELIVERED</code> when the notification is shown, even with the app closed.</p></div>
+      <div class="arrow">→</div>
+      <div class="step side"><div class="n">4</div><h3>Read</h3><p class="small">The user taps it: the SDK reports <code>READ</code>. Any active device of the user counts.</p></div>
+      <div class="arrow">→</div>
+      <div class="step fall"><div class="n">5</div><h3>Fallback?</h3><p class="small">Policy still unmet at <code>dueAt</code>? A worker calls your signed webhook. Met? Nothing happens.</p></div>
+    </div>
+    <div class="cols c2" style="margin-top:22px">
+      <pre><code>POST /v1/notifications            X-Api-Key: …
+{ "userId": "user-42", "policy": "NOT_READ",
+  "timeoutMinutes": 10,
+  "fallback": { "sms": "Your order has shipped." } }
+→ 201 { "trackingId": "6f1c…", "state": "PENDING" }</code></pre>
+      <pre><code>POST https://your-receiver/hook
+X-RP-Signature: v1=…   Idempotency-Key: 6f1c…
+{ "trackingId": "6f1c…", "userId": "user-42",
+  "fallback": { "sms": "Your order has shipped." },
+  "reason": "NOT_READ", "attempt": 1 }</code></pre>
+    </div>
+  </div>
+</section>
+
+<!-- 7 -->
+<section class="slide" data-title="Policy and timing">
+  <p class="kicker">How it works</p>
+  <h2>Policy, timeout and trigger window</h2>
+  <div class="grow">
+    <svg class="dia" viewBox="0 0 960 250" role="img" aria-label="Timeline of one notification">
+      <rect class="zone-ok" x="60" y="70" width="400" height="70" rx="8"/>
+      <rect class="zone-fall" x="460" y="70" width="300" height="70" rx="8"/>
+      <rect class="zone-bad" x="760" y="70" width="170" height="70" rx="8"/>
+      <text class="t-b" x="260" y="100" text-anchor="middle">waiting for confirmation</text>
+      <text class="t-muted" x="260" y="122" text-anchor="middle">DELIVERED / READ satisfy the policy</text>
+      <text class="t-b" x="610" y="100" text-anchor="middle">fallback window</text>
+      <text class="t-muted" x="610" y="122" text-anchor="middle">webhook + retries 1, 2, 4, 8 min</text>
+      <text class="t-b" x="845" y="100" text-anchor="middle">too late</text>
+      <text class="t-muted" x="845" y="122" text-anchor="middle">FALLBACK_EXPIRED</text>
+      <path class="e plain" d="M40 170 H940"/>
+      <line x1="60" y1="160" x2="60" y2="180" stroke="currentColor" class="m-muted" style="stroke:var(--muted);stroke-width:2"/>
+      <line x1="460" y1="160" x2="460" y2="180" style="stroke:var(--fall);stroke-width:3"/>
+      <line x1="760" y1="160" x2="760" y2="180" style="stroke:var(--bad);stroke-width:3"/>
+      <text x="60" y="205" text-anchor="middle">registered</text>
+      <text x="460" y="205" text-anchor="middle">dueAt = created + timeout</text>
+      <text x="760" y="205" text-anchor="middle">dueAt + trigger window</text>
+      <text class="t-muted" x="460" y="228" text-anchor="middle">default 10 min (per app)</text>
+      <text class="t-muted" x="760" y="228" text-anchor="middle">default 20 min (per app)</text>
+    </svg>
+    <div class="cols c3" style="margin-top:14px">
+      <div class="card"><h3><span class="pill side">NOT_DELIVERED</span></h3><p class="small">Satisfied by <code>DELIVERED</code> or <code>READ</code>. Use it for "the user must at least receive it".</p></div>
+      <div class="card"><h3><span class="pill side">NOT_READ</span></h3><p class="small">Satisfied only by <code>READ</code>. Use it for "the user must see it".</p></div>
+      <div class="card"><h3>Stale-fallback guard</h3><p class="small">After a long outage, an old fallback is not sent: it would arrive too late to help.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- 8 -->
+<section class="slide" data-title="States">
+  <p class="kicker">How it works</p>
+  <h2>Notification states</h2>
+  <div class="grow">
+    <svg class="dia" viewBox="0 0 960 360" role="img" aria-label="State diagram">
+      <rect class="box" x="30" y="150" width="150" height="56" rx="28"/>
+      <text class="t-b" x="105" y="183" text-anchor="middle">PENDING</text>
+      <rect class="box side" x="260" y="40" width="160" height="56" rx="28"/>
+      <text class="t-b" x="340" y="73" text-anchor="middle">DELIVERED</text>
+      <rect class="box ok" x="520" y="40" width="140" height="56" rx="28"/>
+      <text class="t-b" x="590" y="73" text-anchor="middle">READ ✓</text>
+      <rect class="box fall" x="380" y="190" width="220" height="56" rx="28"/>
+      <text class="t-b" x="490" y="223" text-anchor="middle">FALLBACK_PENDING</text>
+      <rect class="box ok" x="700" y="130" width="230" height="48" rx="24"/>
+      <text class="t-b" x="815" y="160" text-anchor="middle">FALLBACK_TRIGGERED ✓</text>
+      <rect class="box bad" x="700" y="194" width="230" height="48" rx="24"/>
+      <text class="t-b" x="815" y="224" text-anchor="middle">FALLBACK_FAILED</text>
+      <rect class="box bad" x="700" y="258" width="230" height="48" rx="24"/>
+      <text class="t-b" x="815" y="288" text-anchor="middle">FALLBACK_EXPIRED</text>
+      <rect class="box" x="30" y="290" width="150" height="48" rx="24"/>
+      <text class="t-b" x="105" y="320" text-anchor="middle">CANCELLED</text>
+
+      <path class="e side" d="M160 158 L270 92"/>
+      <path class="e side" d="M420 68 H516"/>
+      <path class="e side" d="M140 152 C 200 10, 560 10, 586 36"/>
+      <path class="e fall" d="M180 188 H376"/>
+      <path class="e fall" d="M380 92 L440 186"/>
+      <path class="e plain" d="M600 210 L696 158"/>
+      <path class="e plain" d="M600 218 H696"/>
+      <path class="e plain" d="M600 228 L696 280"/>
+      <path class="e plain" d="M105 206 V286"/>
+      <text class="t-muted" x="214" y="152">DELIVERED</text>
+      <text class="t-muted" x="440" y="58">READ</text>
+      <text class="t-muted" x="300" y="22">READ (implies delivered)</text>
+      <text class="t-muted" x="200" y="180">due, policy unmet</text>
+      <text class="t-muted" x="116" y="252">sender DELETE</text>
+      <text class="t-muted" x="620" y="182">2xx</text>
+      <text class="t-muted" x="606" y="268">too late</text>
+    </svg>
+    <p class="small muted">Late events (after a fallback was claimed) are stored as <code>LATE</code> and change nothing. Duplicates are no-ops.</p>
+  </div>
+</section>
+
+<!-- 9 -->
+<section class="slide" data-title="Backend">
+  <p class="kicker">Component detail</p>
+  <h2>Backend: one image, two roles</h2>
+  <div class="grow">
+    <div class="cols c2">
+      <div class="vflow">
+        <div class="row main">📥 Request: sender key or device JWT</div>
+        <div class="down">↓</div>
+        <div class="row">🧱 Filters: trace id · access log · 64 KB limit · auth · rate limit</div>
+        <div class="down">↓</div>
+        <div class="row side">🧩 Modules: <b>notifications</b> · <b>devices</b> · <b>tracking</b> · <b>apps</b></div>
+        <div class="down">↓</div>
+        <div class="row side">🗄️ PostgreSQL (plain SQL, Flyway migrations)</div>
+        <div class="down">↑</div>
+        <div class="row" style="border-color:var(--fall);background:var(--fall-soft)">⚙️ Worker: claim due rows → decide → signed webhook</div>
+      </div>
+      <div class="cols">
+        <div class="card side"><h3>Scales out safely</h3><p class="small">Run any number of API and worker replicas. Workers claim rows with <code>FOR NO KEY UPDATE SKIP LOCKED</code>, so no fallback is sent twice by two replicas.</p></div>
+        <div class="card"><h3>Crash-safe</h3><p class="small">Each claim has a lease. If a worker dies, another one re-claims the row. Outcomes are fenced on the lease, and receivers de-duplicate on <code>Idempotency-Key</code>.</p></div>
+        <div class="card"><h3>Lightweight</h3><p class="small">Java 21, Spring Boot 4, no ORM, no Spring Security. The image is about 105 MB, non-root, with a read-only filesystem.</p></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 10 -->
+<section class="slide" data-title="Android SDK">
+  <p class="kicker">Component detail</p>
+  <h2>Android SDK</h2>
+  <div class="grow">
+    <div class="cols c2">
+      <div class="vflow">
+        <div class="row main">📨 FCM data message with <code>rp_tid</code></div>
+        <div class="down">↓</div>
+        <div class="row">Your <code>FirebaseMessagingService</code> → <code>ReliablePushMessaging.onMessageReceived</code></div>
+        <div class="down">↓</div>
+        <div class="row side">🔔 Notification posted (never hidden) · <code>DELIVERED</code> queued on disk</div>
+        <div class="down">↓</div>
+        <div class="row side">📤 Sent in a batch on the SDK thread · offline? JobScheduler retries</div>
+        <div class="down">↓</div>
+        <div class="row ok">👆 Tap → <code>trackOpen(intent)</code> → <code>READ</code></div>
+      </div>
+      <div class="cols">
+        <div class="card"><h3>Small and plain</h3><p class="small">Kotlin, minSdk 26, Android APIs only: no AndroidX, OkHttp, WorkManager or coroutines. The release AAR is about 66 KB.</p></div>
+        <div class="card"><h3>Honest delivery</h3><p class="small"><code>DELIVERED</code> only when the notification was really shown. If it was blocked, the fallback decides, which is the point.</p></div>
+        <div class="card"><h3>Integration</h3><pre><code>if (ReliablePushMessaging
+      .onMessageReceived(this, msg)) return
+// your own handling</code></pre></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 11 -->
+<section class="slide" data-title="iOS SDK">
+  <p class="kicker">Component detail</p>
+  <h2>iOS SDK</h2>
+  <div class="grow">
+    <div class="cols c2">
+      <svg class="dia" viewBox="0 0 470 400" role="img" aria-label="iOS app and extension share storage">
+        <rect class="box main" x="20" y="20" width="430" height="56" rx="10"/>
+        <text class="t-b" x="235" y="45" text-anchor="middle">APNs alert · mutable-content: 1</text>
+        <text class="t-muted" x="235" y="65" text-anchor="middle">top-level rp_tid</text>
+        <rect class="box side" x="20" y="120" width="200" height="80" rx="10"/>
+        <text class="t-b" x="120" y="152" text-anchor="middle">Notification</text>
+        <text class="t-b" x="120" y="172" text-anchor="middle">Service Extension</text>
+        <text class="t-muted" x="120" y="192" text-anchor="middle">DELIVERED, ≤ 5 s</text>
+        <rect class="box side" x="250" y="120" width="200" height="80" rx="10"/>
+        <text class="t-b" x="350" y="160" text-anchor="middle">App</text>
+        <text class="t-muted" x="350" y="182" text-anchor="middle">register · trackOpen = READ</text>
+        <rect class="box" x="20" y="250" width="200" height="60" rx="10"/>
+        <text class="t-b" x="120" y="276" text-anchor="middle">App Group</text>
+        <text class="t-muted" x="120" y="296" text-anchor="middle">event queue + state</text>
+        <rect class="box" x="250" y="250" width="200" height="60" rx="10"/>
+        <text class="t-b" x="350" y="276" text-anchor="middle">Keychain group</text>
+        <text class="t-muted" x="350" y="296" text-anchor="middle">device token</text>
+        <rect class="box side" x="20" y="340" width="430" height="44" rx="10"/>
+        <text class="t-b" x="235" y="368" text-anchor="middle">reliable-push /v1/events</text>
+        <path class="e main" d="M120 76 V116"/>
+        <path class="e plain" d="M120 200 V246"/>
+        <path class="e plain" d="M350 200 V246"/>
+        <path class="e plain" d="M300 200 L190 246"/>
+        <path class="e plain" d="M260 250 L200 202"/>
+        <path class="e side" d="M235 310 V336"/>
+      </svg>
+      <div class="cols">
+        <div class="card"><h3>Swift package</h3><p class="small">iOS 15+, Swift 6, Apple frameworks only, under 300 KB. Add it by tag with SwiftPM: <code>from: "0.1.0"</code>.</p></div>
+        <div class="card"><h3>Works with the app closed</h3><p class="small">The extension records <code>DELIVERED</code> and calls the content handler <b>exactly once</b>: after the send, at the timeout, or when iOS ends the extension.</p></div>
+        <div class="card"><h3>Store ready</h3><p class="small">Privacy manifest included. Short work in the extension, no hidden background activity.</p></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 12 -->
+<section class="slide" data-title="Integrate">
+  <p class="kicker">Using it</p>
+  <h2>Integrate in three steps</h2>
+  <div class="grow">
+    <div class="cols c3">
+      <div class="card main">
+        <h3>1 · Sender backend</h3>
+        <p class="small">Register each notification, then put <code>rp_tid</code> in the push. Use <code>client-java</code> or any HTTP client.</p>
+        <pre><code>Notification n = client.register(
+  RegisterRequest.builder()
+    .userId("user-42")
+    .policy(NOT_READ)
+    .fallback(Map.of("sms", "…"))
+    .build());
+// push data: rp_tid = n.trackingId()</code></pre>
+      </div>
+      <div class="card side">
+        <h3>2 · Mobile apps</h3>
+        <p class="small">Configure the SDK, register after login, hand pushes and taps to it.</p>
+        <pre><code>// iOS NSE
+reliablePush.didReceive(request,
+    withContentHandler: handler)
+// app
+ReliablePush.trackOpen(response:)
+// Android
+ReliablePush.trackOpen(intent)</code></pre>
+      </div>
+      <div class="card fall">
+        <h3>3 · Fallback receiver</h3>
+        <p class="small">An HTTPS endpoint that checks the signature, de-duplicates and sends the SMS or email.</p>
+        <pre><code>check  X-RP-Timestamp (± 5 min)
+verify X-RP-Signature
+  = HMAC-SHA256(ts + "." + body)
+dedupe Idempotency-Key
+send   SMS / email / …
+answer 2xx</code></pre>
+      </div>
+    </div>
+    <p class="small muted" style="margin-top:14px">Guides in the repository: <code>docs/integration-guide.md</code>, <code>docs/android.md</code>, <code>docs/ios.md</code>, <code>docs/api.md</code>.</p>
+  </div>
+</section>
+
+<!-- 13 -->
+<section class="slide" data-title="Security">
+  <p class="kicker">Using it</p>
+  <h2>Security by default</h2>
+  <div class="grow">
+    <div class="cols c3">
+      <div class="card"><div class="icon">🔑</div><h3>Sender API key</h3><p class="small">One key per app. The backend stores only its SHA-256.</p></div>
+      <div class="card"><div class="icon">🪪</div><h3>Device identity</h3><p class="small">Devices register with the app's OIDC ID token, or with a short-lived signed grant. The user id always comes from the verified credential.</p></div>
+      <div class="card"><div class="icon">🎟️</div><h3>Device token</h3><p class="small">ES256 JWT, 90 days by default, with key rotation. Revoked on logout and re-registration.</p></div>
+      <div class="card"><div class="icon">✍️</div><h3>Signed webhook</h3><p class="small">HMAC-SHA256 with a timestamp, plus <code>Idempotency-Key</code>. Redirects are never followed.</p></div>
+      <div class="card"><div class="icon">🚦</div><h3>Limits</h3><p class="small">Rate limits per device and per app, a 64 KB body limit, and events accepted only for the device's own app and user.</p></div>
+      <div class="card"><div class="icon">🙈</div><h3>Clean logs</h3><p class="small">Structured ECS JSON with no tokens, keys, user ids or message text.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- 14 -->
+<section class="slide" data-title="Deploy">
+  <p class="kicker">Running it</p>
+  <h2>Deploy anywhere containers run</h2>
+  <div class="grow">
+    <svg class="dia" viewBox="0 0 960 250" role="img" aria-label="Combined and split modes">
+      <text class="t-lane" x="30" y="30">Combined mode · small installations</text>
+      <rect class="box" x="30" y="50" width="130" height="50" rx="10"/><text class="t-b" x="95" y="80" text-anchor="middle">Ingress</text>
+      <rect class="box side" x="200" y="50" width="200" height="50" rx="10"/><text class="t-b" x="300" y="80" text-anchor="middle">Pods: api + worker</text>
+      <rect class="box side" x="200" y="160" width="200" height="50" rx="25"/><text class="t-b" x="300" y="190" text-anchor="middle">PostgreSQL</text>
+      <path class="e main" d="M160 75 H196"/>
+      <path class="e plain" d="M300 100 V156"/>
+
+      <text class="t-lane" x="500" y="30">Split mode · scale each role</text>
+      <rect class="box" x="500" y="50" width="130" height="50" rx="10"/><text class="t-b" x="565" y="80" text-anchor="middle">Ingress</text>
+      <rect class="box side" x="670" y="50" width="160" height="50" rx="10"/><text class="t-b" x="750" y="80" text-anchor="middle">API pods</text>
+      <rect class="box fall" x="670" y="120" width="160" height="50" rx="10"/><text class="t-b" x="750" y="150" text-anchor="middle">Worker pods</text>
+      <rect class="box side" x="860" y="85" width="90" height="50" rx="25"/><text class="t-b" x="905" y="115" text-anchor="middle">DB</text>
+      <path class="e main" d="M630 75 H666"/>
+      <path class="e plain" d="M830 75 L858 100"/>
+      <path class="e plain" d="M830 145 L858 122"/>
+      <text class="t-muted" x="670" y="198">workers get no Service traffic</text>
+    </svg>
+    <div class="cols c4" style="margin-top:8px">
+      <div class="card"><h3>Docker</h3><p class="small">One image, configured with environment variables.</p></div>
+      <div class="card"><h3>Helm chart</h3><p class="small">Combined or split, HPA, PodDisruptionBudgets, ServiceMonitor.</p></div>
+      <div class="card"><h3>GKE · OpenShift</h3><p class="small">Values files included. Non-root, arbitrary UID.</p></div>
+      <div class="card"><h3>Observability</h3><p class="small">Health probes, Prometheus <code>rp_*</code> metrics, ECS JSON logs.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- 15 -->
+<section class="slide" data-title="Test and demo">
+  <p class="kicker">Trying it</p>
+  <h2>A harness to see it work</h2>
+  <div class="grow">
+    <div class="cols c2">
+      <div>
+        <p>One command starts the real backend, two workers, PostgreSQL and a harness that plays the sender, the devices
+          and the fallback receiver:</p>
+        <pre><code>./scripts/demo.sh
+# → http://127.0.0.1:8090/</code></pre>
+        <div style="margin-top:14px">
+          <span class="pill side">Devices</span><span class="pill side">Send push</span><span class="pill side">Live tracking</span>
+          <span class="pill fall">Fallback inbox</span><span class="pill">Scenarios</span><span class="pill">Logs</span>
+        </div>
+        <p class="small muted" style="margin-top:10px">Fast clock: 1 product minute = 1 second. The same harness drives the Android emulator and iOS Simulator sample apps.</p>
+      </div>
+      <div class="cols">
+        <div class="card ok"><div class="big">17 / 17</div><p class="small">backend end-to-end scenarios, including worker crashes and retries</p></div>
+        <div class="cols c2">
+          <div class="card ok"><div class="big">8 / 8</div><p class="small">Android emulator suite</p></div>
+          <div class="card ok"><div class="big">8 / 8</div><p class="small">iOS Simulator suite</p></div>
+        </div>
+        <div class="card"><p class="small">CI on every push: builds, unit and integration tests, ≥ 80% coverage gate, CodeQL, Trivy, Helm checks, size gates.</p></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 16 -->
+<section class="slide" data-title="Numbers">
+  <p class="kicker">Measured</p>
+  <h2>Light on every side</h2>
+  <div class="grow">
+    <div class="cols c4">
+      <div class="card side"><div class="big">1,000/s</div><p class="small">events on one API replica (2 CPU / 1 GiB) for 5 min, plus 500 registrations/s. p99 38 ms, 0 failed.</p></div>
+      <div class="card side"><div class="big">~66 KB</div><p class="small">Android release AAR (gate: 100 KB)</p></div>
+      <div class="card side"><div class="big">~292 KB</div><p class="small">iOS stripped arm64 library (gate: 300 KB)</p></div>
+      <div class="card side"><div class="big">~105 MB</div><p class="small">backend container image (budget: 250 MB)</p></div>
+    </div>
+    <div class="cols c3" style="margin-top:18px">
+      <div class="card"><h3>1 call per event</h3><p class="small">The device makes at most one call per push event, plus rare token renewals.</p></div>
+      <div class="card"><h3>0 runtime dependencies</h3><p class="small">In the Java client and the iOS SDK. Kotlin stdlib only in the Android SDK.</p></div>
+      <div class="card"><h3>1 stateful dependency</h3><p class="small">PostgreSQL. No queue, cache or broker to run.</p></div>
+    </div>
+    <p class="small muted" style="margin-top:12px">Load figures come from a local run on one Mac (2026-11-05). Use them as orders of magnitude.</p>
+  </div>
+</section>
+
+<!-- 17 -->
+<section class="slide" data-title="Status and next">
+  <p class="kicker">Where we are</p>
+  <h2>Status and what comes next</h2>
+  <div class="grow">
+    <div class="cols c2">
+      <div class="card ok">
+        <h3>Released: v0.1.0 (2026-11-06)</h3>
+        <ul class="clean small">
+          <li>Backend, Java client, harness and web console</li>
+          <li>Helm chart, load tests</li>
+          <li>Android SDK and iOS SDK</li>
+          <li>CI green: build, tests, CodeQL (Java/Kotlin, Swift)</li>
+        </ul>
+      </div>
+      <div class="card fall">
+        <h3>Open (see docs/TODO.md)</h3>
+        <ul class="clean small">
+          <li>Real APNs delivery and locked-device check: needs the Apple Developer Program</li>
+          <li>Real FCM delivery: needs a Firebase project</li>
+          <li>Maven Central publishing: needs a namespace and signing key</li>
+          <li>Android mode v2: waits for Google's GA (next check 2027-02-01)</li>
+          <li>Real GKE / OpenShift install, Windows scripts</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 18 -->
+<section class="slide" data-title="Try it">
+  <div class="grow">
+    <p class="kicker">Get started</p>
+    <h1>Try it in one command</h1>
+    <pre style="font-size:1.1em;max-width:640px"><code>git clone https://github.com/valentirob/reliable-push
+cd reliable-push
+./scripts/demo.sh</code></pre>
+    <div class="cols c3" style="margin-top:26px">
+      <div class="card"><h3>Overview</h3><p class="small"><code>docs/overview.md</code>: every diagram</p></div>
+      <div class="card"><h3>Step by step</h3><p class="small"><code>docs/getting-started.md</code>: run and test each component</p></div>
+      <div class="card"><h3>Integrate</h3><p class="small"><code>docs/integration-guide.md</code>, <code>docs/android.md</code>, <code>docs/ios.md</code></p></div>
+    </div>
+  </div>
+  <p class="muted small">reliable-push · MIT license · github.com/valentirob/reliable-push</p>
+</section>
+
+</main>
+
+<nav class="index" id="index" aria-label="Slide index">
+  <h2>Slides</h2>
+  <ol id="index-list"></ol>
+</nav>
+
+<div class="bar">
+  <button id="prev" aria-label="Previous slide">←</button>
+  <button id="next" aria-label="Next slide">→</button>
+  <span class="counter" id="counter">1 / 1</span>
+  <div class="progress"><i id="progress"></i></div>
+  <span class="hint">O index · F full screen · T theme</span>
+  <button id="btn-index" aria-label="Slide index">☰</button>
+  <button id="btn-theme" aria-label="Switch theme">◐</button>
+  <button id="btn-full" aria-label="Full screen">⛶</button>
+</div>
+
+<script>
+(function () {
+  var slides = Array.prototype.slice.call(document.querySelectorAll('.slide'));
+  var index = document.getElementById('index');
+  var list = document.getElementById('index-list');
+  var current = 0;
+
+  slides.forEach(function (s, i) {
+    var li = document.createElement('li');
+    var a = document.createElement('a');
+    a.href = '#' + (i + 1);
+    var small = document.createElement('small');
+    small.textContent = String(i + 1);
+    a.appendChild(small);
+    a.appendChild(document.createTextNode(s.getAttribute('data-title') || ('Slide ' + (i + 1))));
+    a.addEventListener('click', function (e) { e.preventDefault(); show(i); toggleIndex(false); });
+    li.appendChild(a);
+    list.appendChild(li);
+  });
+
+  function show(i) {
+    current = Math.max(0, Math.min(slides.length - 1, i));
+    slides.forEach(function (s, k) { s.classList.toggle('active', k === current); });
+    document.getElementById('counter').textContent = (current + 1) + ' / ' + slides.length;
+    document.getElementById('progress').style.width = ((current + 1) / slides.length * 100) + '%';
+    Array.prototype.forEach.call(list.querySelectorAll('a'), function (a, k) { a.classList.toggle('current', k === current); });
+    if (location.hash !== '#' + (current + 1)) history.replaceState(null, '', '#' + (current + 1));
+  }
+  function toggleIndex(open) { index.classList.toggle('open', open === undefined ? !index.classList.contains('open') : open); }
+  function toggleTheme() {
+    var root = document.documentElement;
+    var dark = root.getAttribute('data-theme') ? root.getAttribute('data-theme') === 'dark'
+      : window.matchMedia('(prefers-color-scheme: dark)').matches;
+    root.setAttribute('data-theme', dark ? 'light' : 'dark');
+    try { localStorage.setItem('rp-theme', root.getAttribute('data-theme')); } catch (e) {}
+  }
+  function toggleFull() {
+    if (!document.fullscreenElement) { if (document.documentElement.requestFullscreen) document.documentElement.requestFullscreen(); }
+    else if (document.exitFullscreen) document.exitFullscreen();
+  }
+
+  try { var t = localStorage.getItem('rp-theme'); if (t) document.documentElement.setAttribute('data-theme', t); } catch (e) {}
+
+  document.getElementById('prev').onclick = function () { show(current - 1); };
+  document.getElementById('next').onclick = function () { show(current + 1); };
+  document.getElementById('btn-index').onclick = function () { toggleIndex(); };
+  document.getElementById('btn-theme').onclick = toggleTheme;
+  document.getElementById('btn-full').onclick = toggleFull;
+
+  document.addEventListener('keydown', function (e) {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    var k = e.key;
+    if (k === 'ArrowRight' || k === 'PageDown' || k === ' ' || k === 'Enter') { e.preventDefault(); show(current + 1); }
+    else if (k === 'ArrowLeft' || k === 'PageUp' || k === 'Backspace') { e.preventDefault(); show(current - 1); }
+    else if (k === 'Home') show(0);
+    else if (k === 'End') show(slides.length - 1);
+    else if (k === 'o' || k === 'O') toggleIndex();
+    else if (k === 'Escape') toggleIndex(false);
+    else if (k === 'f' || k === 'F') toggleFull();
+    else if (k === 't' || k === 'T') toggleTheme();
+  });
+
+  var x0 = null;
+  document.addEventListener('touchstart', function (e) { x0 = e.touches[0].clientX; }, { passive: true });
+  document.addEventListener('touchend', function (e) {
+    if (x0 === null || window.innerWidth <= 820) return;
+    var dx = e.changedTouches[0].clientX - x0;
+    if (Math.abs(dx) > 50) show(current + (dx < 0 ? 1 : -1));
+    x0 = null;
+  });
+
+  window.addEventListener('hashchange', function () { var n = parseInt(location.hash.slice(1), 10); if (n) show(n - 1); });
+  var start = parseInt(location.hash.slice(1), 10);
+  show(start ? start - 1 : 0);
+})();
+</script>
+</body>
+</html>
