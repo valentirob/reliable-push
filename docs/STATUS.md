@@ -2,21 +2,26 @@
 
 Newest entry first. Updated at the end of every work session (see `.agents/skills/session-handoff/SKILL.md`).
 
-## Pending maintainer tasks
+## Remaining work
 
-Tasks only the maintainer can do: they need personal accounts and credentials, which agents never create, enter or
-handle. Agents: remind the maintainer of these at the start of a session, and update this list when one is done.
+Everything left after `v0.1.0` is in [TODO.md](TODO.md): each item says why it is deferred and which action or date
+unblocks it. Agents: remind the maintainer of its section 1 (real APNs and the locked-device check, real FCM, Maven
+Central) at the start of a session.
 
-1. **Real APNs delivery and the locked-device check (iOS).** Needs the paid Apple Developer Program. Steps in
-   `docs/testing.md` ("Real APNs pushes"): App IDs and App Group for the sample, `harness/build/apns/AuthKey.p8`,
-   `harness/build/apns/apns.properties`, `IOS_DEVELOPMENT_TEAM`, then `./scripts/ios-e2e.sh --test apns-real-delivery`
-   (expected: `DELIVERED` within 60 s). Also send one push while a real device is locked, with the app built with Data
-   Protection Complete. This is the on-device check of findings I1 (file protection of the queue and lock files) and M5
-   (Debug-only local-network exception of the NSE), which the Simulator cannot verify.
-2. **Real FCM delivery (Android).** Needs a Firebase project. Steps in `docs/testing.md` ("Real FCM pushes"):
-   `android/sample/google-services.json`, `harness/build/fcm/service-account.json` (`chmod 600`), then
-   `./scripts/android-e2e.sh --test fcm-real-delivery` on an AVD with Google Play services.
+## 2026-11-06 (5) — Claude Code — docs: diagrams, guides, presentation
 
+- **Done:**
+  - `docs/TODO.md`: the remaining work, with the reason each item is deferred and what unblocks it.
+  - `docs/overview.md`: Mermaid diagrams, with the sidecar principle and a failure table, the components, the end-to-end
+    flow and states, and one detail diagram per component.
+  - `docs/getting-started.md`: run and test each component step by step, including the demo tour and the sample apps.
+  - `docs/presentation.html`: self-contained HTML slides, offline, keyboard navigation, light and dark themes.
+  - README, `architecture.md` and `integration-guide.md`: the ASCII diagrams are now Mermaid, and the sidecar framing is
+    explicit. `android.md` and `ios.md` have a sidecar note.
+  - Plan 1A Steps 1 and 2 ticked.
+- **State:** all 16 Mermaid blocks parse and render with Mermaid 11.4.1. The slides were checked in a browser at
+  1280x800, in light and dark. Docs only, no code change.
+- **Next / Open:** see [TODO.md](TODO.md).
 
 ## 2026-11-06 (4) — Claude Code — release 0.1.0
 

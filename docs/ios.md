@@ -9,6 +9,14 @@ is about 292 KB (CI gate: under 307,200 bytes).
 Your backend registers each notification with reliable-push and puts the returned `trackingId` into the APNs payload as
 `rp_tid`: see [integration-guide.md](integration-guide.md) §1 and §2. This page is the app side.
 
+**A sidecar inside your app.** The SDK only observes your pushes:
+- `ReliablePushExtension.didReceive` returns `false` for a notification without `rp_tid` and leaves it to your code.
+- For a tracked notification it always calls the content handler, exactly once, at most `extensionSendTimeout` after
+  the push (5 s by default).
+
+If the reliable-push backend cannot be reached, your notifications are shown as usual and the events wait in the App
+Group queue. The flow diagram is in [overview.md §7](overview.md#7-ios-sdk).
+
 > **Status.** Version `0.1.0` (tag `v0.1.0`), tested on the iOS Simulator locally (package tests, end-to-end suite) and
 > in CI (`ios-ci.yml`: package tests, sample builds, size gate). SwiftPM by git tag is the only distribution channel (no
 > XCFramework, no CocoaPods). Real APNs delivery on a device has not been verified yet.

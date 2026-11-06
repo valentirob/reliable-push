@@ -10,6 +10,36 @@ webhook (`userId`, message, `trackingId`) that routes to SMS, email or any other
 channel. It runs as a sidecar: your existing backend keeps sending pushes itself
 and keeps the FCM/APNs credentials.
 
+## A sidecar, not a push gateway
+
+reliable-push sits **next to** your push path, not on it. The backend and the mobile SDKs only observe and react, so
+they never change how your notifications are sent or shown:
+
+- **Your backend keeps sending the pushes** with its own FCM / APNs credentials. reliable-push never sends a push and
+  never sees those credentials.
+- **If the reliable-push backend is down, your pushes still go out.** Only tracking and fallbacks pause. Device events
+  wait in the SDK's queue and are sent when the backend is back.
+- **The SDKs never hide or block a notification.** Pushes without `rp_tid` are left to your own code. Network errors
+  stay inside the SDK and never reach the app.
+
+```mermaid
+flowchart TB
+  subgraph main["Your push path: unchanged"]
+    BE["Your backend"] -- "push with your FCM / APNs credentials" --> PS["FCM / APNs"]
+    PS --> DEV["Device: the notification is shown"]
+  end
+  subgraph side["reliable-push: the sidecar next to it"]
+    RP["reliable-push backend<br/>(tracking + fallback)"]
+    FR["Your fallback receiver<br/>(SMS, email, ...)"]
+    RP -. "③ signed webhook, only if unconfirmed in time" .-> FR
+  end
+  BE -. "① register, get trackingId" .-> RP
+  DEV -. "② SDK reports DELIVERED / READ" .-> RP
+```
+
+What happens when each part fails, the component diagrams and the full lifecycle: [docs/overview.md](docs/overview.md).
+To present the project, open [docs/presentation.html](docs/presentation.html) in a browser.
+
 ## How it works
 
 1. Your backend registers the notification with `POST /v1/notifications`
@@ -36,8 +66,9 @@ and keeps the FCM/APNs credentials.
 | `loadtest/` | Local load tests (NFR-2 ingest, fallback burst) run by `./scripts/load.sh` | Java 21, Gatling, docker-compose |
 | `docs/` | Requirements, specs, plans, guides, status | Markdown |
 
-Components land incrementally; see [docs/STATUS.md](docs/STATUS.md) for what
-exists today (`backend/`, `client-java/`, `harness/`, `android/` and `ios/` exist).
+All components are released in `v0.1.0` ([CHANGELOG.md](CHANGELOG.md)). What is left is in
+[docs/TODO.md](docs/TODO.md), and the session log is in [docs/STATUS.md](docs/STATUS.md). To build, run and test each
+component step by step, see [docs/getting-started.md](docs/getting-started.md).
 
 ### Try it: demo console
 
@@ -116,6 +147,9 @@ the metrics are in [docs/operations.md](docs/operations.md).
 
 ## Documentation
 
+- [System overview with diagrams](docs/overview.md)
+- [Presentation (HTML slides)](docs/presentation.html)
+- [Getting started: run and test each component](docs/getting-started.md)
 - [Requirements](docs/requirements.md)
 - [Design spec](docs/specs/2026-11-03-reliable-push-design.md)
 - [Architecture](docs/architecture.md)
@@ -126,6 +160,8 @@ the metrics are in [docs/operations.md](docs/operations.md).
 - [Deployment (Kubernetes, GKE, OpenShift)](docs/deployment.md)
 - [Testing](docs/testing.md)
 - [Project status](docs/STATUS.md)
+- [Remaining work (TODO)](docs/TODO.md)
+- [Changelog](CHANGELOG.md)
 - [AGENTS.md](AGENTS.md) (context for AI coding agents)
 - [Contributing](CONTRIBUTING.md)
 - [Security policy](SECURITY.md)

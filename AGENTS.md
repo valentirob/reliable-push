@@ -34,6 +34,7 @@ sending pushes itself.
 2. `docs/specs/` — approved design specs. Do not contradict them; propose a spec change instead.
 3. `docs/plans/` — implementation plans with checkbox tasks. Work the next unchecked task.
 4. `docs/STATUS.md` — **handoff log**: current state, last session, next steps. Read first, update last.
+   `docs/TODO.md` — remaining work with the reason each item waits; `docs/overview.md` — diagrams of every component.
 5. `.agents/rules/*.md` — coding and process rules (listed below). Antigravity loads them automatically; other tools must read them explicitly.
 6. `.agents/skills/*/SKILL.md` — repeatable workflows (Agent Skills open standard).
 
