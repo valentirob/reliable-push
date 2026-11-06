@@ -21,7 +21,7 @@ sending pushes itself.
 |---|---|---|
 | `backend/` | Tracking + fallback service (modular monolith, `api`/`worker` profiles) | Java 21, Spring Boot 4, PostgreSQL, Flyway |
 | `android/` | Android SDK, FCM v1 data mode (AndroidConfigV2 mode deferred until Google's GA); guide `docs/android.md` | Kotlin, minSdk 26 |
-| `ios/` | iOS SDK + Notification Service Extension helper | Swift, iOS 15+, SPM |
+| `ios/` (+ root `Package.swift`) | iOS SDK + Notification Service Extension helper; guide `docs/ios.md` | Swift, iOS 15+, SPM |
 | `client-java/` | Optional zero-dependency Java client for the sender API | Java 17+, JDK only |
 | `harness/` | Fake sender, fake fallback receiver, device simulator, E2E scenarios, web console for manual tests and demos (`./scripts/demo.sh`) | Java, plain HTML/JS, docker-compose |
 | `deploy/helm/` | Helm chart for the backend only (`deploy/helm/reliable-push`, combined/split, GKE and OpenShift values); tool images pinned in `deploy/helm/tools.env` | Helm, Kubernetes ≥ 1.30 |
@@ -87,6 +87,9 @@ running the Maven commands. Details: `docs/testing.md`.
 | E2E (local only, manual or agent) | `./scripts/e2e.sh [--scenario <name>] [--keep]` (Windows: `pwsh scripts/e2e.ps1`) — details in `.agents/skills/run-e2e/SKILL.md` |
 | Android SDK build + lint + unit tests + AAR (needs the Android SDK, `ANDROID_HOME`) | `cd android && ./gradlew build` |
 | Android emulator E2E against the harness stack (local only; boots the AVD; `Android E2E: 8/8 passed, 1 skipped` without Firebase files) | `./scripts/android-e2e.sh [--test <method>] [--release-lib] [--keep]` — details in `docs/testing.md` |
+| iOS SDK package tests on the Simulator (needs Xcode; default device `iPhone 17`, override with `IOS_SIMULATOR`) | `xcodebuild test -scheme ReliablePush -destination "platform=iOS Simulator,name=${IOS_SIMULATOR:-iPhone 17}"` |
+| iOS binary size gate (stripped arm64 dylib < 307,200 bytes) | `ios/scripts/size.sh` |
+| iOS Simulator E2E against the harness stack (local only; `iOS E2E: 8/8 passed, 1 skipped` without the APNs files) | `./scripts/ios-e2e.sh [--test <name>] [--keep]` — details in `docs/testing.md` and `ios/README.md` |
 | Helm chart checks: lint, unit tests, kubeconform (Docker only, pinned images) | `deploy/helm/scripts/validate.sh` |
 | Helm kind smoke install (local only; needs kind, kubectl, JDK 21; `--keep` keeps the cluster) | `./scripts/helm-smoke.sh [--keep]` |
 | Loadtest module build + unit tests (compiles the simulations, never runs Gatling) | `./mvnw -B -pl loadtest verify` |

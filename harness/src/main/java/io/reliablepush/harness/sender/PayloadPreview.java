@@ -62,6 +62,20 @@ public final class PayloadPreview {
                 + " --es body " + quote(quote(body));
     }
 
+    /**
+     * The {@code xcrun simctl openurl} line that hands a tracked push to the iOS sample app's debug URL without APNs.
+     * Values are percent-encoded; the whole URL is single-quoted for the host shell.
+     */
+    public static String iosDebugOpenUrl(UUID tid, String title, String body) {
+        return "xcrun simctl openurl booted " + quote("rpsample://debug-push?rp_tid=" + tid
+                + "&title=" + encode(title) + "&body=" + encode(body));
+    }
+
+    private static String encode(String s) {
+        return java.net.URLEncoder.encode(s, java.nio.charset.StandardCharsets.UTF_8).replace("+", "%20")
+                .replace("'", "%27");
+    }
+
     private static String quote(String s) {
         return "'" + s.replace("'", "'\\''") + "'";
     }

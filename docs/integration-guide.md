@@ -253,8 +253,10 @@ entries and known limits. Mode v2 is not supported yet.
 
 ### iOS
 
-The iOS SDK is planned for a later cycle. Until then, and for any other client, the device API in [api.md](api.md) is the
-contract.
+The iOS SDK is described in [ios.md](ios.md): the Swift package, the App Group, `configure` in
+`didFinishLaunching`, the Notification Service Extension helper, `trackOpen`, the payload contract (`alert` +
+`mutable-content: 1`, top-level `rp_tid`), App Store privacy entries and known limits. For any other client, the device
+API in [api.md](api.md) is the contract.
 
 ## Operating notes
 

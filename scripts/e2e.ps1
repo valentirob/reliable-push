@@ -184,7 +184,7 @@ try {
         Log "removing the stack left by a previous run (project $Project)"
         Compose down -v --remove-orphans *> $null
     }
-    foreach ($port in 8080, 8090) {
+    foreach ($port in 8080, 8090, 8091) {
         if (Test-PortInUse $port) { Die "port $port is in use on 127.0.0.1; stop the process using it (netstat -ano | findstr :$port) and retry" }
     }
     foreach ($d in 'logs', 'junit', 'responses') { Remove-Item -Recurse -Force -ErrorAction SilentlyContinue (Join-Path $Out $d) }

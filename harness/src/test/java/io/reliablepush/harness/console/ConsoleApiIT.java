@@ -304,6 +304,20 @@ class ConsoleApiIT {
     }
 
     @Test
+    void deviceNetworkEndpointTogglesProxy() throws Exception {
+        assertThat(json.readTree(get("/console/api/device-network").body()).get("online").asBoolean()).isTrue();
+
+        HttpResponse<String> off = post("/console/api/device-network", "{\"online\":false}");
+
+        assertThat(off.statusCode()).isEqualTo(200);
+        assertThat(json.readTree(off.body()).get("online").asBoolean()).isFalse();
+        assertThat(json.readTree(get("/console/api/device-network").body()).get("online").asBoolean()).isFalse();
+        assertThat(post("/console/api/device-network", "{}").statusCode()).isEqualTo(400);
+        assertThat(json.readTree(post("/console/api/device-network", "{\"online\":true}").body())
+                .get("online").asBoolean()).isTrue();
+    }
+
+    @Test
     void payloadPreviewHasThreeShapes() throws Exception {
         UUID tid = UUID.randomUUID();
 
@@ -314,6 +328,7 @@ class ConsoleApiIT {
         assertThat(n.get("apns").asString()).contains(tid.toString(), "mutable-content");
         assertThat(n.get("fcmV1").asString()).contains(tid.toString(), "\"priority\": \"HIGH\"");
         assertThat(n.get("fcmV2").asString()).contains(tid.toString(), "android_v2");
+        assertThat(n.get("iosDebugOpenUrl").asString()).contains("rpsample://debug-push?rp_tid=" + tid);
         assertThat(get("/console/api/payload-preview?trackingId=zzz").statusCode()).isEqualTo(400);
     }
 

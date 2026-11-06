@@ -52,7 +52,7 @@ if [ -n "$(rp_compose ps -a -q 2>/dev/null)" ]; then
     rp_log "removing the stack left by a previous run (project $RP_PROJECT)"
     rp_compose down -v --remove-orphans >/dev/null 2>&1 || true
 fi
-rp_check_ports 8080 8090
+rp_check_ports 8080 8090 8091
 
 mkdir -p "$RP_OUT/logs"
 failed() {
@@ -96,6 +96,7 @@ while :; do
     [ "$(date +%s)" -lt "$deadline" ] || failed "container(s) not ready after ${READY_TIMEOUT}s: $pending"
     sleep 1
 done
+rp_wait_device_proxy 30 || failed "the device proxy on 127.0.0.1:8091 does not forward to the backend"
 
 rp_log "stack ready: console $RP_HARNESS_URL, API $RP_API_URL"
 rp_log "stop it with: $STOP_CMD"

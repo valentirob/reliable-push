@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Debug build: merged with the generated Info.plist (GENERATE_INFOPLIST_FILE). -->
+	<key>RPBaseURL</key>
+	<string>$(RP_BASE_URL)</string>
+	<key>RPAppId</key>
+	<string>$(RP_APP_ID)</string>
+	<key>RPAppGroup</key>
+	<string>$(RP_APP_GROUP)</string>
+	<key>RPHarnessURL</key>
+	<string>$(RP_HARNESS_URL)</string>
+	<!-- 1 only for a real APNs run (RP_APNS=1 on the xcodebuild command line or in the environment). -->
+	<key>RPApns</key>
+	<string>$(RP_APNS)</string>
+	<!-- Cleartext only to the local harness stack (127.0.0.1); Release has no exception. -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+	<!-- rpsample://debug-push?rp_tid=&title=&body= (DebugPush.swift): the in-process NSE path for the Simulator. -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>$(RP_BUNDLE_ID).debug</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>rpsample</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>

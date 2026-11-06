@@ -46,7 +46,16 @@ harness/build/
 android/sample/google-services.json
 **/google-services.json
 
+# APNs auth key and settings placed by the maintainer for the optional real-APNs path (harness/build/apns/, covered by
+# harness/build/ above; listed so a stray copy elsewhere is never committed)
+AuthKey*.p8
+apns.properties
+
 # Secrets / local env
 .env
 .env.*
 !.env.example
+
+# SwiftPM (root package)
+/.build/
+/.swiftpm/

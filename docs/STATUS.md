@@ -2,6 +2,56 @@
 
 Newest entry first. Updated at the end of every work session (see `.agents/skills/session-handoff/SKILL.md`).
 
+## 2026-11-06 (2) — Claude Code — `feature/cycle3-ios-sdk` (plan 3, final fix wave)
+
+- **Done:** the final whole-branch review's fix wave (ruling R21): I1 Data Protection class
+  `completeUntilFirstUserAuthentication` on the queue directory and on `events.lock` / `flush.lock` (set on every open,
+  WARN `file.protection_failed` if refused); I2 `ReliablePush.deviceId` from the Keychain record (nil after a restore);
+  I3 `willPresent` guidance and known limit; M1 doc fix; M2 WARN `token.unavailable status=<OSStatus>`; M3 a
+  retry-not-before more than 3600 s ahead counts as expired; M4 async-NSE and foreign-delegate docs; M5 Debug-only ATS
+  local-networking exception for the sample NSE (plist split per configuration); M6 `ios-e2e.sh` restores the language
+  of a Simulator it did not boot; M8 no clear / persist on a locked first launch; M9 every in-flight app flush is
+  cancelled by logout / reconfigure; R19 public log keys `reason status count outcome type call`; R20 User ID in
+  `PrivacyInfo.xcprivacy`; the review's "fix now" items (spoof-host tests, size.sh stderr, doc tidy-ups, delivered-test
+  timing, Harness comment, `ios-e2e.sh` header, CI `simctl list` step). Spec plan 3 block updated. M7, M12 stay parked.
+- **State (not merged, not pushed):** package tests on the Simulator: 108 run, 1 skipped, 0 failures, no warnings;
+  `ios/scripts/size.sh`: 291,920 bytes (limit 307,200; was 272,736, one more 16 KB page); `plutil -lint` OK (privacy
+  manifest, NSE plists); sample Debug and Release builds OK (`CODE_SIGNING_ALLOWED=NO`); `./scripts/ios-e2e.sh`:
+  `iOS E2E: 8/8 passed, 1 skipped`; the M6 restore was checked with `--test notifications-blocked-means-fallback` on a
+  booted de-DE Simulator (`1/1 passed`, language restored); actionlint 1.7.12 clean. No harness, backend or Android
+  change, so `e2e.sh` / `android-e2e.sh` were not rerun (last: 17/17, 8/8 + 1 skipped).
+- **Next:** the maintainer decides the merge into `develop` (`--no-ff`; merge line `E2E: 17/17 passed`, `Android E2E:
+  8/8 passed, 1 skipped`, `iOS E2E: 8/8 passed, 1 skipped`); before that, ideally push the branch / open a draft PR so
+  `ios-ci.yml` and the CodeQL Swift job run once.
+- **Open:** I1 and M5 need an on-device check (the Simulator does not enforce Data Protection): run `apns-real-delivery`
+  with a push while the device is locked, in an app built with Data Protection Complete. Size headroom is now about 15 KB.
+
+## 2026-11-06 (1) — Claude Code — `feature/cycle3-ios-sdk` (plan 3, iOS SDK, Task 8 and handoff)
+
+- **Done:** all plan 3 tasks (0 to 8) are implemented and ticked: the iOS SDK (root `Package.swift`, `ios/Sources/ReliablePush`,
+  Apple frameworks only), the sample app with NSE and Simulator UI tests, the harness device proxy (`127.0.0.1:8091`,
+  online/offline switch) and the optional real APNs sender. Task 8: `.github/workflows/ios-ci.yml` (`macos-26`, Xcode 26.6 at
+  `/Applications/Xcode_26.6.app`, iPhone 17 Simulator: package tests, sample Debug and Release builds, size gate, privacy
+  manifest lint, `.xcresult` upload on failure; no UI tests, no credentials), a CodeQL Swift job, `docs/ios.md`, integration
+  guide §4, README, `AGENTS.md`, `docs/testing.md`, the run-e2e skill and the spec block "Changes during implementation
+  (plan 3)". actionlint 1.7.12 is clean.
+- **State (verification on this branch, not merged, not pushed):** package tests on the Simulator: 96 run, 1 skipped, 0
+  failures; `ios/scripts/size.sh`: 272,736 bytes (limit 307,200); `./mvnw -B -pl harness -am verify` OK (34 client + 151
+  harness unit + 81 harness integration, 0 failures); `cd backend && ./mvnw -B verify` OK (240 unit + 218 integration, 0
+  failures); `cd android && ./gradlew build` OK (release AAR 67,347 bytes); `./scripts/e2e.sh`: 17/17 passed (summary line
+  `[e2e] summary: 17/17 passed`); `./scripts/android-e2e.sh`: `Android E2E: 8/8 passed, 1 skipped`; `./scripts/ios-e2e.sh`:
+  `iOS E2E: 8/8 passed, 1 skipped` (`apns-real-delivery` skipped). The CI sample builds and the CodeQL build command were also
+  run locally and succeed. The new workflows have not run on GitHub yet (actionlint only).
+- **Not run:** Task 7 Step 7 (real APNs delivery): not run, no credentials (maintainer step: `harness/build/apns/AuthKey.p8`,
+  `apns.properties`, `IOS_DEVELOPMENT_TEAM`, see `docs/testing.md`).
+- **Next:** (1) final whole-branch review of `feature/cycle3-ios-sdk` (from `e8a2933`) and one fix wave; parked minors are
+  in `.superpowers/sdd/2026-11-05-cycle3-ios-sdk/progress.md`. (2) The maintainer decides the merge into `develop`
+  (`--no-ff`; merge line `E2E: 17/17 passed`, `Android E2E: 8/8 passed, 1 skipped`, `iOS E2E: 8/8 passed, 1 skipped`).
+  Nothing is pushed or merged. (3) Optionally run `apns-real-delivery` with the Apple Developer files.
+- **Open:** (a) Real APNs delivery and the real NSE run on a device are unverified. (b) No release tag yet, so the package
+  URL snippet in `docs/ios.md` is a template. (c) The iOS CI and CodeQL Swift jobs have not run on GitHub (Xcode path and
+  simulator name come from the runner-images readme for `macos-26`).
+
 ## 2026-11-05 (7) — Claude Code — `feature/cycle2-android-sdk` (plan 2, final fix wave)
 
 - **Done:** R18 fix wave (whole-branch review minors): SDK no longer posts or reports `DELIVERED` for a blocked channel

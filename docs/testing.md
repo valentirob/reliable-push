@@ -38,7 +38,7 @@ Reports: `target/surefire-reports/` (unit), `target/failsafe-reports/` (integrat
 | Console smoke | Playwright for Java against the harness web console | local only | The 17th entry of the E2E run: a headless browser registers a device, sends a push and sees `DELIVERED` and the fallback in the inbox |
 | Load | `loadtest/`, Gatling (Java DSL), `./scripts/load.sh` | local only, never in CI (CI compiles the simulations and runs the module's unit tests) | NFR-2 ingest (`EventIngestSimulation`) and the fallback burst drained by the workers (`FallbackBurstSimulation` + `BurstDrainProbe`) |
 | Helm chart | helm-unittest, `helm lint --strict`, kubeconform (`deploy/helm/scripts/validate.sh`); kind smoke install (`./scripts/helm-smoke.sh`) | validate: CI and local; kind: local only | Required values and secret rules, rendering per mode and platform, schemas; a real install with a worker rollout during dispatch |
-| Mobile | Robolectric, XCTest, emulator/simulator tests | per SDK | Planned in cycles 2 and 3 |
+| Mobile | Robolectric and emulator tests (Android), XCTest unit tests and Simulator UI tests (iOS) | unit tests: CI (`android-ci.yml`, `ios-ci.yml`); emulator and Simulator suites: local only | See the Android and iOS sections below |
 
 ## Notes on how the suites work
 
@@ -70,7 +70,7 @@ The default build never downloads Playwright. GitHub Actions runs the client, ha
 ## End-to-end tests (local only)
 
 `./scripts/e2e.sh [--scenario <name>] [--keep]` (Windows, PowerShell 7: `pwsh scripts/e2e.ps1 [-Scenario <name>] [-Keep]`; the
-PowerShell scripts have not been run on Windows). Needs Docker with the compose plugin, `curl`, and ports 8080 and 8090 free
+PowerShell scripts have not been run on Windows). Needs Docker with the compose plugin, `curl`, and ports 8080, 8090 and 8091 free
 on 127.0.0.1. The images build inside Docker, but `console-smoke` (so the full 17-entry run) calls the host `./mvnw`: it needs
 JDK 21 and network access (Maven artifacts, Playwright's Chromium). With Colima: `export DOCKER_HOST=unix://$HOME/.colima/default/docker.sock`.
 
@@ -91,7 +91,7 @@ JDK 21 and network access (Maven artifacts, Playwright's Chromium). With Colima:
   when scenarios fail (unless `--keep`).
 - **Failures:** `grep -B2 -A6 '"FAILED"' harness/build/e2e/summary.json`, then search the logs by `trace.id` or
   `rp.tracking_id`.
-- **Safety checks:** the script refuses to start if port 8080 or 8090 is taken (it names the port) and if a stack of an earlier
+- **Safety checks:** the script refuses to start if port 8080, 8090 or 8091 is taken (it names the port) and if a stack of an earlier
   `--keep` run exists it removes it first. If a service is not ready within `E2E_READY_TIMEOUT` seconds (default 120) it names
   the container and prints its last log lines.
 - The agent workflow is in [`.agents/skills/run-e2e/SKILL.md`](../.agents/skills/run-e2e/SKILL.md).
@@ -121,6 +121,27 @@ Keystore tests, and writes `harness/build/android-e2e/` (`summary.json`, `junit/
 (`8080` backend, `8090` harness). On Android 17 the E2E grants the sample `ACCESS_LOCAL_NETWORK`. The workflow
 `.github/workflows/android-ci.yml` never runs it: CI has no emulator and no Firebase files.
 
+## iOS SDK tests
+
+Need Xcode 26.6 selected with `xcode-select` and an iOS Simulator (iPhone 17); the Command Line Tools alone have no XCTest.
+Versions are pinned in `ios/README.md`. No Docker for the unit tests.
+
+| What | Command |
+|---|---|
+| Package unit tests (XCTest; what CI runs) | `xcodebuild test -scheme ReliablePush -destination "platform=iOS Simulator,name=${IOS_SIMULATOR:-iPhone 17}"` |
+| Binary size (CI gate: stripped arm64 dylib at `-O` under 307,200 bytes) | `ios/scripts/size.sh` |
+| Privacy manifest lint | `plutil -lint ios/Sources/ReliablePush/PrivacyInfo.xcprivacy` |
+| Simulator E2E (local only) | `./scripts/ios-e2e.sh [--test <name>] [--keep]` |
+
+`./scripts/ios-e2e.sh` starts the harness compose stack (backend on `127.0.0.1:8080`, harness on `8090`, device proxy on
+`8091`), runs the sample app's UI tests (6) and hosted Keychain / App Group tests (2) on the Simulator and writes
+`harness/build/ios-e2e/` (`summary.json`, result bundles, `logs/`); it ends with `iOS E2E: 8/8 passed, 1 skipped`. The
+Simulator does not run a Notification Service Extension for `xcrun simctl push` or `.apns` files, so the tests open the
+sample's debug URL `rpsample://debug-push?...`, which runs the same `ReliablePushExtension` code in the app process and
+shows the result as a local notification that the test taps. "Offline" is the harness device proxy's online/offline switch
+(the Simulator shares the Mac's network and has no airplane mode). `.github/workflows/ios-ci.yml` never runs it: CI builds
+and unit-tests the package, builds the sample (Debug and Release) and checks the size and the manifest.
+
 ## Real FCM pushes (optional, maintainer's Firebase project)
 
 `./scripts/android-e2e.sh` (emulator, needs the Android SDK) normally ends with `Android E2E: 8/8 passed, 1 skipped`: the
@@ -141,6 +162,45 @@ Both files are git-ignored and never committed, logged or printed. The harness r
 reported an FCM token adds an `fcm_push` entry (`SENT`, `UNREGISTERED` or `FAILED` with the HTTP status) to the
 notification's timeline; an `UNREGISTERED` answer drops the device's token. When you are done, delete the key in the Google
 Cloud console.
+
+## Real APNs pushes (optional, maintainer's Apple Developer team)
+
+`./scripts/ios-e2e.sh` normally ends with `iOS E2E: 8/8 passed, 1 skipped`: the ninth entry, `apns-real-delivery`, sends a
+push through the real APNs sandbox and checks that the OS starts the Notification Service Extension of the terminated
+sample app, which reports `DELIVERED` (the extension reads the device token from the shared Keychain group and App Group).
+On Apple-silicon Macs the Simulator receives real APNs sandbox pushes. It needs an app signed by a paid Apple Developer
+Program team with Push Notifications, so it runs only when all three pieces below exist; without any of them it is `SKIPPED`
+(neither passed nor failed, exit code 0, the hint names the missing piece) and every build and test works as usual, with
+ad hoc signing and no team. This is a maintainer step; scripts and agents never create keys, sign in or enter credentials.
+
+1. In the Apple Developer portal register the bundle id `io.reliablepush.sample` (or your own, then set `RP_BUNDLE_ID` when
+   running the script and `RP_APP_GROUP` to match) and the App Group `group.io.reliablepush.sample` for it and for the
+   `.NSE` extension, with the Push Notifications capability on the app.
+2. Create an APNs authentication key (Keys, "Apple Push Notifications service") and save it as
+   `harness/build/apns/AuthKey.p8`; `chmod 600` it. Compose mounts `harness/build/apns/` read-only at `/run/apns` (the
+   scripts create it empty), and the harness container runs as the invoking user so it can read the key.
+3. Write `harness/build/apns/apns.properties`:
+
+   ```
+   keyId=ABC123DEFG
+   teamId=TEAM123456
+   topic=io.reliablepush.sample
+   environment=sandbox
+   ```
+
+4. `export IOS_DEVELOPMENT_TEAM=<your 10-character team id>`.
+5. Run `./scripts/ios-e2e.sh --test apns-real-delivery`. Phase `apns` builds the sample with `RP_APNS=1` (Debug.xcconfig then
+   uses `ReliablePushSample-APNs.entitlements` with `aps-environment` and signs with your team; the app registers for remote
+   notifications and reports its APNs token to the harness), registers, waits for the token, terminates the app and sends a
+   console push; `DELIVERED` must follow within 60 s. Without `RP_APNS` the sample never asks for an APNs token.
+6. When you are done, revoke the key in the Apple Developer portal.
+
+Everything under `harness/build/apns/` is git-ignored and never committed, logged or printed. The harness reports
+`apnsEnabled` in `GET /console/api/apps`; the console API shows only `hasApnsToken` for a device. A push to a user with
+real devices that reported an APNs token adds an `apns_push` entry (`SENT`, `UNREGISTERED` or `FAILED` with the HTTP status
+and Apple's reason code) to the notification's timeline; `UNREGISTERED` (HTTP 410, or 400 `BadDeviceToken`) drops the device's
+token. The provider JWT (ES256, cached 50 minutes) and the token never reach a log line. Unit tests use a test EC key
+generated in the test and a local stub; they never contact Apple.
 
 ## Web console and demo
 
@@ -163,12 +223,19 @@ simulator's; the only endpoint that returns one, never logged) and `POST /consol
 platform, label}` (201; kept in memory, at most 50). Real devices show in the Devices list as `REAL` (the harness holds no
 token for them, so no refresh/offline buttons); `GET /console/api/devices` marks every entry `"kind": "REAL"` or
 `"SIMULATED"`. The push preview also shows the `adb shell am broadcast` line for the sample app's debug receiver; its values
-are single-quoted twice (host shell and device shell), so paste it into a POSIX host shell (not PowerShell or cmd).
+are single-quoted twice (host shell and device shell), so paste it into a POSIX host shell (not PowerShell or cmd). For the iOS
+sample app the preview also shows `xcrun simctl openurl booted 'rpsample://debug-push?...'` (percent-encoded, single-quoted).
+
+The iOS Simulator shares the Mac's network and has no airplane mode, so the iOS sample reaches the backend through a TCP proxy
+in the harness container, published on `127.0.0.1:8091` only (to `api:8080`; `HARNESS_DEVICEPROXYTARGET`, and port 8091 must be
+free on the host). `GET /console/api/device-network` returns `{online, enabled}` and `POST /console/api/device-network
+{"online": false}` switches it: offline closes every open connection and closes new ones at once, so clients see a transport
+error, not an HTTP status. The Devices screen has the same switch. Without the target (plain `mvn` runs) nothing listens.
 
 ## Load tests (local only)
 
 `./scripts/load.sh [--simulation ingest|burst|all] [--api-pool N] [--worker-concurrency N] [--worker-pool N] [--workers 1|2] [--keep]`
-(defaults: `all`, 10, 100, 10, 1). Never run in CI. Needs Docker with the compose plugin and ports 8080 and 8090 free on
+(defaults: `all`, 10, 100, 10, 1). Never run in CI. Needs Docker with the compose plugin and ports 8080, 8090 and 8091 free on
 127.0.0.1, so it cannot run next to the E2E or demo stack. `--simulation all` takes about 15 minutes.
 
 - **Stack:** the E2E compose file plus `loadtest/compose/load.override.yml` (project `reliable-push-load`, real clock, API

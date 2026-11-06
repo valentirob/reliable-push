@@ -89,7 +89,7 @@ if [ -n "$(rp_compose ps -a -q 2>/dev/null)" ]; then
     rp_log "removing the stack left by a previous run (project $RP_PROJECT)"
     rp_compose down -v --remove-orphans >/dev/null 2>&1 || true
 fi
-rp_check_ports 8080 8090
+rp_check_ports 8080 8090 8091
 
 rm -rf "$RP_OUT/logs" "$RP_OUT/junit" "$RP_OUT/summary.json" "$RP_OUT/responses"
 mkdir -p "$RP_OUT/logs" "$RP_OUT/junit" "$RP_OUT/responses"
@@ -144,6 +144,8 @@ while :; do
     fi
     sleep 1
 done
+rp_wait_device_proxy 30 \
+    || rp_die "the device proxy on 127.0.0.1:8091 does not forward to the backend (GET /actuator/health did not answer 200)"
 rp_log "stack ready"
 
 # ---- scenarios -------------------------------------------------------------------------------------------------

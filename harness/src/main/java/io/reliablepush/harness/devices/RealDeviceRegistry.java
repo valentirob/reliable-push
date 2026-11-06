@@ -21,14 +21,16 @@ public class RealDeviceRegistry {
     /**
      * A device the harness only knows about; never carries a backend device token. {@code fcmToken} (nullable) is the
      * device's FCM registration token, used only to send real pushes: it is never returned by an endpoint and is
-     * redacted from {@link #toString()}.
+     * redacted from {@link #toString()}. {@code apnsToken} (nullable) is the iOS device's hex APNs token, treated the
+     * same way.
      */
     public record RealDevice(String appId, String userId, UUID deviceId, Platform platform, String label,
-                             Instant registeredAt, String fcmToken) {
+                             Instant registeredAt, String fcmToken, String apnsToken) {
         @Override
         public String toString() {
             return "RealDevice[appId=" + appId + ", deviceId=" + deviceId + ", platform=" + platform
-                    + ", fcmToken=" + (fcmToken == null ? "none" : "<redacted>") + "]";
+                    + ", fcmToken=" + (fcmToken == null ? "none" : "<redacted>")
+                    + ", apnsToken=" + (apnsToken == null ? "none" : "<redacted>") + "]";
         }
     }
 
@@ -49,7 +51,7 @@ public class RealDeviceRegistry {
     }
 
     public RealDevice add(String appId, String userId, UUID deviceId, Platform platform, String label, String fcmToken) {
-        RealDevice d = new RealDevice(appId, userId, deviceId, platform, label, clock.instant(), fcmToken);
+        RealDevice d = new RealDevice(appId, userId, deviceId, platform, label, clock.instant(), fcmToken, null);
         synchronized (devices) {
             devices.removeIf(e -> e.deviceId().equals(deviceId));
             devices.addLast(d);
@@ -76,7 +78,7 @@ public class RealDeviceRegistry {
             for (RealDevice d : all) {
                 found |= d.deviceId().equals(deviceId);
                 devices.addLast(d.deviceId().equals(deviceId) ? new RealDevice(d.appId(), d.userId(), d.deviceId(),
-                        d.platform(), d.label(), d.registeredAt(), fcmToken) : d);
+                        d.platform(), d.label(), d.registeredAt(), fcmToken, d.apnsToken()) : d);
             }
             return found;
         }
@@ -92,7 +94,38 @@ public class RealDeviceRegistry {
                 boolean match = d.deviceId().equals(deviceId) && expected != null && expected.equals(d.fcmToken());
                 cleared |= match;
                 devices.addLast(match ? new RealDevice(d.appId(), d.userId(), d.deviceId(), d.platform(), d.label(),
-                        d.registeredAt(), null) : d);
+                        d.registeredAt(), null, d.apnsToken()) : d);
+            }
+            return cleared;
+        }
+    }
+
+    /** Replaces the APNs token of a device; false when the device is unknown. */
+    public boolean setApnsToken(UUID deviceId, String apnsToken) {
+        synchronized (devices) {
+            List<RealDevice> all = List.copyOf(devices);
+            boolean found = false;
+            devices.clear();
+            for (RealDevice d : all) {
+                found |= d.deviceId().equals(deviceId);
+                devices.addLast(d.deviceId().equals(deviceId) ? new RealDevice(d.appId(), d.userId(), d.deviceId(),
+                        d.platform(), d.label(), d.registeredAt(), d.fcmToken(), apnsToken) : d);
+            }
+            return found;
+        }
+    }
+
+    /** Drops the APNs token of a device only if it still equals {@code expected}; true when it was dropped. */
+    public boolean clearApnsToken(UUID deviceId, String expected) {
+        synchronized (devices) {
+            List<RealDevice> all = List.copyOf(devices);
+            boolean cleared = false;
+            devices.clear();
+            for (RealDevice d : all) {
+                boolean match = d.deviceId().equals(deviceId) && expected != null && expected.equals(d.apnsToken());
+                cleared |= match;
+                devices.addLast(match ? new RealDevice(d.appId(), d.userId(), d.deviceId(), d.platform(), d.label(),
+                        d.registeredAt(), d.fcmToken(), null) : d);
             }
             return cleared;
         }

@@ -7,6 +7,22 @@ export function mount(root, ctx) {
   const platform = el('select', {}, el('option', { value: 'ANDROID', text: 'ANDROID' }), el('option', { value: 'IOS', text: 'IOS' }));
   const mode = el('select', {}, el('option', { value: 'V1', text: 'v1 (data-only)' }), el('option', { value: 'V2', text: 'v2 (mutable content)' }));
   const body = el('tbody');
+  const netState = el('span', { class: 'muted' });
+  const netButton = el('button', { type: 'button' });
+  let netOnline = true;
+  async function loadNet() {
+    try {
+      const n = await api('/device-network');
+      netOnline = n.online;
+      netState.textContent = (n.enabled ? '' : 'proxy not running; ') + (n.online ? 'online' : 'offline');
+      netButton.textContent = n.online ? 'Go offline' : 'Go online';
+    } catch (e) { err.show(e); }
+  }
+  netButton.addEventListener('click', async () => {
+    err.show(null);
+    try { await api('/device-network', { method: 'POST', body: { online: !netOnline } }); } catch (e) { err.show(e); }
+    await loadNet();
+  });
   const syncMode = () => { mode.disabled = platform.value !== 'ANDROID'; };
   platform.addEventListener('change', syncMode);
   syncMode();
@@ -42,9 +58,12 @@ export function mount(root, ctx) {
   el('h3', { text: 'Register a simulated device' }),
   el('div', { class: 'row' }, field('App', app), field('User id', user), field('Platform', platform), field('Android mode', mode),
     el('button', { type: 'submit', text: 'Register device' })));
-  root.append(form, err, el('div', { class: 'card table-wrap' }, el('table', {},
+  const net = el('div', { class: 'card' }, el('h3', { text: 'Real device network (iOS Simulator via 127.0.0.1:8091)' }),
+    el('div', { class: 'row' }, netState, netButton));
+  root.append(form, net, err, el('div', { class: 'card table-wrap' }, el('table', {},
     el('thead', {}, el('tr', {}, ['User', 'Platform', 'Device id', 'Token expires', 'Status', 'Actions'].map((t) => el('th', { text: t })))), body)),
   el('p', { class: 'muted', text: 'Last loaded ' + fmtTime(new Date().toISOString()) }));
   load();
+  loadNet();
   return { unmount() { loadSeq++; } };
 }

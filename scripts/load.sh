@@ -151,7 +151,7 @@ if [ -n "$(rp_compose ps -a -q 2>/dev/null)" ]; then
     rp_log "removing the stack left by a previous run (project $RP_PROJECT)"
     rp_compose down -v --remove-orphans >/dev/null 2>&1 || true
 fi
-rp_check_ports 8080 8090
+rp_check_ports 8080 8090 8091
 
 SERVICES="postgres api worker-a harness gatling"
 [ "$WORKERS" = 2 ] && SERVICES="postgres api worker-a worker-b harness gatling"

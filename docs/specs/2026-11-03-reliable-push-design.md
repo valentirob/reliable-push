@@ -98,6 +98,58 @@
 >   `scripts/android-e2e.sh` runs the emulator suite against the harness stack (`Android E2E: 8/8 passed, 1 skipped`
 >   without the Firebase files); `.github/workflows/android-ci.yml` builds the SDK without emulator or credentials. Guide:
 >   [`docs/android.md`](../android.md).
+>
+> **Changes during implementation (plan 3, 2026-11-06).** The iOS SDK, its sample app and the Simulator E2E suite are built.
+> The notes below override older wording in the sections they name (§12 is updated; the code is the reference):
+>
+> - §7.3: the manifest `Package.swift` is at the **repository root** (SwiftPM resolves a package by URL only from the root);
+>   sources are under `ios/`. Library `ReliablePush`, iOS 15+, Swift 6, Foundation / UserNotifications / Security / OSLog only.
+> - §7.3 Keychain: the access group **defaults to the App Group id** (an App Group is a valid keychain access group, so no
+>   team-prefixed entitlement); `ReliablePushOptions.keychainAccessGroup` overrides it. The token and the device id are
+>   **one atomic Keychain record** `{deviceId, token}` (R10), so a reader never clears a registration being written.
+> - §7.3 locked device: `errSecInteractionNotAllowed` (and any other Keychain failure) means "not available now" and
+>   **never clears** the registration; only an undecodable record clears it (WARN `token.unreadable`). A push arriving before
+>   the first unlock after a reboot therefore cannot be reported (the event is lost). A Keychain failure other than
+>   "locked" also logs WARN `token.unavailable status=<OSStatus>` (e.g. `-34018`, a missing entitlement).
+> - §7.3 reinstall: the first `configure` with no stored configuration clears a Keychain record that survived a
+>   reinstall (R17; Android parity), except when the Keychain read is "locked" (a background launch before the first
+>   unlock, when the App Group also reads as empty): then nothing is cleared or persisted until a later launch.
+> - §7.3 restore: `ReliablePush.deviceId` is derived from the Keychain record (registered: its id; missing: nil; locked:
+>   the cached id), so it is nil after a backup restore or a device migration even though the App Group cache came back.
+> - §7.3 file protection: the queue directory and the lock files `events.lock` / `flush.lock` get
+>   `completeUntilFirstUserAuthentication` explicitly (set on every open; a refusal is WARN `file.protection_failed`, not
+>   fatal), like `events.json`, so an NSE can use them on a locked device in a host app whose default class is Complete.
+> - §7 events: an unacknowledged event is dropped after **two strikes** (WARN `tracking.event_dropped`), as on Android (R11).
+>   A stored retry-not-before more than 3600 s ahead of the clock (set under a wrong clock) counts as expired and is
+>   cleared when read.
+> - §7.3 concurrency: the app-side flush runs inside `ProcessInfo.performExpiringActivity`, bounded to **25 s**, so the
+>   cross-process `flush.lock` is not held when iOS suspends the app; `logout` and a reconfiguring `configure` wait at most
+>   **2 s** for that lock (R12). Every in-flight app flush is tracked and all are cancelled by `logout` and reconfigure.
+> - §7.3 public API: new errors `ReliablePushError.appGroupUnavailable` and `.invalidAppId`. `ReliablePushExtension.didReceive`
+>   takes a plain non-`Sendable` `@escaping (UNNotificationContent) -> Void` handler (R16: the system's NSE handler is not
+>   `Sendable`) and must be called from the NSE's **synchronous** override. The notification-settings read is capped at 2 s,
+>   independent of `extensionSendTimeout` (default 5 s, clamped to 0...25).
+> - §9.1: logging goes through `os_log` on an `OSLog` (subsystem `io.reliablepush`, category `ReliablePush`) instead of
+>   `os.Logger` (R14: `Logger`'s format section costs a 16 KB page); event names and levels are unchanged. Public fields
+>   (R19): `trackingId`, `deviceId` and the low-cardinality, non-personal `reason`, `status`, `count`, `outcome`, `type`,
+>   `call`, so a release WARN keeps its cause; every other field is private.
+> - §9.2: the wire format uses `JSONSerialization` instead of `Codable` to meet the size gate (R15). The gate is
+>   `ios/scripts/size.sh`: stripped arm64 dylib built at `-O`, **< 307,200 B** (currently about 291.9 KB); CI runs it.
+> - §10, §10.1: the Simulator does not run a Notification Service Extension for `simctl push` or `.apns` files, so the
+>   E2E uses a **debug URL** (`rpsample://debug-push?...`) that runs the same `ReliablePushExtension` code in the app process
+>   and shows a local notification the UI test taps, instead of `simctl push`. The harness gains a **device proxy**
+>   (`127.0.0.1:8091` to the backend) with an **online/offline switch** (the Simulator has no airplane mode) and an
+>   **optional real APNs sender** (ES256 provider token, key under `harness/build/apns/`, maintainer's Apple Developer team,
+>   git-ignored). `./scripts/ios-e2e.sh` has 8 entries plus 1 optional: `iOS E2E: 8/8 passed, 1 skipped` without the APNs
+>   files (R18).
+> - NFR-5 store policy: `PrivacyInfo.xcprivacy` also declares **User ID** (linked, App Functionality, not tracking;
+>   R20): the ID token sent at registration carries the account id and the backend links every event to it.
+> - Final fix wave scope (R21): the final review's I1-I3, M1-M6, M8, M9, R19, R20 and its "fix now" items; M7 (a burst
+>   can leave one DELIVERED queued until the next run) and M12 (the harness device proxy binds all interfaces) stay
+>   parked.
+> - §11: `.github/workflows/ios-ci.yml` (macOS 26 runner, Xcode 26.6: package tests on the Simulator, sample Debug and
+>   Release builds, size gate, privacy manifest lint, no UI tests, no credentials) and a CodeQL Swift job. Guide:
+>   [`docs/ios.md`](../ios.md).
 
 ## 1. Architecture
 
@@ -509,11 +561,11 @@ apps on real or emulated devices. Credentials are never committed or logged.
 ## 12. Repository layout (end state)
 
 ```
-LICENSE  README.md  AGENTS.md  CLAUDE.md  CONTRIBUTING.md  SECURITY.md
+LICENSE  README.md  AGENTS.md  CLAUDE.md  CONTRIBUTING.md  SECURITY.md  Package.swift (iOS SDK manifest)
 .agents/{rules,skills}/   .claude/{agents,skills->../.agents/skills}
 .github/workflows/
 backend/      client-java/      harness/      loadtest/      android/      ios/      deploy/helm/
-scripts/ (e2e.sh, e2e.ps1, demo.sh, demo.ps1, helm-smoke.sh, load.sh, android-e2e.sh)
+scripts/ (e2e.sh, e2e.ps1, demo.sh, demo.ps1, helm-smoke.sh, load.sh, android-e2e.sh, ios-e2e.sh)
 docs/  requirements.md  STATUS.md  specs/  plans/  architecture.md  api.md
-       integration-guide.md  security.md  operations.md  deployment.md  testing.md
+       integration-guide.md  security.md  operations.md  deployment.md  testing.md  android.md  ios.md
 ```

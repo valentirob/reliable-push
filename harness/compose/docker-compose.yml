@@ -3,7 +3,7 @@
 #   docker compose -p reliable-push-e2e -f harness/compose/docker-compose.yml run --rm secrets
 #   docker compose -p reliable-push-e2e -f harness/compose/docker-compose.yml up -d --build
 # Per-run secrets live in harness/build/e2e/{secrets,db}.env (git-ignored), written by the one-shot `secrets` service.
-# Published ports bind 127.0.0.1 only: backend API 8080, harness/console 8090.
+# Published ports bind 127.0.0.1 only: backend API 8080, harness/console 8090, device-traffic proxy 8091.
 
 name: reliable-push-e2e
 
@@ -91,7 +91,7 @@ services:
       context: ../..
       dockerfile: harness/Dockerfile
     read_only: true
-    # the invoking user, so a service-account key with mode 600 in harness/build/fcm/ is readable inside the container
+    # the invoking user, so a service-account key (or APNs auth key) with mode 600 in harness/build/fcm/ (apns/) is readable inside the container
     # (the image's files are world-readable); 1001:0 when compose is run by hand
     user: "${E2E_UID:-1001}:${E2E_GID:-0}"
     tmpfs:
@@ -100,6 +100,8 @@ services:
       - rp-logs:/tmp/rp-logs:ro
       # optional real FCM mode: service-account.json placed here by the maintainer (empty directory otherwise)
       - ../build/fcm:/run/fcm:ro
+      # optional real APNs mode: AuthKey.p8 and apns.properties placed here by the maintainer (empty directory otherwise)
+      - ../build/apns:/run/apns:ro
     env_file:
       - path: ../build/e2e/secrets.env
         required: false
@@ -108,8 +110,11 @@ services:
       HARNESS_BACKENDLOGDIR: /tmp/rp-logs
       # the backend runs the fast clock (1 minute = 1 s): console countdowns use the same scale
       HARNESS_MINUTESECONDS: "${HARNESS_MINUTESECONDS:-1}"
+      # TCP proxy for the iOS Simulator (no airplane mode): 127.0.0.1:8091 -> api:8080, switched from the console
+      HARNESS_DEVICEPROXYTARGET: http://api:8080
     ports:
       - "127.0.0.1:8090:8090"
+      - "127.0.0.1:8091:8091"
     depends_on:
       - api
 

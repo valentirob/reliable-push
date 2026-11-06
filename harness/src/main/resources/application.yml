@@ -28,3 +28,5 @@ harness:
   # Optional: HARNESS_MINUTESECONDS (harness.minute-seconds, default 60; 1 = the backend's fast clock) and per app
   # HARNESS_APPS_<ID>_TRIGGERWINDOWMINUTES (default 20): console countdowns only, they must mirror the backend.
   # At least one app is required. Pinned by HarnessPropertiesEnvBindingTest.
+  # Optional: HARNESS_DEVICEPROXYTARGET (harness.device-proxy-target, e.g. http://api:8080) starts the TCP proxy the iOS
+  # Simulator uses to reach the backend (HARNESS_DEVICEPROXYPORT, default 8091). Unset: no proxy, the switch only remembers.
