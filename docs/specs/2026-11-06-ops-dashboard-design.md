@@ -183,7 +183,8 @@ range → `400`; unknown route → `404`; rate limit → `429` + `Retry-After` (
 
 Audit (Log4j 2 ECS, logger `io.reliablepush.event`, INFO): `admin.search` (`rp.admin_key`, `rp.app_id`, `filters` =
 names of the filters used, never their values), `admin.notification_viewed` and `admin.payload_viewed`
-(`rp.admin_key`, `rp.app_id`, `rp.tracking_id`, `rp.user_hash`). Authentication failures reuse `auth.failed` with
+(`rp.admin_key`, `rp.app_id`, `rp.tracking_id`, `rp.user_hash`), `admin.devices_viewed` (`rp.admin_key`, `rp.app_id`,
+`rp.user_hash`). Authentication failures reuse `auth.failed` with
 `reason` = `missing_admin_key` / `unknown_admin_key`. The key, `userId` and payload never appear in a log line.
 
 ## 5. Page (`/admin/`)

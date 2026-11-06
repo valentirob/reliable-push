@@ -64,6 +64,7 @@ Every search and view is logged (logger `io.reliablepush.event`, INFO) without p
 | `admin.search` | `rp.admin_key`, `rp.app_id`, `filters` (names of the filters used, never their values) |
 | `admin.notification_viewed` | `rp.admin_key`, `rp.app_id`, `rp.tracking_id`, `rp.user_hash` |
 | `admin.payload_viewed` | same |
+| `admin.devices_viewed` | `rp.admin_key`, `rp.app_id`, `rp.user_hash` (devices of a user; the user id itself is never logged) |
 
 A failed sign-in logs `auth.failed` with `reason` `missing_admin_key` or `unknown_admin_key`; a key over its limit logs
 `rate_limit.exceeded` with `rate_limit.scope=admin`. The key, the user id and the payload never appear in a log line.

@@ -255,7 +255,9 @@ class AdminController {
         if (userId == null || userId.isEmpty()) {
             throw new BadParameterException("userId", "is required");
         }
-        return new AdminViews.Devices(queries.devices(appId, userId));
+        AdminViews.Devices devices = new AdminViews.Devices(queries.devices(appId, userId));
+        AdminAudit.devicesViewed(principal, appId, userId);
+        return devices;
     }
 
     private static AdminPrincipal principal(HttpServletRequest request) {

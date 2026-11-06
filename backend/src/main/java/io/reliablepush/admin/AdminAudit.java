@@ -31,6 +31,14 @@ final class AdminAudit {
         EventLog.info("admin.payload_viewed", fields(principal, appId, id, userId));
     }
 
+    /** A devices lookup by user id: the user hash only, never the raw user id. */
+    static void devicesViewed(AdminPrincipal principal, String appId, String userId) {
+        EventLog.info("admin.devices_viewed", Map.of(
+                "rp.admin_key", principal.keyId(),
+                "rp.app_id", appId,
+                "rp.user_hash", UserHash.of(userId)));
+    }
+
     private static Map<String, Object> fields(AdminPrincipal principal, String appId, UUID id, String userId) {
         return Map.of(
                 "rp.admin_key", principal.keyId(),

@@ -195,6 +195,7 @@ below, all top-level. ThreadContext entries `trace.id` and `rp.*` are top-level;
 | `admin.search` | Admin notification search answered | `rp.admin_key`, `rp.app_id`, `filters` = comma-separated filter names used (never values) |
 | `admin.notification_viewed` | Admin opened a notification detail | `rp.admin_key`, `rp.app_id`, `rp.tracking_id`, `rp.user_hash` |
 | `admin.payload_viewed` | Admin read a stored fallback payload (needs the `payload` permission) | same |
+| `admin.devices_viewed` | Admin listed the devices of a user | `rp.admin_key`, `rp.app_id`, `rp.user_hash` (never the user id) |
 | `fallback.claimed` | The worker claimed a due row | `rp.app_id`, `rp.user_hash`, `rp.attempt` (number of the attempt about to be made) |
 | `fallback.reclaimed` (WARN) | Claimed while the previous lease was still set: the previous holder crashed or was too slow | same |
 | `fallback.dispatched` | Webhook answered `2xx`, row closed `FALLBACK_TRIGGERED` | `rp.attempt`, `event.duration`, `http.response.status_code` |

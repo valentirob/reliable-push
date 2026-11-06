@@ -53,8 +53,9 @@ under `reliable-push.admin.keys[]` as `{id, key-sha256, apps, permissions}`; wit
   unknown app or permission, and on a hash equal to a sender key hash.
 - **Rotation:** add the new key (new `id` and hash), deploy, hand the new key out, remove the old entry, deploy. Both keys work
   during the overlap, so nobody is locked out. To revoke a key at once, remove its entry and deploy.
-- **Audit:** every search and view logs `admin.search`, `admin.notification_viewed` or `admin.payload_viewed` with the key
-  `id`, the app and (for views) the tracking id and `rp.user_hash`; never the key, a user id, a filter value or a payload.
+- **Audit:** every search and view logs `admin.search`, `admin.notification_viewed`, `admin.payload_viewed` or
+  `admin.devices_viewed` with the key `id`, the app, for a notification or payload view the tracking id, and for every view
+  `rp.user_hash`; never the key, a user id, a filter value or a payload.
   Failed sign-ins log `auth.failed` (`missing_admin_key`, `unknown_admin_key`); a key over its rate limit logs
   `rate_limit.exceeded` with scope `admin`.
 - **Page headers** on `/admin/**`: `Content-Security-Policy: default-src 'self'; frame-ancestors 'none'; base-uri 'none';

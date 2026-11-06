@@ -277,6 +277,7 @@ class AdminSearchIT extends PostgresTestBase {
         checked(ALL_KEY, "/v1/admin/notifications?app=shop&userId=" + enc(user) + "&state=PENDING");
         checked(ALL_KEY, "/v1/admin/notifications/" + id);
         checked(ALL_KEY, "/v1/admin/notifications/" + id + "/payload");
+        checked(ALL_KEY, "/v1/admin/devices?app=shop&userId=" + enc(user));
 
         await().atMost(Duration.ofSeconds(5)).untilAsserted(() -> {
             List<String> lines = output.getOut().lines().toList();
@@ -286,6 +287,13 @@ class AdminSearchIT extends PostgresTestBase {
                 assertThat(JsonPath.<String>read(l, "$['rp.admin_key']")).isEqualTo("admin-all");
                 assertThat(JsonPath.<String>read(l, "$['rp.app_id']")).isEqualTo("shop");
                 assertThat(JsonPath.<String>read(l, "$.filters")).isEqualTo("state,userId");
+            });
+            assertThat(lines).anySatisfy(l -> {
+                assertThat(l).contains("\"admin.devices_viewed\"");
+                assertThat(JsonPath.<String>read(l, "$['rp.admin_key']")).isEqualTo("admin-all");
+                assertThat(JsonPath.<String>read(l, "$['rp.app_id']")).isEqualTo("shop");
+                assertThat(JsonPath.<String>read(l, "$['rp.user_hash']")).isEqualTo(hash);
+                assertThat(JsonPath.<String>read(l, "$['log.level']")).isEqualTo("INFO");
             });
             for (String action : List.of("admin.notification_viewed", "admin.payload_viewed")) {
                 assertThat(lines).as(action).anySatisfy(l -> {

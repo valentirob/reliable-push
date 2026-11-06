@@ -177,7 +177,7 @@ one, `/v1/admin/**` answers `404` like any unknown path.
 | `GET /v1/admin/devices` | `app`, `userId` (both required) | `{items}`, at most 50, newest first, revoked devices included |
 
 Searches and views are audit-logged without personal data (`admin.search`, `admin.notification_viewed`,
-`admin.payload_viewed`; see [operations.md](operations.md#event-catalogue)). Field-level schemas: `openapi.yaml`, tag `admin`.
+`admin.payload_viewed`, `admin.devices_viewed`; see [operations.md](operations.md#event-catalogue)). Field-level schemas: `openapi.yaml`, tag `admin`.
 
 ## Errors
 

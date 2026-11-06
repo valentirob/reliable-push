@@ -569,6 +569,7 @@ paths:
       tags: [admin]
       operationId: adminDevices
       summary: The devices of one user, newest first (at most 50)
+      description: Audited (`admin.devices_viewed`, with `rp.user_hash`); the user id is never logged.
       security:
         - AdminKey: []
       parameters:
