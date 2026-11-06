@@ -30,10 +30,10 @@ Central) at the start of a session.
   - R8 the page was checked by fetch and Playwright; signed-in views were not checked by a person.
   - R9 `#app` is the overview app selector, `<main>` has id `view` (the smoke test contract).
   - R10 task 8 ran the web E2E only; the controller runs the iOS suite once at the end.
+  - R11 with `config.admin.keys` the chart also routes `/admin` (Ingress path appended, second OpenShift Route `-admin`, `route.host` required); unchanged without keys. Helm `validate.sh` passes (92 unit tests).
 - **State:** E2E expected `18/18 passed` (the controller runs it at the end; not run by the docs task).
 - **Open:** `scripts/e2e.ps1` was not run on Windows; the signed-in dashboard views were not checked by a person in a
-  browser; the Helm Ingress/Route route `/v1` only, so the `/admin/` page is reached by port-forward or an internal
-  route that the operator adds ([deployment.md](deployment.md#ops-dashboard)); release 0.2.0 is the maintainer's call.
+  browser; release 0.2.0 is the maintainer's call.
 - **Next:** review loop, full checks, merge `feature/ops-dashboard` into `develop` (`--no-ff`), push, CI.
 
 ## 2026-11-06 (10) — Claude Code — release 0.1.2

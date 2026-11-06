@@ -16,7 +16,7 @@ All notable changes to this project are documented here. Versions follow [Semant
 - Database migration `V4__admin.sql`: `fallback_attempt` (one row per webhook call) and `daily_stats` (nightly rollup
   by `DailyRollupJob`, kept `admin.rollup-retention-days`, 400 by default). `RetentionJob` skips its purge when the
   rollup is missing (`retention.skipped`).
-- Helm: `config.admin` in `values.yaml`.
+- Helm: `config.admin` in `values.yaml`. With admin keys the Ingress also routes `/admin` and OpenShift gets a second Route for `/admin` (`route.host` is then required); without keys the rendered manifests are unchanged.
 - Harness: E2E scenario `admin-dashboard` and `AdminSmokeE2E` (the full run is now 18 entries); a per-run admin key.
 - Docs: `docs/admin.md`, admin sections in `api.md`, `security.md`, `deployment.md`, `testing.md`, a new section in
   `overview.md`, the at-a-glance picture and a slide.

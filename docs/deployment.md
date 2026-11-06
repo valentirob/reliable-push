@@ -165,7 +165,7 @@ helm install rp deploy/helm/reliable-push -n reliable-push -f deploy/helm/reliab
   default `restricted-v2` SCC admits the pods and assigns an arbitrary UID in group 0; the image is built for that
   (group-writable files). Do not grant `anyuid`. The other security settings (non-root, read-only root filesystem, no
   privilege escalation, all capabilities dropped, `RuntimeDefault` seccomp) already satisfy `restricted-v2`.
-- **Route** (`route.openshift.io/v1`) for `/v1` only, edge TLS with HTTP redirected to HTTPS. An empty `route.host`
+- **Route** (`route.openshift.io/v1`) for `/v1` (plus a second Route for `/admin` when admin keys are set, see [Ops dashboard](#ops-dashboard)), edge TLS with HTTP redirected to HTTPS. An empty `route.host`
   lets the router generate a host; set it in `my-values.yaml` for your own domain.
 - **User workload monitoring:** the overlay enables a `ServiceMonitor` for the `management` port. It is scraped only
   when user workload monitoring is enabled (`enableUserWorkload: true` in the `cluster-monitoring-config` ConfigMap of
@@ -250,16 +250,31 @@ config:
 ```
 
 Nothing else changes: no new pod, port or Service. Every pod that serves the API also serves `/admin/` and `/v1/admin/`.
-The chart's Ingress and Route route `/v1` only, so `/v1/admin/` is reachable through them while the `/admin/` page is not.
-Choose how people reach the page:
 
-- **Not through the public host (recommended start):** `kubectl -n reliable-push port-forward svc/rp-reliable-push-api 8080:80`,
-  then open `http://127.0.0.1:8080/admin/`.
-- **Through an internal Ingress or Route** that you add yourself for `/admin/` and `/v1/admin/` on an internal host or behind your
-  SSO proxy, with an IP allow-list (for example `nginx.ingress.kubernetes.io/whitelist-source-range`, or the OpenShift Route annotation
-  `haproxy.router.openshift.io/ip_whitelist`).
-- **Block `/v1/admin/` on the public host** with a path rule or a WAF rule at the ingress, if you route the dashboard only
-  internally. The admin key still protects it, and without any key it answers `404`.
+With admin keys set, the chart routes the page too:
+
+- **Ingress:** each host also gets the path `/admin` (to the API Service), in addition to its configured `/v1` paths. A listed
+  `/admin` is not duplicated. Without admin keys the Ingress is unchanged.
+- **OpenShift Route:** a second Route, `<release>-reliable-push-admin`, with `path: /admin` and the same host, annotations and TLS
+  as the `/v1` Route. `route.host` is required when admin keys are set (the page calls `/v1/admin` on its own origin, so both
+  Routes must share one host). The two paths are fixed: you cannot route `/v1/...` sub-paths separately with the Route.
+
+`/v1` as a prefix also covers `/v1/admin`. To keep the dashboard off the public host, choose one:
+
+- **Ingress, explicit paths:** list the API paths instead of `/v1`, so `/v1/admin` is not routed, for example
+  `paths: [/v1/notifications, /v1/devices, /v1/events]`, and do not leave `/admin` to the chart: the chart still appends `/admin`
+  when keys exist, so guard it (next bullets) or give the public Ingress no admin keys by using a second release without them.
+- **Internal Ingress:** add your own Ingress for `/admin` and `/v1/admin` on an internal host or behind your SSO proxy, and
+  remove the public rule for `/admin` with a WAF or path rule at the load balancer.
+- **Allow-list:** restrict `/admin/` and `/v1/admin/` by source address with annotations in `ingress.annotations` (for example
+  `nginx.ingress.kubernetes.io/whitelist-source-range`; note that annotations apply to the whole Ingress, so this works best
+  with a second Ingress that carries only the dashboard paths), or with a NetworkPolicy or WAF in front.
+- **Route:** the two Routes cannot be narrowed by path. Use the Route annotation `haproxy.router.openshift.io/ip_whitelist` (it applies
+  to both Routes, so it would also restrict the sender API), or do not set `route.enabled` and expose the API with your own Routes.
+- **No exposure:** `kubectl -n reliable-push port-forward svc/rp-reliable-push-api 8080:80`, then open
+  `http://127.0.0.1:8080/admin/`.
+
+The admin key still protects the API when the page is reachable; without any key both paths answer `404`.
 
 ## Per-IP limits at the ingress
 
