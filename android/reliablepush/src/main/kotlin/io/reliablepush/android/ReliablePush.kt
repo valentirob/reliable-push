@@ -18,7 +18,7 @@ import io.reliablepush.android.internal.SdkLog
  */
 public object ReliablePush {
     /** SDK version; kept equal to `VERSION_NAME` in `android/gradle.properties` (checked by VersionTest). */
-    public const val VERSION: String = "0.2.0-SNAPSHOT"
+    public const val VERSION: String = "0.1.2"
 
     private class State(val sdk: Sdk, val options: ReliablePushOptions)
 

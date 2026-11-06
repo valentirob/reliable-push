@@ -146,7 +146,7 @@
 >   R20): the ID token sent at registration carries the account id and the backend links every event to it.
 > - Final fix wave scope (R21): the final review's I1-I3, M1-M6, M8, M9, R19, R20 and its "fix now" items; M7 (a burst
 >   can leave one DELIVERED queued until the next run) and M12 (the harness device proxy binds all interfaces) stay
->   parked. Both fixed after 0.1.1: a flush with a deadline (app and NSE) waits for `flush.lock` until that deadline
+>   parked. Both fixed in 0.1.2: a flush with a deadline (app and NSE) waits for `flush.lock` until that deadline
 >   instead of skipping, and the device proxy binds `127.0.0.1` unless `harness.device-proxy-bind` is set (compose:
 >   `0.0.0.0` inside the container).
 > - §11: `.github/workflows/ios-ci.yml` (macOS 26 runner, Xcode 26.6: package tests on the Simulator, sample Debug and

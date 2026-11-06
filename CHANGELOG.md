@@ -2,7 +2,9 @@
 
 All notable changes to this project are documented here. Versions follow [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## 0.1.2 — 2026-11-06
+
+Bug-fix release: one iOS SDK fix and one harness fix. No change to the API or the database.
 
 ### Fixed
 
