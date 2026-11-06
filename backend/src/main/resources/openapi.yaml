@@ -17,6 +17,8 @@ tags:
     description: Device registration and device tokens
   - name: events
     description: Delivery and read events reported by devices
+  - name: admin
+    description: Read-only ops dashboard API (header `X-Admin-Key`)
 
 paths:
   /v1/notifications:
@@ -298,6 +300,33 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
+  /v1/admin/me:
+    get:
+      tags: [admin]
+      operationId: adminMe
+      summary: The scope of the calling admin key
+      description: |
+        Read-only ops dashboard API. Disabled (`404` everywhere under `/v1/admin`) unless admin keys are configured.
+        Every response carries `Cache-Control: no-store`.
+      security:
+        - AdminKey: []
+      responses:
+        '200':
+          description: The key id, the apps it may see (sorted) and its permissions.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminMe'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+
 components:
   securitySchemes:
     SenderApiKey:
@@ -305,6 +334,11 @@ components:
       in: header
       name: X-Api-Key
       description: Per-app sender API key (stored hashed on the server).
+    AdminKey:
+      type: apiKey
+      in: header
+      name: X-Admin-Key
+      description: Admin key of the read-only ops dashboard (stored hashed on the server).
     DeviceToken:
       type: http
       scheme: bearer
@@ -322,6 +356,21 @@ components:
         format: uuid
 
   schemas:
+    AdminMe:
+      type: object
+      required: [keyId, apps, permissions]
+      properties:
+        keyId:
+          type: string
+        apps:
+          type: array
+          items:
+            type: string
+        permissions:
+          type: array
+          items:
+            type: string
+            enum: [payload]
     FallbackPolicy:
       type: string
       description: |
@@ -591,6 +640,12 @@ components:
           description: Seconds until a request is allowed again.
           schema:
             type: integer
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    MethodNotAllowed:
+      description: The method is not supported on this path.
       content:
         application/problem+json:
           schema:
