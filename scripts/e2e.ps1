@@ -14,7 +14,9 @@
   one-shot `secrets` service. Outputs in harness/build/e2e/: summary.json, junit/e2e.xml, logs/<service>.log and the
   backend JSON log files. Exit code 0 only if every scenario PASSED.
   console-smoke: after the catalogue a headless Chromium (Playwright for Java, Maven profile console-smoke) drives the
-  web console; its JUnit XML goes to junit/console-smoke.xml and it is the last entry of summary.json.
+  web console and then the ops dashboard (/admin/, signed in with the per-run HARNESS_ADMINKEY from secrets.env, passed to
+  Maven through the process environment only); their JUnit XML goes to junit/console-smoke.xml and junit/admin-smoke.xml,
+  both must pass, and together they are the last entry of summary.json.
   NOTE: this script has not been run on Windows (written and reviewed against scripts/e2e.sh only).
   Environment: E2E_READY_TIMEOUT (seconds to wait for readiness, default 120).
 #>
@@ -270,26 +272,39 @@ try {
     if ($runConsole) {
         $expected++
         Log 'console-smoke: driving the console with headless Chromium (first run downloads the browser); output in harness/build/e2e/logs/console-smoke.log'
-        $report = Join-Path $Root 'harness/target/failsafe-reports/TEST-io.reliablepush.harness.console.ConsoleSmokeE2E.xml'
-        Remove-Item -Force -ErrorAction SilentlyContinue $report
+        $reportDir = Join-Path $Root 'harness/target/failsafe-reports'
+        $report = Join-Path $reportDir 'TEST-io.reliablepush.harness.console.ConsoleSmokeE2E.xml'
+        $adminReport = Join-Path $reportDir 'TEST-io.reliablepush.harness.console.AdminSmokeE2E.xml'
+        Remove-Item -Force -ErrorAction SilentlyContinue $report, $adminReport
+        # the admin smoke test signs in with the per-run admin key: it goes to Maven's environment only (never an argument, never printed)
+        $adminKeyLine = Get-Content (Join-Path $Out 'secrets.env') | Where-Object { $_ -like 'HARNESS_ADMINKEY=*' } | Select-Object -First 1
+        if (-not $adminKeyLine) { Die 'HARNESS_ADMINKEY missing in harness/build/e2e/secrets.env' }
+        $env:HARNESS_ADMINKEY = $adminKeyLine.Substring('HARNESS_ADMINKEY='.Length)
+        $adminKeyLine = $null
         $sw = [System.Diagnostics.Stopwatch]::StartNew()
         Push-Location $Root
         try {
             $mvnw = if ($IsWindows) { '.\mvnw.cmd' } else { './mvnw' }
-            & $mvnw -B -pl harness -am verify -Pconsole-smoke "-Dconsole.url=$HarnessUrl" *> (Join-Path $Out 'logs/console-smoke.log')
+            & $mvnw -B -pl harness -am verify -Pconsole-smoke "-Dconsole.url=$HarnessUrl" "-Dadmin.url=$ApiUrl" *> (Join-Path $Out 'logs/console-smoke.log')
             $mvnRc = $LASTEXITCODE
-        } finally { Pop-Location }
+        } finally {
+            Pop-Location
+            Remove-Item Env:HARNESS_ADMINKEY -ErrorAction SilentlyContinue
+        }
         $sw.Stop()
         $failure = $null
-        if (Test-Path $report) {
-            Copy-Item $report (Join-Path $Out 'junit/console-smoke.xml') -Force
-            [xml] $xml = Get-Content $report -Raw
-            $suite = $xml.testsuite
-            $bad = @($xml.SelectNodes('//failure | //error'))
-            if ($bad.Count -gt 0) { $failure = [string]$bad[0].message }
-            elseif ([int]$suite.tests -lt 1 -or [int]$suite.failures -ne 0 -or [int]$suite.errors -ne 0 -or [int]$suite.skipped -ne 0) { $failure = 'the console test was skipped or did not run (tests >= 1 and failures, errors, skipped = 0 required)' }
-        } else {
-            $failure = "maven exited $mvnRc without a test report (build, Playwright download or startup problem)"
+        foreach ($r in @(@{ Path = $report; Copy = 'junit/console-smoke.xml' }, @{ Path = $adminReport; Copy = 'junit/admin-smoke.xml' })) {
+            if (Test-Path $r.Path) {
+                Copy-Item $r.Path (Join-Path $Out $r.Copy) -Force
+                [xml] $xml = Get-Content $r.Path -Raw
+                $suite = $xml.testsuite
+                $bad = @($xml.SelectNodes('//failure | //error'))
+                if ($failure) { continue }
+                if ($bad.Count -gt 0) { $failure = [string]$bad[0].message }
+                elseif ([int]$suite.tests -lt 1 -or [int]$suite.failures -ne 0 -or [int]$suite.errors -ne 0 -or [int]$suite.skipped -ne 0) { $failure = 'a console or admin smoke test was skipped or did not run (tests >= 1 and failures, errors, skipped = 0 required)' }
+            } elseif (-not $failure) {
+                $failure = "maven exited $mvnRc without a test report (build, Playwright download or startup problem)"
+            }
         }
         if ($mvnRc -ne 0 -and -not $failure) { $failure = "maven exited $mvnRc" }
         $entry = [ordered]@{ scenario = 'console-smoke'; status = $(if ($failure) { 'FAILED' } else { 'PASSED' }); durationMs = [int]$sw.ElapsedMilliseconds }
@@ -297,15 +312,15 @@ try {
             if ($failure.Length -gt 600) { $failure = $failure.Substring(0, 600) }
             Warn "console-smoke FAILED: $failure"
             $entry.failure = [ordered]@{
-                expected = 'the console registers a device, shows the push DELIVERED and the fallback webhook with a valid signature'
+                expected = 'the console registers a device, shows the push DELIVERED and the fallback webhook with a valid signature; the admin dashboard signs in, shows the overview, finds the scenario user and opens the timeline'
                 actual = $failure
-                hint = 'harness/build/e2e/logs/console-smoke.log and harness/build/e2e/junit/console-smoke.xml; the Playwright call log shows the element that was awaited'
+                hint = 'harness/build/e2e/logs/console-smoke.log and harness/build/e2e/junit/console-smoke.xml and admin-smoke.xml; the Playwright call log shows the element that was awaited'
             }
             $entry.logs = @()
         } else {
             Log "console-smoke: PASSED ($($entry.durationMs) ms)"
             $entry.failure = $null
-            $entry.logs = @('ConsoleSmokeE2E.registerDeviceSendPushSeeDeliveredAndFallback')
+            $entry.logs = @('ConsoleSmokeE2E.registerDeviceSendPushSeeDeliveredAndFallback', 'AdminSmokeE2E.signInSeeOverviewSearchUserOpenTimeline')
         }
         $summary = @($summary) + @([pscustomobject]$entry)
         # ConvertTo-Json -InputObject keeps a one-element array an array
