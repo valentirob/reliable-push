@@ -1,0 +1,83 @@
+# Dummy fallback receiver of the kind smoke install (ruling R3): answers 200 to every POST after ~2 s, so that webhook
+# calls are really in flight when the worker is restarted. It logs one line "HOOK <path>" per request (the script counts
+# them: exactly one per notification means no re-send). The HMAC is not verified (the E2E covers it). Image pinned by digest.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fallback-dummy
+data:
+  server.py: |
+    import sys, time
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    class H(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def do_POST(self):
+            n = int(self.headers.get("Content-Length") or 0)
+            self.rfile.read(n)
+            sys.stdout.write("HOOK " + self.path + "\n")
+            sys.stdout.flush()
+            time.sleep(2)
+            body = b"ok"
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-Length", "2")
+            self.end_headers()
+            self.wfile.write(b"ok")
+
+        def log_message(self, *a):
+            pass
+
+    ThreadingHTTPServer(("0.0.0.0", 8080), H).serve_forever()
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fallback-dummy
+  labels: { app: fallback-dummy }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: fallback-dummy }
+  template:
+    metadata:
+      labels: { app: fallback-dummy }
+    spec:
+      containers:
+        - name: dummy
+          image: python:3.13.9-alpine@sha256:e5fa639e49b85986c4481e28faa2564b45aa8021413f31026c3856e5911618b1
+          command: ["python", "-u", "/app/server.py"]
+          ports:
+            - { name: http, containerPort: 8080 }
+          readinessProbe:
+            httpGet: { path: /, port: http }
+            periodSeconds: 3
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities: { drop: [ALL] }
+          resources:
+            requests: { cpu: 20m, memory: 32Mi }
+            limits: { memory: 128Mi }
+          volumeMounts:
+            - { name: app, mountPath: /app, readOnly: true }
+      volumes:
+        - name: app
+          configMap: { name: fallback-dummy }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fallback-dummy
+spec:
+  selector: { app: fallback-dummy }
+  ports:
+    - { name: http, port: 8080, targetPort: http }

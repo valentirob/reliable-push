@@ -1,0 +1,14 @@
+# Added by `scripts/demo.sh --realtime` on top of demo.override.yml: real clock (1 minute = 60 s).
+# scripts/demo.sh also removes RELIABLEPUSH_TESTING_MINUTEDURATION from harness/build/demo/secrets.env.
+
+services:
+  worker-a:
+    environment:
+      # the backend default (2 real minutes; overrides the 12 fast-clock minutes) is far above the 10 s webhook http-timeout
+      RELIABLEPUSH_WORKER_LEASE: 2m
+  worker-b:
+    environment:
+      RELIABLEPUSH_WORKER_LEASE: 2m
+  harness:
+    environment:
+      HARNESS_MINUTESECONDS: "60"

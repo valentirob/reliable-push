@@ -1,0 +1,58 @@
+spring:
+  application:
+    name: reliable-push
+  # Runs both roles unless overridden (SPRING_PROFILES_ACTIVE=api or worker).
+  profiles:
+    default: api,worker
+  lifecycle:
+    # Bounds the web server's graceful drain (server.shutdown: graceful) on SIGTERM. The worker stop
+    # (reliable-push.worker.shutdown-timeout) runs synchronously and is not cut by it: the hard bound is the kubelet's
+    # SIGKILL, so keep terminationGracePeriodSeconds above preStop 5 s (API pods) + worker.shutdown-timeout + 30 s.
+    timeout-per-shutdown-phase: 30s
+  threads:
+    virtual:
+      enabled: true
+  main:
+    # stdout carries only JSON log lines (spec 9.1)
+    banner-mode: off
+  flyway:
+    enabled: true
+  datasource:
+    hikari:
+      # milliseconds a request waits for a pooled connection before failing with 503 + Retry-After (Hikari's default is
+      # 30 s); override with SPRING_DATASOURCE_HIKARI_CONNECTIONTIMEOUT
+      connection-timeout: 5000
+  servlet:
+    multipart:
+      # the API is JSON-only: with multipart handling on, the container would parse (and spool to disk) any
+      # multipart/* body of up to 10 MB before BodySizeLimitFilter's stream wrapper ever sees it
+      enabled: false
+
+server:
+  # on SIGTERM the web server finishes the requests in flight (bounded by spring.lifecycle.timeout-per-shutdown-phase)
+  shutdown: graceful
+  tomcat:
+    # JSON request bodies are limited to 64 KB by BodySizeLimitFilter (/v1/**);
+    # this only bounds how much Tomcat swallows of an upload the filter rejected unread.
+    max-swallow-size: 64KB
+    # same reason for application/x-www-form-urlencoded: bounded like every other body (default is 2 MB)
+    max-http-form-post-size: 64KB
+
+# Filtered by Maven; the webhook User-Agent carries it (reliable-push/<version>).
+info:
+  app:
+    version: "@project.version@"
+
+management:
+  # Opt-in: set MANAGEMENT_SERVER_PORT (e.g. 8081) to serve /actuator/** on a separate port, outside the API filters
+  # (access log, rate limit); the server port then answers 404 for /actuator/**. Unset: actuator shares the server port.
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+# Logging profile (json | local) is selected in log4j2-spring.xml: ECS JSON unless the "local" profile is active.

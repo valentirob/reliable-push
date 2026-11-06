@@ -1,0 +1,161 @@
+{{- $roles := list -}}
+{{- if eq .Values.mode "split" -}}
+{{- $roles = append $roles (dict "component" "api" "suffix" "-api" "profiles" "api,json" "cfg" .Values.api "worker" false) -}}
+{{- $roles = append $roles (dict "component" "worker" "suffix" "-worker" "profiles" "worker,json" "cfg" .Values.worker "worker" true) -}}
+{{- else -}}
+{{- $roles = append $roles (dict "component" "combined" "suffix" "" "profiles" "api,worker,json" "cfg" .Values.api "worker" true) -}}
+{{- end -}}
+{{- $configChecksum := include (print $.Template.BasePath "/configmap.yaml") . | sha256sum -}}
+{{- range $i, $role := $roles }}
+{{- $api := ne $role.component "worker" }}
+{{- if $i }}
+---
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "rp.fullname" $ }}{{ $role.suffix }}
+  labels:
+    {{- include "rp.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ $role.component }}
+spec:
+  {{- if not (and $api $.Values.autoscaling.api.enabled) }}
+  replicas: {{ $role.cfg.replicas }}
+  {{- end }}
+  {{- if eq $role.component "worker" }}
+  strategy:
+    type: {{ $.Values.worker.strategy }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "rp.selectorLabels" $ | nindent 6 }}
+      app.kubernetes.io/component: {{ $role.component }}
+  template:
+    metadata:
+      labels:
+        {{- include "rp.selectorLabels" $ | nindent 8 }}
+        app.kubernetes.io/component: {{ $role.component }}
+      annotations:
+        checksum/config: {{ $configChecksum }}
+        {{- with $.Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "rp.serviceAccountName" $ }}
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: {{ $.Values.terminationGracePeriodSeconds }}
+      {{- with $.Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml $.Values.podSecurityContext | nindent 8 }}
+      {{- with $.Values.extraInitContainers }}
+      initContainers:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: backend
+          image: {{ include "rp.image" $ | quote }}
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml $.Values.securityContext | nindent 12 }}
+          ports:
+            {{- if $api }}
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+            {{- end }}
+            - name: management
+              containerPort: {{ include "rp.managementPort" $ }}
+              protocol: TCP
+          envFrom:
+            - secretRef:
+                name: {{ $.Values.secrets.existingSecret }}
+          env:
+            - name: SPRING_PROFILES_ACTIVE
+              value: {{ $role.profiles | quote }}
+            - name: SPRING_CONFIG_ADDITIONAL_LOCATION
+              value: optional:file:/config/
+            - name: MANAGEMENT_SERVER_PORT
+              value: {{ include "rp.managementPort" $ | quote }}
+            - name: JAVA_TOOL_OPTIONS
+              value: {{ $.Values.javaToolOptions | quote }}
+            - name: SPRING_DATASOURCE_URL
+              value: {{ $.Values.database.url | quote }}
+            - name: SPRING_DATASOURCE_USERNAME
+              value: {{ $.Values.database.username | quote }}
+            - name: SPRING_DATASOURCE_HIKARI_MAXIMUMPOOLSIZE
+              value: {{ (ternary $.Values.worker.hikariMaximumPoolSize $.Values.api.hikariMaximumPoolSize (eq $role.component "worker")) | quote }}
+            {{- if $role.worker }}
+            - name: RELIABLEPUSH_WORKER_MAXCONCURRENCY
+              value: {{ $.Values.worker.maxConcurrency | quote }}
+            {{- end }}
+            {{- with $.Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          startupProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: management
+            periodSeconds: 5
+            failureThreshold: 36
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: management
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: management
+            periodSeconds: 5
+            failureThreshold: 3
+          {{- if $api }}
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sleep", "5"]
+          {{- end }}
+          resources:
+            {{- toYaml $role.cfg.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: config
+              mountPath: /config
+              readOnly: true
+            {{- with $.Values.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+        {{- with $.Values.extraContainers }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
+        - name: config
+          configMap:
+            name: {{ include "rp.fullname" $ }}-config
+        {{- with $.Values.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with $.Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $.Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $.Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $.Values.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

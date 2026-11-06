@@ -1,0 +1,96 @@
+suite: ingress
+templates:
+  - ingress.yaml
+values:
+  - ../ci/default-values.yaml
+release:
+  name: rp
+tests:
+  - it: renders nothing by default
+    asserts:
+      - hasDocuments:
+          count: 0
+  - it: routes only /v1 to the API service
+    set:
+      ingress.enabled: true
+      ingress.className: gce
+      ingress.hosts:
+        - host: push.example.com
+          paths: [/v1]
+    asserts:
+      - isKind:
+          of: Ingress
+      - equal:
+          path: spec.ingressClassName
+          value: gce
+      - equal:
+          path: spec.rules[0].host
+          value: push.example.com
+      - equal:
+          path: spec.rules[0].http.paths
+          value:
+            - path: /v1
+              pathType: Prefix
+              backend:
+                service:
+                  name: rp-reliable-push-api
+                  port:
+                    name: http
+  - it: never targets the management service or port 8081
+    set:
+      ingress.enabled: true
+      ingress.hosts:
+        - host: push.example.com
+          paths: [/v1]
+    asserts:
+      - notContains:
+          path: spec.rules[0].http.paths
+          content:
+            path: /actuator
+  - it: refuses a path outside /v1
+    set:
+      ingress.enabled: true
+      ingress.hosts:
+        - host: push.example.com
+          paths: [/actuator]
+    asserts:
+      - failedTemplate:
+          errorPattern: ingress.hosts
+  - it: refuses a path that only starts with the letters v1
+    set:
+      ingress.enabled: true
+      ingress.hosts:
+        - host: push.example.com
+          paths: [/v1x]
+    asserts:
+      - failedTemplate:
+          errorPattern: ingress.hosts
+  - it: adds annotations and tls
+    set:
+      ingress.enabled: true
+      ingress.annotations:
+        kubernetes.io/ingress.global-static-ip-name: rp-ip
+      ingress.hosts:
+        - host: push.example.com
+          paths: [/v1]
+      ingress.tls:
+        - secretName: rp-tls
+          hosts: [push.example.com]
+    asserts:
+      - equal:
+          path: metadata.annotations["kubernetes.io/ingress.global-static-ip-name"]
+          value: rp-ip
+      - equal:
+          path: spec.tls[0].secretName
+          value: rp-tls
+  - it: targets the API service in split mode too
+    set:
+      mode: split
+      ingress.enabled: true
+      ingress.hosts:
+        - host: push.example.com
+          paths: [/v1]
+    asserts:
+      - equal:
+          path: spec.rules[0].http.paths[0].backend.service.name
+          value: rp-reliable-push-api

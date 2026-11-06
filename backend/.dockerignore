@@ -1,0 +1,17 @@
+# Only the sources the build stage needs go into the build context; the jar is built inside the image.
+target/
+.git
+.gitignore
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+.classpath
+.project
+.settings/
+*.swp
+.DS_Store
+*.md
+.env
+.env.*

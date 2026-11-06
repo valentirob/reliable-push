@@ -1,0 +1,24 @@
+{{- if .Values.gke.backendConfig.enabled }}
+{{- /*
+GKE Ingress health check: the readiness endpoint on the management port. Without it GKE probes GET / on the serving
+port (8080), which answers 404, and marks every backend unhealthy. The API Service references it through the
+cloud.google.com/backend-config annotation (rp.apiServiceAnnotations).
+*/ -}}
+apiVersion: cloud.google.com/v1
+kind: BackendConfig
+metadata:
+  name: {{ include "rp.fullname" . }}-api
+  labels:
+    {{- include "rp.labels" . | nindent 4 }}
+spec:
+  healthCheck:
+    type: HTTP
+    port: {{ include "rp.managementPort" . }}
+    requestPath: /actuator/health/readiness
+    {{- with .Values.gke.backendConfig.healthCheck }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- with .Values.gke.backendConfig.extraSpec }}
+  {{- toYaml . | nindent 2 }}
+  {{- end }}
+{{- end }}

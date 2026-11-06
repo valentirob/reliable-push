@@ -1,0 +1,40 @@
+# GKE overlay: helm install rp deploy/helm/reliable-push -f values-gke.yaml -f my-values.yaml
+# No secret values here: the Secret (secrets.existingSecret) is created out of band, e.g. from Secret Manager.
+ingress:
+  enabled: true
+  className: gce
+  # Managed certificate / static IP examples (create the ManagedCertificate and the global address yourself):
+  # annotations:
+  #   networking.gke.io/managed-certificates: rp-cert
+  #   kubernetes.io/ingress.global-static-ip-name: rp-ip
+  hosts:
+    - host: push.example.com
+      paths: [/v1]
+
+metrics:
+  podMonitoring:
+    enabled: true
+
+# Ingress health check on the management port (/actuator/health/readiness on 8081) instead of GKE's default GET / on
+# 8080. The Google health-check ranges must reach port 8081 of the nodes/pods (see docs/deployment.md).
+gke:
+  backendConfig:
+    enabled: true
+
+podSecurityContext:
+  runAsUser: 1001
+  runAsGroup: 0
+
+# Cloud SQL Auth Proxy as a native sidecar (init container with restartPolicy: Always); point database.url at
+# jdbc:postgresql://127.0.0.1:5432/<db> and grant the pod's service account roles/cloudsql.client (Workload Identity).
+# extraInitContainers:
+#   - name: cloud-sql-proxy
+#     image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:<pinned version>@sha256:<digest>
+#     args: ["--structured-logs", "--port=5432", "<project>:<region>:<instance>"]
+#     restartPolicy: Always
+#     securityContext:
+#       runAsNonRoot: true
+#       readOnlyRootFilesystem: true
+#       allowPrivilegeEscalation: false
+#       capabilities: { drop: [ALL] }
+#       seccompProfile: { type: RuntimeDefault }

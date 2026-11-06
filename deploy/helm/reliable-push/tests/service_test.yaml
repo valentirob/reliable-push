@@ -1,0 +1,128 @@
+suite: service
+templates:
+  - service.yaml
+  - serviceaccount.yaml
+release:
+  name: rp
+set:
+  image.repository: registry.example.com/reliable-push
+  database.url: jdbc:postgresql://db:5432/rp
+  database.username: rp
+  secrets.existingSecret: rp-secrets
+  config.apps.shop.default-timeout-minutes: 10
+tests:
+  - it: combined mode API service selects the combined pods
+    template: service.yaml
+    documentIndex: 0
+    asserts:
+      - equal:
+          path: metadata.name
+          value: rp-reliable-push-api
+      - equal:
+          path: spec.type
+          value: ClusterIP
+      - equal:
+          path: spec.ports[0]
+          value: { name: http, port: 80, targetPort: http, protocol: TCP }
+      - equal:
+          path: spec.selector["app.kubernetes.io/component"]
+          value: combined
+
+  - it: split mode API service selects only API pods
+    template: service.yaml
+    documentIndex: 0
+    set:
+      mode: split
+    asserts:
+      - equal:
+          path: spec.selector["app.kubernetes.io/component"]
+          value: api
+
+  - it: management service selects every pod of the release
+    template: service.yaml
+    documentIndex: 1
+    set:
+      mode: split
+    asserts:
+      - equal:
+          path: metadata.name
+          value: rp-reliable-push-management
+      - equal:
+          path: spec.ports[0]
+          value: { name: management, port: 8081, targetPort: management, protocol: TCP }
+      - notExists:
+          path: spec.selector["app.kubernetes.io/component"]
+      - equal:
+          path: spec.selector["app.kubernetes.io/instance"]
+          value: rp
+
+  - it: service account is created by default
+    template: serviceaccount.yaml
+    set:
+      serviceAccount.annotations: { a: b }
+    asserts:
+      - isKind:
+          of: ServiceAccount
+      - equal:
+          path: metadata.name
+          value: rp-reliable-push
+      - equal:
+          path: metadata.annotations.a
+          value: b
+
+  - it: service account can be disabled
+    template: serviceaccount.yaml
+    set:
+      serviceAccount.create: false
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: api.service.annotations go on the combined API service only
+    template: service.yaml
+    set:
+      api.service.annotations: { example.com/team: push }
+    asserts:
+      - equal:
+          path: metadata.annotations["example.com/team"]
+          value: push
+        documentIndex: 0
+      - notExists:
+          path: metadata.annotations
+        documentIndex: 1
+
+  - it: api.service.annotations go on the split API service
+    template: service.yaml
+    set:
+      mode: split
+      api.service.annotations: { example.com/team: push }
+    asserts:
+      - equal:
+          path: metadata.annotations["example.com/team"]
+          value: push
+        documentIndex: 0
+      - equal:
+          path: metadata.name
+          value: rp-reliable-push-api
+        documentIndex: 0
+
+  - it: no annotations on the API service by default
+    template: service.yaml
+    documentIndex: 0
+    asserts:
+      - notExists:
+          path: metadata.annotations
+
+  - it: gke.backendConfig.enabled points the API service at the chart's BackendConfig
+    template: service.yaml
+    documentIndex: 0
+    set:
+      gke.backendConfig.enabled: true
+      api.service.annotations: { example.com/team: push }
+    asserts:
+      - equal:
+          path: metadata.annotations["cloud.google.com/backend-config"]
+          value: '{"default": "rp-reliable-push-api"}'
+      - equal:
+          path: metadata.annotations["example.com/team"]
+          value: push

@@ -1,0 +1,14 @@
+# Test input for deploy/helm/scripts/validate.sh: the default dummy values in split mode.
+image:
+  repository: registry.example.com/reliable-push
+database:
+  url: jdbc:postgresql://postgres:5432/reliablepush
+  username: reliablepush
+secrets:
+  existingSecret: reliable-push-secrets
+config:
+  apps:
+    shop:
+      sender-api-key-sha256: "0000000000000000000000000000000000000000000000000000000000000000"
+      default-timeout-minutes: 10
+mode: split

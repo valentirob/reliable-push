@@ -1,0 +1,77 @@
+suite: pdb
+templates:
+  - pdb.yaml
+release:
+  name: rp
+set:
+  image.repository: registry.example.com/reliable-push
+  database.url: jdbc:postgresql://db:5432/rp
+  database.username: rp
+  secrets.existingSecret: rp-secrets
+  config.apps.shop.default-timeout-minutes: 10
+tests:
+  - it: combined mode renders one PDB for the API replicas
+    set:
+      api.replicas: 2
+    asserts:
+      - hasDocuments:
+          count: 1
+      - isKind:
+          of: PodDisruptionBudget
+      - equal:
+          path: spec.minAvailable
+          value: 1
+      - equal:
+          path: spec.selector.matchLabels["app.kubernetes.io/component"]
+          value: combined
+
+  - it: no PDB with a single replica
+    set:
+      api.replicas: 1
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: split mode renders a PDB per component with more than one replica
+    set:
+      mode: split
+      api.replicas: 3
+      worker.replicas: 1
+    asserts:
+      - hasDocuments:
+          count: 1
+      - equal:
+          path: metadata.name
+          value: rp-reliable-push-api
+
+  - it: with the API HPA the PDB follows autoscaling.api.minReplicas, not api.replicas
+    set:
+      api.replicas: 1
+      autoscaling.api.enabled: true
+      autoscaling.api.minReplicas: 2
+    asserts:
+      - hasDocuments:
+          count: 1
+      - equal:
+          path: spec.selector.matchLabels["app.kubernetes.io/component"]
+          value: combined
+
+  - it: no API PDB with the HPA at minReplicas 1, whatever api.replicas says
+    set:
+      api.replicas: 3
+      autoscaling.api.enabled: true
+      autoscaling.api.minReplicas: 1
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: split mode with the HPA keeps the worker PDB on worker.replicas
+    set:
+      mode: split
+      api.replicas: 1
+      worker.replicas: 2
+      autoscaling.api.enabled: true
+      autoscaling.api.minReplicas: 2
+    asserts:
+      - hasDocuments:
+          count: 2

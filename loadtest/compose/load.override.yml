@@ -1,0 +1,92 @@
+# Override of harness/compose/docker-compose.yml for scripts/load.sh (project reliable-push-load). LOCAL ONLY.
+# Real clock (no RELIABLEPUSH_TESTING_MINUTEDURATION), profiles without e2e/demo, stdout logging only (RP_LOG_FILE unset),
+# generated files under harness/build/load/. The API is limited to the NFR-2 reference size (2 CPUs / 1 GiB); the Gatling
+# runner is a container on the same compose network (no host port forwarding in the measured path).
+#   docker compose -p reliable-push-load -f harness/compose/docker-compose.yml -f loadtest/compose/load.override.yml ...
+# Workers publish their management port on 8081 (probes + Prometheus; BurstDrainProbe scrapes it); the API keeps 8080.
+
+x-worker-env: &worker-env
+  SPRING_PROFILES_ACTIVE: worker,json
+  RP_LOG_FILE: !reset null
+  MANAGEMENT_SERVER_PORT: "8081"
+  RELIABLEPUSH_WORKER_LEASE: 2m
+  RELIABLEPUSH_WORKER_MAXCONCURRENCY: "${LOAD_WORKER_CONCURRENCY:-100}"
+  SPRING_DATASOURCE_HIKARI_MAXIMUMPOOLSIZE: "${LOAD_WORKER_POOL:-10}"
+
+services:
+  secrets:
+    volumes: !override
+      - ./GenSecrets.java:/work/GenSecrets.java:ro
+      - ./backend.env.template:/work/backend.env.template:ro
+      - ../build/load:/out
+  postgres:
+    cpus: "1"
+    command: ["postgres", "-c", "max_connections=200"]
+    env_file: !override
+      - path: ../build/load/db.env
+        required: false
+  api:
+    cpus: "2"
+    mem_limit: 1g
+    env_file: !override
+      - path: ../build/load/secrets.env
+        required: false
+    environment:
+      SPRING_PROFILES_ACTIVE: api,json
+      RP_LOG_FILE: !reset null
+      SPRING_DATASOURCE_HIKARI_MAXIMUMPOOLSIZE: "${LOAD_API_POOL:-10}"
+      # default 6,000/min would reject the 500 registrations/s and the 1,500/s burst
+      RELIABLEPUSH_APPS_SHOP_RATELIMITS_SENDERPERMINUTE: "600000"
+  worker-a:
+    cpus: "${LOAD_WORKER_CPUS:-0}"          # 0 = no limit (default); e.g. LOAD_WORKER_CPUS=1 for the chart's limit
+    mem_limit: "${LOAD_WORKER_MEMORY:-0}"   # 0 = no limit (default); e.g. LOAD_WORKER_MEMORY=768m
+    env_file: !override
+      - path: ../build/load/secrets.env
+        required: false
+    environment: *worker-env
+  worker-b:
+    cpus: "${LOAD_WORKER_CPUS:-0}"          # 0 = no limit (default); e.g. LOAD_WORKER_CPUS=1 for the chart's limit
+    mem_limit: "${LOAD_WORKER_MEMORY:-0}"   # 0 = no limit (default); e.g. LOAD_WORKER_MEMORY=768m
+    env_file: !override
+      - path: ../build/load/secrets.env
+        required: false
+    environment: *worker-env
+  harness:
+    env_file: !override
+      - path: ../build/load/secrets.env
+        required: false
+
+  # Gatling runner: toolchain only; the repository is mounted at /work (Maven output lands in loadtest/target on the host).
+  # Run as the invoking user (E2E_UID/E2E_GID exported by rp_compose); dependencies cached in the external named volume.
+  gatling:
+    profiles: ["load"]
+    image: reliable-push-gatling:load
+    pull_policy: never
+    build:
+      context: ../../loadtest
+      dockerfile: Dockerfile
+    cpus: "1"
+    # Each virtual user opens its own connections and closes them at its end, so the generator holds ~60 s of
+    # TIME_WAIT sockets: 500 users/s (ingest) or 1,500/s (burst) exhaust the default 28k ephemeral ports
+    # (connect: "Cannot assign requested address"). Wider range plus TIME_WAIT reuse for outgoing connections.
+    sysctls:
+      net.ipv4.ip_local_port_range: "1024 65535"
+      net.ipv4.tcp_tw_reuse: "1"
+    user: "${E2E_UID:-1000}:${E2E_GID:-1000}"
+    working_dir: /work
+    command: ["sleep", "infinity"]
+    # no env_file: load.sh passes only the three HARNESS_APPS_SHOP_* keys the simulations need (docker compose exec -e)
+    environment:
+      LOAD_API_URL: http://api:8080
+      HOME: /home/load
+    volumes:
+      - ../..:/work
+      - gatling-m2:/home/load/.m2
+    depends_on:
+      - api
+
+volumes:
+  # external, so `down -v` keeps the Maven cache (created by scripts/load.sh); purge: docker volume rm reliable-push-gatling-m2
+  gatling-m2:
+    external: true
+    name: reliable-push-gatling-m2

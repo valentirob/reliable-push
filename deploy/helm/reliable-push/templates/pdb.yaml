@@ -1,0 +1,27 @@
+{{- $roles := list (dict "component" (include "rp.apiComponent" .) "suffix" (ternary "-api" "" (eq .Values.mode "split")) "cfg" .Values.api) -}}
+{{- if eq .Values.mode "split" -}}
+{{- $roles = append $roles (dict "component" "worker" "suffix" "-worker" "cfg" .Values.worker) -}}
+{{- end -}}
+{{- range $roles }}
+{{- /* With the API HPA the Deployment's replica count is the HPA's, at least autoscaling.api.minReplicas. */ -}}
+{{- $replicas := .cfg.replicas -}}
+{{- if and (ne .component "worker") $.Values.autoscaling.api.enabled -}}
+{{- $replicas = $.Values.autoscaling.api.minReplicas -}}
+{{- end -}}
+{{- if gt (int $replicas) 1 }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "rp.fullname" $ }}{{ .suffix }}
+  labels:
+    {{- include "rp.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ .component }}
+spec:
+  minAvailable: {{ .cfg.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "rp.selectorLabels" $ | nindent 6 }}
+      app.kubernetes.io/component: {{ .component }}
+{{- end }}
+{{- end }}

@@ -1,0 +1,97 @@
+version: 2
+updates:
+  - package-ecosystem: maven
+    directory: /backend
+    target-branch: develop
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: build(deps)
+    groups:
+      maven-minor-patch:
+        update-types:
+          - minor
+          - patch
+
+  # the Android SDK and sample (Gradle version catalog and wrapper)
+  - package-ecosystem: gradle
+    directory: /android
+    target-branch: develop
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: build(deps)
+    groups:
+      gradle-minor-patch:
+        update-types:
+          - minor
+          - patch
+
+  # root reactor: client-java, harness and loadtest (the backend has its own build)
+  - package-ecosystem: maven
+    directory: /
+    target-branch: develop
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: build(deps)
+    groups:
+      maven-minor-patch:
+        update-types:
+          - minor
+          - patch
+
+  # the pinned FROM tags of backend/Dockerfile
+  - package-ecosystem: docker
+    directory: /backend
+    target-branch: develop
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: build(deps)
+    groups:
+      docker-minor-patch:
+        update-types:
+          - minor
+          - patch
+
+  # the pinned FROM tags of harness/Dockerfile
+  - package-ecosystem: docker
+    directory: /harness
+    target-branch: develop
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: build(deps)
+    groups:
+      docker-minor-patch:
+        update-types:
+          - minor
+          - patch
+
+  # the pinned FROM tag of loadtest/Dockerfile (Gatling runner of scripts/load.sh; Gatling itself is in the maven / entry)
+  - package-ecosystem: docker
+    directory: /loadtest
+    target-branch: develop
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: build(deps)
+    groups:
+      docker-minor-patch:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: github-actions
+    directory: /
+    target-branch: develop
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: ci(deps)
+    groups:
+      actions-minor-patch:
+        update-types:
+          - minor
+          - patch

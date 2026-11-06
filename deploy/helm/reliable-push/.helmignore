@@ -1,0 +1,7 @@
+.git/
+.DS_Store
+/tests/
+/ci/
+*.swp
+*.bak
+*.tmp

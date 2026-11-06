@@ -1,0 +1,177 @@
+# Reliable Push backend chart. Required values have no default: image.repository, database.url, database.username,
+# secrets.existingSecret and at least one entry under config.apps. Never put a secret value in this file.
+
+# combined: one Deployment running the API and the worker (profiles api,worker,json).
+# split: separate "<fullname>-api" and "<fullname>-worker" Deployments.
+mode: combined
+
+nameOverride: ""
+fullnameOverride: ""
+
+image:
+  # repository: registry.example.com/reliable-push    # required
+  tag: ""            # defaults to the chart appVersion
+  digest: ""         # sha256:..., takes precedence over tag
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+database:
+  # url: jdbc:postgresql://postgres:5432/reliablepush  # required
+  # username: reliablepush                             # required
+  # The password is SPRING_DATASOURCE_PASSWORD in the Secret below.
+
+secrets:
+  # Name of an existing Secret, loaded with envFrom. It must contain SPRING_DATASOURCE_PASSWORD and one key for every
+  # `env:NAME` reference in `config` (device token keys, webhook HMAC secrets). Not checkable at render time.
+  # existingSecret: reliable-push-secrets              # required
+  existingSecret: ""
+
+# Rendered verbatim under `reliable-push:` in application.yml (YAML form of the reliable-push.* properties, see
+# docs/operations.md). Every key ending in -ref must be env:NAME. At least one app is required.
+config:
+  # retention-days: 30
+  # worker: { poll-interval: 5s, batch-size: 100, lease: 2m }
+  # device-token:
+  #   current-kid: k1
+  #   signing-keys:
+  #     - kid: k1
+  #       private-key-pem-ref: env:RP_DEVICE_KEY_K1
+  #       public-key-pem-ref: env:RP_DEVICE_PUB_K1
+  apps: {}
+  # apps:
+  #   shop:
+  #     sender-api-key-sha256: "<64 hex characters>"
+  #     identity: { type: oidc, issuer: "https://idp.example.com", audience: shop-mobile, user-claim: sub }
+  #     default-timeout-minutes: 10
+  #     fallback:
+  #       url: https://fallback.example.com/hook
+  #       hmac-secret-ref: env:RP_SHOP_HOOK_SECRET
+
+# Sizing defaults come from the local load runs in docs/operations.md ("Measured capacity"); they are relative to that
+# machine, so confirm them on your cluster. Keep replicas x hikariMaximumPoolSize (API + worker) below PostgreSQL
+# max_connections (defaults: 2 x 10 + 2 x 20 = 60).
+# The chart sets these as env vars, which win over the same keys under config (the file): hikariMaximumPoolSize is
+# SPRING_DATASOURCE_HIKARI_MAXIMUMPOOLSIZE and worker.maxConcurrency is RELIABLEPUSH_WORKER_MAXCONCURRENCY, so
+# config.worker.max-concurrency has no effect. In combined mode the pods (API and worker role) use
+# api.hikariMaximumPoolSize; worker.hikariMaximumPoolSize applies to the split worker Deployment only.
+
+# API pods (and the combined Deployment, which also uses worker.maxConcurrency).
+api:
+  replicas: 2
+  # 5 already sustained the NFR-2 load (about 0.15 ms of connection time per request, database on the same host);
+  # 10 leaves room for a database across the network.
+  hikariMaximumPoolSize: 10
+  podDisruptionBudget:
+    minAvailable: 1       # rendered only when replicas > 1
+  # requests: measured at the NFR-2 load (1,500 requests/s per replica): 0.62 CPU and 275 MiB RSS, + 30 %.
+  # limits: the replica size NFR-2 was verified at (2 CPUs / 1 GiB); the JVM sizes its heap from the memory limit.
+  # In combined mode the same pods also run the worker: add worker.resources.requests (about 1300m / 768Mi).
+  resources:
+    requests: { cpu: 800m, memory: 384Mi }
+    limits: { cpu: "2", memory: 1Gi }
+  service:
+    # Annotations of the API Service (<fullname>-api; the one Ingress and Route route to, in both modes).
+    annotations: {}
+
+worker:
+  replicas: 2
+  strategy: RollingUpdate   # RollingUpdate | Recreate
+  # Best measured single-worker setting (200 / 20). Webhook calls in flight per replica: the receiver must accept
+  # replicas x maxConcurrency concurrent calls. Pool about maxConcurrency / 10 (only outcome writes hold a connection).
+  maxConcurrency: 200
+  hikariMaximumPoolSize: 20
+  podDisruptionBudget:
+    minAvailable: 1
+  # requests: measured while keeping up with a 1,500 rows/s burst: 0.4 CPU, + 30 %; memory: RSS 270 MiB + 30 %.
+  # limits: draining a backlog uses the whole CPU limit (about 3,100-3,400 rows/s at 1 CPU with a fast receiver);
+  # 512Mi verified with -XX:MaxRAMPercentage=75 as in javaToolOptions (heap up to 384 MiB, non-heap about 115 MiB).
+  resources:
+    requests: { cpu: 500m, memory: 384Mi }
+    limits: { cpu: "1", memory: 512Mi }
+
+# The image's baked defaults are replaced by this value, so repeat them when you change it.
+javaToolOptions: "-XX:MaxRAMPercentage=75 -XX:+ExitOnOutOfMemoryError"
+
+# Covers the worker's graceful stop (largest app http-timeout + 5 s).
+terminationGracePeriodSeconds: 60
+
+podSecurityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+securityContext:
+  readOnlyRootFilesystem: true
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: [ALL]
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+# Exposure. Only the public API prefix /v1 is ever routed, to <fullname>-api:http; /actuator and port 8081 are not.
+ingress:               # Kubernetes Ingress (GKE: className gce)
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: push.example.com
+      paths: [/v1]     # each path must be /v1 or below it
+  tls: []              # [{ secretName: rp-tls, hosts: [push.example.com] }]
+route:                 # OpenShift Route (route.openshift.io/v1), path /v1
+  enabled: false
+  host: ""             # empty: OpenShift generates one
+  annotations: {}
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+
+# CPU autoscaling of the API only; worker scaling follows the backlog, not CPU (set worker.replicas).
+# In combined mode the HPA targets the combined Deployment (API and worker in the same pods), so the workers scale
+# with it; prefer mode: split when you need to autoscale. While enabled, api.replicas is not rendered on that Deployment.
+autoscaling:
+  api:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+
+metrics:
+  serviceMonitor:      # Prometheus Operator / OpenShift user workload monitoring
+    enabled: false
+    interval: 30s
+    labels: {}         # extra labels, e.g. the release label your Prometheus selects on
+  podMonitoring:       # GKE Managed Service for Prometheus
+    enabled: false
+    interval: 30s
+
+gke:
+  # GKE Ingress health check (cloud.google.com/v1 BackendConfig "<fullname>-api"): HTTP GET /actuator/health/readiness
+  # on the management port 8081. Without it GKE probes GET / on 8080 (404) and marks the backends unhealthy. When
+  # enabled the API Service gets the cloud.google.com/backend-config annotation (it replaces one set in
+  # api.service.annotations). Needs the BackendConfig CRD (GKE only).
+  backendConfig:
+    enabled: false
+    # Optional timings: checkIntervalSec, timeoutSec, healthyThreshold, unhealthyThreshold (GKE defaults otherwise).
+    healthCheck: {}
+    # Other BackendConfig spec fields (not healthCheck), e.g. a Cloud Armor policy: { securityPolicy: { name: rp-armor } }
+    extraSpec: {}
+
+# `helm test` pod: GETs /actuator/health/readiness through <fullname>-management. Runs with podSecurityContext and
+# securityContext; test.runAsUser is used only when podSecurityContext sets no runAsUser (busybox runs as root otherwise,
+# which runAsNonRoot refuses). OpenShift values set it to null (the SCC assigns the UID).
+test:
+  image: busybox:1.38.0@sha256:a46257e06c82ad85242d0d38077d0a52d9896389ca60a1a59d3463db586e5fa4
+  runAsUser: 65534
+
+podAnnotations: {}
+extraEnv: []
+extraVolumes: []
+extraVolumeMounts: []
+extraContainers: []
+extraInitContainers: []
+nodeSelector: {}
+tolerations: []
+affinity: {}
+topologySpreadConstraints: []

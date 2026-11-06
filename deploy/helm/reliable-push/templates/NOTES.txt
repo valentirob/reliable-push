@@ -1,0 +1,7 @@
+Reliable Push backend {{ .Chart.AppVersion }} installed as {{ include "rp.fullname" . }} (mode: {{ .Values.mode }}).
+
+API Service:        {{ include "rp.fullname" . }}-api:80
+Management Service: {{ include "rp.fullname" . }}-management:8081 (probes, /actuator/prometheus; never expose it publicly)
+
+Every env:NAME referenced under `config` must be a key of the Secret "{{ .Values.secrets.existingSecret }}"
+(the chart cannot check that); SPRING_DATASOURCE_PASSWORD must be in it too.

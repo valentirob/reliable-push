@@ -1,0 +1,52 @@
+# PostgreSQL for the kind smoke install (scripts/helm-smoke.sh). Throwaway: emptyDir storage, password from Secret
+# rp-postgres (key POSTGRES_PASSWORD, created by the script from the generated db.env). Image pinned by digest.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  labels: { app: postgres }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app: postgres }
+  template:
+    metadata:
+      labels: { app: postgres }
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
+          env:
+            - name: POSTGRES_DB
+              value: reliablepush
+            - name: POSTGRES_USER
+              value: reliablepush
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: rp-postgres, key: POSTGRES_PASSWORD }
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          ports:
+            - { name: pg, containerPort: 5432 }
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "reliablepush", "-d", "reliablepush"]
+            periodSeconds: 3
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { memory: 384Mi }
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/postgresql/data }
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+spec:
+  selector: { app: postgres }
+  ports:
+    - { name: pg, port: 5432, targetPort: pg }

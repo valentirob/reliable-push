@@ -1,0 +1,5 @@
+# Build context for `docker build -f harness/Dockerfile .` (the backend builds from its own backend/ context).
+.git
+.superpowers
+**/target
+harness/build

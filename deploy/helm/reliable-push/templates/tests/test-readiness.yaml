@@ -1,0 +1,32 @@
+{{- /* helm test: the readiness endpoint on the management port answers through the management Service. */ -}}
+{{- $sc := deepCopy .Values.podSecurityContext -}}
+{{- if and .Values.test.runAsUser (not (hasKey $sc "runAsUser")) -}}
+{{- $_ := set $sc "runAsUser" .Values.test.runAsUser -}}
+{{- end -}}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "rp.fullname" . }}-test-readiness
+  labels:
+    {{- include "rp.labels" . | nindent 4 }}
+    app.kubernetes.io/component: test
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  automountServiceAccountToken: false
+  securityContext:
+    {{- toYaml $sc | nindent 4 }}
+  containers:
+    - name: readiness
+      image: {{ .Values.test.image | quote }}
+      command:
+        - wget
+        - -qO-
+        - http://{{ include "rp.fullname" . }}-management:8081/actuator/health/readiness
+      securityContext:
+        {{- toYaml .Values.securityContext | nindent 8 }}
+      resources:
+        requests: { cpu: 10m, memory: 16Mi }
+        limits: { cpu: 100m, memory: 32Mi }

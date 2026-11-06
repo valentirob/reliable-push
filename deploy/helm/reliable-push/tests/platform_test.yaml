@@ -1,0 +1,122 @@
+suite: platform values
+templates:
+  - "*.yaml"
+  - tests/test-readiness.yaml
+release:
+  name: rp
+tests:
+  - it: OpenShift values set no runAsUser, runAsGroup or fsGroup in any object (combined)
+    values:
+      - ../values-openshift.yaml
+      - ../ci/default-values.yaml
+    asserts:
+      - notExists:
+          path: spec.template.spec.securityContext.runAsUser
+        template: deployment.yaml
+      - notExists:
+          path: spec.template.spec.securityContext.runAsGroup
+        template: deployment.yaml
+      - notExists:
+          path: spec.template.spec.securityContext.fsGroup
+        template: deployment.yaml
+      - notExists:
+          path: spec.template.spec.containers[0].securityContext.runAsUser
+        template: deployment.yaml
+      - notExists:
+          path: spec.template.spec.containers[0].securityContext.runAsGroup
+        template: deployment.yaml
+      - notExists:
+          path: spec.securityContext.runAsUser
+        template: tests/test-readiness.yaml
+      - notExists:
+          path: spec.securityContext.runAsGroup
+        template: tests/test-readiness.yaml
+      - notExists:
+          path: spec.securityContext.fsGroup
+        template: tests/test-readiness.yaml
+      - notExists:
+          path: spec.containers[0].securityContext.runAsUser
+        template: tests/test-readiness.yaml
+  - it: OpenShift values set no runAsUser, runAsGroup or fsGroup in any object (split)
+    values:
+      - ../values-openshift.yaml
+      - ../ci/split-values.yaml
+    asserts:
+      - notExists:
+          path: spec.template.spec.securityContext.runAsUser
+        template: deployment.yaml
+      - notExists:
+          path: spec.template.spec.securityContext.runAsGroup
+        template: deployment.yaml
+      - notExists:
+          path: spec.template.spec.securityContext.fsGroup
+        template: deployment.yaml
+      - notExists:
+          path: spec.template.spec.containers[0].securityContext.runAsUser
+        template: deployment.yaml
+      - notExists:
+          path: spec.template.spec.containers[0].securityContext.runAsGroup
+        template: deployment.yaml
+      - notExists:
+          path: spec.securityContext.runAsUser
+        template: tests/test-readiness.yaml
+      - notExists:
+          path: spec.securityContext.runAsGroup
+        template: tests/test-readiness.yaml
+      - notExists:
+          path: spec.securityContext.fsGroup
+        template: tests/test-readiness.yaml
+      - notExists:
+          path: spec.containers[0].securityContext.runAsUser
+        template: tests/test-readiness.yaml
+  - it: OpenShift values enable the Route and the ServiceMonitor, not the Ingress or PodMonitoring
+    values:
+      - ../values-openshift.yaml
+      - ../ci/default-values.yaml
+    asserts:
+      - hasDocuments:
+          count: 1
+        template: route.yaml
+      - hasDocuments:
+          count: 1
+        template: servicemonitor.yaml
+      - hasDocuments:
+          count: 0
+        template: ingress.yaml
+      - hasDocuments:
+          count: 0
+        template: podmonitoring.yaml
+  - it: GKE values run as 1001:0 and enable Ingress and PodMonitoring
+    values:
+      - ../values-gke.yaml
+      - ../ci/default-values.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.securityContext.runAsUser
+          value: 1001
+        template: deployment.yaml
+      - equal:
+          path: spec.template.spec.securityContext.runAsGroup
+          value: 0
+        template: deployment.yaml
+      - equal:
+          path: spec.template.spec.securityContext.runAsNonRoot
+          value: true
+        template: deployment.yaml
+      - equal:
+          path: spec.ingressClassName
+          value: gce
+        template: ingress.yaml
+      - hasDocuments:
+          count: 1
+        template: podmonitoring.yaml
+      - hasDocuments:
+          count: 0
+        template: route.yaml
+      - hasDocuments:
+          count: 0
+        template: servicemonitor.yaml
+      - equal:
+          path: spec.securityContext.runAsUser
+          value: 1001
+        template: tests/test-readiness.yaml

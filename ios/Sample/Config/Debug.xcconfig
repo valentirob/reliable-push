@@ -1,0 +1,28 @@
+// Debug: the local harness stack (scripts/ios-e2e.sh). The launch environment can override the base URL, the app id
+// and the harness URL (RP_BASE_URL, RP_APP_ID, RP_HARNESS_URL); RP_RESET=1 clears the SDK's state before configure.
+#include "Shared.xcconfig"
+
+// The harness's device proxy to the backend (127.0.0.1:8091); `$()` keeps `//` from starting a comment.
+RP_BASE_URL = http:/$()/127.0.0.1:8091
+RP_HARNESS_URL = http:/$()/127.0.0.1:8090
+
+// RP_APNS=1 (xcodebuild argument or environment; scripts/ios-e2e.sh sets it when the maintainer's APNs files exist):
+// a real APNs run. The app gets the aps-environment entitlement, is signed by the maintainer's team
+// (IOS_DEVELOPMENT_TEAM, never committed) and reports its APNs token to the harness. RP_APNS unset: the ad hoc signing
+// of Shared.xcconfig, no team needed.
+RP_ENTITLEMENTS_ = $(RP_ENTITLEMENTS_BASE)
+RP_ENTITLEMENTS_0 = $(RP_ENTITLEMENTS_BASE)
+RP_ENTITLEMENTS_1 = ReliablePushSample/ReliablePushSample-APNs.entitlements
+RP_TEAM_ =
+RP_TEAM_0 =
+RP_TEAM_1 = $(IOS_DEVELOPMENT_TEAM)
+RP_SIGN_STYLE_ = Manual
+RP_SIGN_STYLE_0 = Manual
+RP_SIGN_STYLE_1 = Automatic
+RP_SIGN_IDENTITY_ = -
+RP_SIGN_IDENTITY_0 = -
+RP_SIGN_IDENTITY_1 = Apple Development
+RP_ENTITLEMENTS = $(RP_ENTITLEMENTS_$(RP_APNS))
+DEVELOPMENT_TEAM = $(RP_TEAM_$(RP_APNS))
+CODE_SIGN_STYLE = $(RP_SIGN_STYLE_$(RP_APNS))
+CODE_SIGN_IDENTITY = $(RP_SIGN_IDENTITY_$(RP_APNS))

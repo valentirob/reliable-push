@@ -1,0 +1,2 @@
+{{- /* Fails the render, naming the offending key, when a required value is missing or invalid. Rendered first (reverse file order) so the message is the one reported. */ -}}
+{{- include "rp.validate" . -}}

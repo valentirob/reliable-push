@@ -1,0 +1,81 @@
+suite: monitoring
+templates:
+  - servicemonitor.yaml
+  - podmonitoring.yaml
+  - service.yaml
+values:
+  - ../ci/default-values.yaml
+release:
+  name: rp
+tests:
+  - it: renders no ServiceMonitor by default
+    template: servicemonitor.yaml
+    asserts:
+      - hasDocuments:
+          count: 0
+  - it: renders no PodMonitoring by default
+    template: podmonitoring.yaml
+    asserts:
+      - hasDocuments:
+          count: 0
+  - it: scrapes the management service
+    template: servicemonitor.yaml
+    set:
+      metrics.serviceMonitor.enabled: true
+    asserts:
+      - isKind:
+          of: ServiceMonitor
+      - isAPIVersion:
+          of: monitoring.coreos.com/v1
+      - equal:
+          path: spec.endpoints
+          value:
+            - port: management
+              path: /actuator/prometheus
+              interval: 30s
+      - equal:
+          path: spec.selector.matchLabels["app.kubernetes.io/component"]
+          value: management
+      - equal:
+          path: spec.selector.matchLabels["app.kubernetes.io/instance"]
+          value: rp
+  - it: the selected labels exist on the management service only
+    template: service.yaml
+    documentIndex: 1
+    asserts:
+      - equal:
+          path: metadata.labels["app.kubernetes.io/component"]
+          value: management
+  - it: takes interval and extra labels
+    template: servicemonitor.yaml
+    set:
+      metrics.serviceMonitor.enabled: true
+      metrics.serviceMonitor.interval: 15s
+      metrics.serviceMonitor.labels: { release: prometheus }
+    asserts:
+      - equal:
+          path: spec.endpoints[0].interval
+          value: 15s
+      - equal:
+          path: metadata.labels.release
+          value: prometheus
+  - it: scrapes every pod on the management port with PodMonitoring
+    template: podmonitoring.yaml
+    set:
+      metrics.podMonitoring.enabled: true
+    asserts:
+      - isKind:
+          of: PodMonitoring
+      - isAPIVersion:
+          of: monitoring.googleapis.com/v1
+      - equal:
+          path: spec.selector.matchLabels
+          value:
+            app.kubernetes.io/name: reliable-push
+            app.kubernetes.io/instance: rp
+      - equal:
+          path: spec.endpoints
+          value:
+            - port: management
+              path: /actuator/prometheus
+              interval: 30s

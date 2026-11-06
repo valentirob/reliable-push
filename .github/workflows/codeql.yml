@@ -1,0 +1,138 @@
+name: CodeQL
+
+on:
+  push:
+    branches:
+      - develop
+      - main
+    paths:
+      - 'backend/**'
+      - 'android/**'
+      - 'Package.swift'
+      - 'ios/**'
+      - '.github/workflows/codeql.yml'
+  pull_request:
+    paths:
+      - 'backend/**'
+      - 'android/**'
+      - 'Package.swift'
+      - 'ios/**'
+      - '.github/workflows/codeql.yml'
+  schedule:
+    - cron: '23 4 * * 1' # weekly, Monday 04:23 UTC
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  analyze:
+    name: Analyze backend (java-kotlin)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Java 21
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@1fc58d04a4d4374f921bdac573c3811c240f9c26 # v4.39.2
+        with:
+          languages: java-kotlin
+          build-mode: manual
+
+      - name: Build (no tests)
+        working-directory: backend
+        run: ./mvnw -B -DskipTests package
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@1fc58d04a4d4374f921bdac573c3811c240f9c26 # v4.39.2
+        with:
+          # category changed from /language:java-kotlin when the Android job was added (two analyses, one per category)
+          category: /language:java-kotlin/backend
+
+  analyze-android:
+    name: Analyze Android SDK (java-kotlin)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Java 21
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+          cache-dependency-path: |
+            android/**/*.gradle*
+            android/gradle/libs.versions.toml
+            android/gradle/wrapper/gradle-wrapper.properties
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@1fc58d04a4d4374f921bdac573c3811c240f9c26 # v4.39.2
+        with:
+          languages: java-kotlin
+          build-mode: manual
+
+      - name: Build the library (no tests)
+        working-directory: android
+        # CodeQL only sees code the compiler actually compiles: a warm Gradle build cache
+        # (org.gradle.caching=true, restored by setup-java) turns compileReleaseKotlin into
+        # FROM-CACHE and the analysis fails with "didn't build any of it".
+        run: ./gradlew --no-build-cache --rerun-tasks :reliablepush:assembleRelease
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@1fc58d04a4d4374f921bdac573c3811c240f9c26 # v4.39.2
+        with:
+          category: /language:java-kotlin/android
+
+  analyze-ios:
+    name: Analyze iOS SDK (swift)
+    runs-on: macos-26
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Select Xcode 26.6
+        run: sudo xcode-select -s /Applications/Xcode_26.6.app
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@1fc58d04a4d4374f921bdac573c3811c240f9c26 # v4.39.2
+        with:
+          languages: swift
+          build-mode: manual
+
+      - name: Build the library (no tests)
+        run: xcodebuild build -scheme ReliablePush -destination generic/platform=iOS CODE_SIGNING_ALLOWED=NO
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@1fc58d04a4d4374f921bdac573c3811c240f9c26 # v4.39.2
+        with:
+          category: /language:swift/ios
