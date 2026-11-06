@@ -186,6 +186,9 @@ below, all top-level. ThreadContext entries `trace.id` and `rp.*` are top-level;
 | `auth.failed` (WARN) | Credential rejected | `reason` code only: `missing_key`, `unknown_key`, `missing_admin_key`, `unknown_admin_key` (admin API, header `X-Admin-Key`), `missing_token`, `malformed`, `unknown_kid`, `bad_signature`, `wrong_issuer`, `wrong_audience`, `expired`, `not_yet_valid`, `missing_user_claim`, `lifetime_too_long`, `jwks_unavailable`, `revoked`, `unknown_app` (a valid device token of an app no longer configured); `rp.app_id` for device registration |
 | `authz.denied` (WARN) | Event for a `trackingId` of another user (`reason=tracking_id_of_another_user`) | `rp.app_id`, `rp.device_id`, `rp.user_hash`, `rp.tracking_id` |
 | `rate_limit.exceeded` (WARN) | A bucket ran empty | `rate_limit.scope` = `sender`, `device`, `register` or `admin`, `rp.app_id`, `rp.device_id`, `rp.user_hash` or (admin) `rp.admin_key` |
+| `admin.search` | Admin notification search answered | `rp.admin_key`, `rp.app_id`, `filters` = comma-separated filter names used (never values) |
+| `admin.notification_viewed` | Admin opened a notification detail | `rp.admin_key`, `rp.app_id`, `rp.tracking_id`, `rp.user_hash` |
+| `admin.payload_viewed` | Admin read a stored fallback payload (needs the `payload` permission) | same |
 | `fallback.claimed` | The worker claimed a due row | `rp.app_id`, `rp.user_hash`, `rp.attempt` (number of the attempt about to be made) |
 | `fallback.reclaimed` (WARN) | Claimed while the previous lease was still set: the previous holder crashed or was too slow | same |
 | `fallback.dispatched` | Webhook answered `2xx`, row closed `FALLBACK_TRIGGERED` | `rp.attempt`, `event.duration`, `http.response.status_code` |

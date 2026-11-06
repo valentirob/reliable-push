@@ -8,13 +8,13 @@ import java.util.Base64;
 import java.util.UUID;
 
 /** Keyset position of the list: base64url (no padding) of {@code <created_at ISO instant>|<id>}. Opaque to clients. */
-record PageCursor(Instant createdAt, UUID id) {
+public record PageCursor(Instant createdAt, UUID id) {
 
-    String encode() {
+    public String encode() {
         return Base64.getUrlEncoder().withoutPadding().encodeToString((createdAt + "|" + id).getBytes(StandardCharsets.UTF_8));
     }
 
-    static PageCursor decode(String cursor) {
+    public static PageCursor decode(String cursor) {
         try {
             String text = new String(Base64.getUrlDecoder().decode(cursor), StandardCharsets.UTF_8);
             int separator = text.indexOf('|');
@@ -32,11 +32,11 @@ record PageCursor(Instant createdAt, UUID id) {
     }
 
     /** Parsers accept years up to +-999999999, which PostgreSQL's timestamptz rejects (a 500): only 1970..9999 is queried. */
-    static final Instant MIN_INSTANT = Instant.parse("1970-01-01T00:00:00Z");
+    public static final Instant MIN_INSTANT = Instant.parse("1970-01-01T00:00:00Z");
 
-    static final Instant MAX_INSTANT = Instant.parse("9999-12-31T23:59:59Z");
+    public static final Instant MAX_INSTANT = Instant.parse("9999-12-31T23:59:59Z");
 
-    static boolean inSaneRange(Instant instant) {
+    public static boolean inSaneRange(Instant instant) {
         return !instant.isBefore(MIN_INSTANT) && !instant.isAfter(MAX_INSTANT);
     }
 
