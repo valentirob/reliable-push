@@ -4,6 +4,14 @@ All notable changes to this project are documented here. Versions follow [Semant
 
 ## Unreleased
 
+### Fixed
+
+- iOS SDK: a flush that finds another one running (the app or the Notification Service Extension) now waits for it
+  within its own time limit instead of skipping, so a burst of pushes no longer leaves a `DELIVERED` queued until the
+  next launch (M7).
+- Harness: the device proxy listens on `127.0.0.1` unless `HARNESS_DEVICEPROXYBIND` is set; compose sets `0.0.0.0`
+  inside the container, still published on `127.0.0.1:8091` only (M12).
+
 ### Process
 
 - New rule `.agents/rules/docs-sync.md`: every change updates the docs, the diagrams and the presentation in the same

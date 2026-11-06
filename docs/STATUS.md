@@ -8,6 +8,26 @@ Everything left after `v0.1.0` is in [TODO.md](TODO.md): each item says why it i
 unblocks it. Agents: remind the maintainer of its section 1 (real APNs and the locked-device check, real FCM, Maven
 Central) at the start of a session.
 
+## 2026-11-06 (9) — Claude Code — backlog fixes M7 and M12 (start of 0.2.0)
+
+- **Done:**
+  - Maintainer chose the backlog fixes as the first 0.2.0 work (TODO 4.1, 4.2; both removed from TODO).
+  - M7, `bugfix/ios-m7-flush-lock-wait`: `EventSender.flush(deadline:)` waits for `flush.lock` until its deadline
+    (`FileLock.lock(until:now:)`, polled every 20 ms, a cancelled task never takes it) instead of skipping; without a
+    deadline it still skips. `testLogoutCancelsEveryInFlightAppFlush` now also checks a flush waiting for the lock.
+  - M12, `bugfix/harness-m12-proxy-bind`: `harness.device-proxy-bind` (`HARNESS_DEVICEPROXYBIND`), default
+    `127.0.0.1`; compose sets `0.0.0.0` inside the container (published on `127.0.0.1:8091` only).
+  - Docs-sync: `ios.md` §9, `testing.md` (device proxy), `overview.md` §7 and §8 diagrams, spec plan 3 block,
+    presentation status slide, CHANGELOG `Unreleased`. At-a-glance picture checked, no change needed.
+- **State:** iOS package tests 112 with 1 skipped, size gate 291,928 B; harness `verify` 238 tests green;
+  `./scripts/ios-e2e.sh`: `iOS E2E: 8/8 passed, 1 skipped`; `./scripts/e2e.sh`: `E2E: 17/17 passed`.
+- **Review loop:** one medium finding fixed: the lock wait polled `tryLock`, which WARNs on every failed open, so an
+  unopenable lock file gave up to ~1250 WARNs; an unopenable file now ends the wait with one WARN. Low, kept:
+  `withLock(timeout:)` (logout, reconfigure) still WARNs per poll in that case, at most 2 s.
+  Low, accepted and documented in `ios.md` §9: an NSE that waits for the lock hands the notification back up to the
+  send timeout (default 5 s) later, never past it.
+- **Next:** the rest of the 0.2.0 scope ([TODO.md](TODO.md) 5.1).
+
 ## 2026-11-06 (8) — Claude Code — docs-sync rule
 
 - **Done:** new always-on rule `.agents/rules/docs-sync.md` (maintainer request): every change updates the docs, the

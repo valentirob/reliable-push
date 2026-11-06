@@ -32,6 +32,7 @@ class HarnessPropertiesEnvBindingTest {
                                 Map.of("HARNESS_BACKENDURL", "http://backend:8080",
                                         "HARNESS_DEVICEPROXYTARGET", "http://api:8080",
                                         "HARNESS_DEVICEPROXYPORT", "8191",
+                                        "HARNESS_DEVICEPROXYBIND", "0.0.0.0",
                                         "HARNESS_BACKENDLOGDIR", "/var/rp-logs",
                                         "HARNESS_APPS_SHOP_" + key, "k",
                                         "HARNESS_APPS_SHOP_" + grant, "g",
@@ -44,6 +45,7 @@ class HarnessPropertiesEnvBindingTest {
                     assertThat(props.backendUrl()).isEqualTo(URI.create("http://backend:8080"));
                     assertThat(props.deviceProxyTarget()).isEqualTo(URI.create("http://api:8080"));
                     assertThat(props.proxyListenPort()).isEqualTo(8191);
+                    assertThat(props.proxyBindAddress()).isEqualTo("0.0.0.0");
                     assertThat(props.backendLogDir()).isEqualTo(Path.of("/var/rp-logs"));
                     assertThat(props.app("shop")).isEqualTo(new HarnessApp("k", "g", "h", "https://shop.invalid"));
                 });

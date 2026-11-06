@@ -42,6 +42,17 @@ class HarnessPropertiesTest {
     }
 
     @Test
+    void deviceProxyBindsLoopbackUnlessConfigured() {
+        assertThat(props(Map.of("shop", app())).proxyBindAddress()).isEqualTo("127.0.0.1");
+        HarnessProperties blank = new HarnessProperties(URI.create("http://localhost:8080"), Path.of("/tmp/rp-logs"),
+                Map.of("shop", app()), null, null, null, " ");
+        assertThat(blank.proxyBindAddress()).isEqualTo("127.0.0.1");
+        HarnessProperties all = new HarnessProperties(URI.create("http://localhost:8080"), Path.of("/tmp/rp-logs"),
+                Map.of("shop", app()), null, null, null, "0.0.0.0");
+        assertThat(all.proxyBindAddress()).isEqualTo("0.0.0.0");
+    }
+
+    @Test
     void validationRejectsBlankValuesAndMissingApps() {
         Validator validator = Validation.buildDefaultValidatorFactory().getValidator();
 

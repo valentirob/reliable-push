@@ -105,6 +105,31 @@ class DeviceProxyTest {
         }
     }
 
+    // M12: outside compose the proxy must not expose the backend on the LAN
+    @Test
+    void listensOnLoopbackByDefault() {
+        assertThat(proxy.bindAddress().isLoopbackAddress()).isTrue();
+    }
+
+    @Test
+    void listensOnTheConfiguredAddress() throws Exception {
+        proxy.close();
+        proxy = new DeviceProxy("0.0.0.0", 0, "127.0.0.1", target.getAddress().getPort());
+        proxy.start();
+
+        assertThat(proxy.bindAddress().isAnyLocalAddress()).isTrue();
+        assertThat(post("all").body()).isEqualTo("echo:all");
+    }
+
+    @Test
+    void anUnknownBindAddressFailsTheStart() {
+        proxy.close();
+        proxy = new DeviceProxy("no-such-host.invalid", 0, "127.0.0.1", target.getAddress().getPort());
+
+        org.junit.jupiter.api.Assertions.assertThrows(IOException.class, proxy::start);
+        assertThat(proxy.port()).isZero();
+    }
+
     @Test
     void unreachableUpstreamIsATransportError() throws Exception {
         int dead;

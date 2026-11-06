@@ -417,6 +417,19 @@ final class EventSenderTests: XCTestCase {
         held?.release()
     }
 
+    func testLockFileThatCannotBeOpenedStopsTheWaitWithOneWarn() async throws {
+        // a regular file where the lock's directory should be: open() fails, which is not contention
+        let blocker = dir.deletingLastPathComponent().appendingPathComponent("blocker")
+        try FileManager.default.createDirectory(at: dir.deletingLastPathComponent(), withIntermediateDirectories: true)
+        XCTAssertTrue(FileManager.default.createFile(atPath: blocker.path, contents: Data()))
+        let lock = FileLock(url: blocker.appendingPathComponent("flush.lock"))
+        let start = Date()
+        let held = await lock.lock(until: Date().addingTimeInterval(2), now: { Date() })
+        XCTAssertNil(held)
+        XCTAssertLessThan(Date().timeIntervalSince(start), 0.5, "no polling when the file cannot be opened")
+        XCTAssertEqual(log.messages.filter { $0.contains("event=lock.unavailable") }.count, 1, "\(log.messages)")
+    }
+
     func testCancellingAFlushThatWaitsForTheLockReturnsSkipped() async {
         add(1)
         let other = FileLock(url: dir.appendingPathComponent("flush.lock"))
