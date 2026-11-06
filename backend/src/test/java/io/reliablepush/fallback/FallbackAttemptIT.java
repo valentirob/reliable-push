@@ -231,6 +231,24 @@ class FallbackAttemptIT extends PostgresTestBase {
     }
 
     @Test
+    void failedAttemptInsertRollsTheOutcomeBack() {
+        RECEIVER.stubFor(post(urlEqualTo("/hook")).willReturn(aResponse().withStatus(200)));
+        UUID id = insert(now().minusMillis(1));
+        // attempt 1 already exists, so the worker's own insert violates fallback_attempt_once
+        FallbackAttempt existing = new FallbackAttempt(id, 1, now(), 1, "RETRYABLE", 503, "http_503");
+        attempts.insert(existing);
+
+        scheduler.tick();
+
+        assertThat(state(id)).isEqualTo(NotificationState.DISPATCHING);
+        assertThat(jdbc.sql("select fallback_attempts from notification where id = ?").param(id)
+                        .query(Integer.class).single())
+                .isZero();
+        assertThat(attempts.forNotification(id)).hasSize(1);
+        assertThat(attempts.forNotification(id).get(0).outcome()).isEqualTo("RETRYABLE");
+    }
+
+    @Test
     void attemptsGoWithTheNotification() {
         UUID id = UUID.randomUUID();
         Instant closedAt = Instant.parse("2000-01-01T00:00:00Z");
