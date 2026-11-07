@@ -30,6 +30,12 @@ All notable changes to this project are documented here. Versions follow [Semant
   supported (Flyway's session-level migration lock); `operations.md` notes the two connections the rollup and the
   retention wait hold in the shared combined-mode pool.
 
+### Fixed
+
+- iOS: `ReliablePushExtension` reads the stored configuration (App Group, Keychain access group) only in `didReceive`,
+  after it has found a valid `rp_tid`. Before, every push the host's Notification Service Extension received, the
+  host's own included, opened the App Group and, when it was misconfigured, logged WARN `sdk.app_group_unavailable`.
+
 ## 0.1.2 — 2026-11-06
 
 Bug-fix release: one iOS SDK fix and one harness fix. No change to the API or the database.

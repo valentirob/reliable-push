@@ -281,6 +281,7 @@ flowchart TB
     AG["App Group<br/>event queue + state"]
   end
   APNS["APNs alert, mutable-content: 1, rp_tid"] --> DR
+  DR -- "no rp_tid: returns false,<br/>nothing read" --> OWNI["Your extension's own handling"]
   REG -- "POST /v1/devices" --> API["reliable-push"]
   REG --> KC
   DR -- "queue DELIVERED" --> AG
