@@ -25,7 +25,10 @@ All notable changes to this project are documented here. Versions follow [Semant
 - Helm: `config.admin` in `values.yaml`. With admin keys the Ingress also routes `/admin` and OpenShift gets a second Route for `/admin` (`route.host` is then required); without keys the rendered manifests are unchanged.
 - Harness: E2E scenario `admin-dashboard` and `AdminSmokeE2E` (the full run is now 18 entries); a per-run admin key.
 - Docs: `docs/admin.md`, admin sections in `api.md`, `security.md`, `deployment.md`, `testing.md`, a new section in
-  `overview.md`, the at-a-glance picture and a slide.
+  `overview.md`, the at-a-glance picture and a slide. `deployment.md` also covers checking and dropping an invalid
+  `notification_app_created` left by an interrupted build, and states that PgBouncer in transaction pooling mode is not
+  supported (Flyway's session-level migration lock); `operations.md` notes the two connections the rollup and the
+  retention wait hold in the shared combined-mode pool.
 
 ## 0.1.2 — 2026-11-06
 

@@ -69,7 +69,8 @@ reliable-push:
 ```
 
 Startup fails (`IllegalStateException`, message names the key id) on: a duplicate `id`; an `id` not matching the
-pattern; a `key-sha256` that is not 64 lowercase hex characters; two keys with the same hash; a hash equal to a sender
+pattern; the reserved `id` `false` (the admin beans are gated on `keys[0].id`, which Spring reads as off when it is
+`false`); a `key-sha256` that is not 64 lowercase hex characters; two keys with the same hash; a hash equal to a sender
 key hash of any app; an empty `apps`; `"*"` mixed with app ids; an unknown app id; an unknown permission. Defaults:
 `rate-limit-per-minute` 600, `rollup-retention-days` 400, `rollup.cron` `0 7 3 * * *`, `keys` empty (admin disabled).
 

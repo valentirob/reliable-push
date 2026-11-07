@@ -26,6 +26,10 @@ values file for the locally loaded image and smaller CPU requests; the GKE and O
     `api.replicas` when autoscaling and the extra pods of a rolling update (25 % surge by default). Chart defaults in
     split mode: 2 × 10 + 2 × 20 = 60, inside PostgreSQL's default of 100; small Cloud SQL tiers allow fewer, so check the
     instance's `max_connections` flag.
+  - **Connection poolers:** connect the backend to PostgreSQL directly or through a pooler in session mode. PgBouncer in
+    transaction pooling mode is not supported: Flyway takes a session-level advisory lock while it migrates
+    (`spring.flyway.postgresql.transactional-lock=false`, needed by the online `V5` index build), which a
+    transaction pooler can release on another server connection.
 - **Fallback receiver** reachable from the worker pods (`config.apps.<id>.fallback.url`), and an identity provider for
   device registration (`identity.type: oidc`) or a grant secret (`signed-grant`), see [security.md](security.md).
 
@@ -211,9 +215,11 @@ kubectl -n reliable-push rollout status deploy/rp-reliable-push --timeout=180s
   proportional to the size of `notification` (minutes on tens of millions of rows) and the first new pod is not started
   until it finishes, while the chart's startup probe allows 180 s (5 s x 36). On a large table build the index beforehand
   in `psql` with the same statement, `create index concurrently if not exists notification_app_created on notification
-  (app_id, created_at);` (V5 is then a no-op), and upgrade after it completes. If a build is interrupted it leaves an invalid index:
-  drop it (`drop index concurrently notification_app_created;`), delete the failed V5 row from `flyway_schema_history` if
-  there is one, and restart.
+  (app_id, created_at);` (V5 is then a no-op), and upgrade after it completes. If a build is interrupted it leaves an invalid index,
+  and `if not exists` then skips it. Check with `select indisvalid from pg_index where indexrelid =
+  'notification_app_created'::regclass;` (`f` means invalid): drop it (`drop index concurrently notification_app_created;`),
+  delete the failed V5 row from `flyway_schema_history` if there is one (`delete from flyway_schema_history where version =
+  '5' and not success;`), and restart.
 - Add a new app to `config.apps` on all replicas before sending its traffic (one `helm upgrade` does that).
 
 ## Graceful shutdown
