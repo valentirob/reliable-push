@@ -9,7 +9,7 @@ with a message naming the key instead of failing the first request.
 | Profile | Effect |
 |---|---|
 | `api` | Marks an API-only instance: activate it **without** `worker` to run no background jobs. The HTTP endpoints themselves are not gated by it: every instance serves them |
-| `worker` | Enables the fallback scheduler (`FallbackScheduler`), the webhook client, `RetentionJob` and `DueBacklogJob` (`rp_due_backlog`) |
+| `worker` | Enables the fallback scheduler (`FallbackScheduler`), the webhook client, `RetentionJob`, `DailyRollupJob` (when admin is enabled) and `DueBacklogJob` (`rp_due_backlog`) |
 | `json` | ECS JSON log lines on stdout (default whenever `local` is not active) |
 | `local` | Human-readable log pattern for development (`%d{ISO8601} %-5level [%t] %c{1.} [trace=...] - %m`) |
 | `e2e`, `demo` | Allow the fast clock (`reliable-push.testing.minute-duration`), used by the local harness only. Also append the same ECS JSON log lines to the file `RP_LOG_FILE` (default `/tmp/rp-logs/backend.json`, append, no rotation; stdout unchanged), which the harness tails from a shared volume |
@@ -64,6 +64,10 @@ says so (minutes for `worker.lease` and `fallback.backoff`, days for `device-tok
 | `worker.backlog-refresh-interval` | `30s` | Optional; how often `rp_due_backlog` is recomputed |
 | `retention-days` | `30` | At least 1. Closed notifications older than this are deleted daily |
 | `retention.cron` | `0 17 3 * * *` | Spring cron expression (six fields, always UTC) of the daily retention run (worker role); `-` disables the schedule |
+| `admin.keys[]` | none (admin disabled) | Admin API keys of the ops dashboard: `{id, key-sha256, apps, permissions}`; `id` matches `[a-z0-9-]{1,40}` and must not be `false` (rejected at startup: the admin beans are switched on by the property `admin.keys[0].id`, which `false` would turn off); see `security.md`. With no key, `/v1/admin/**` and `/admin/**` answer 404 |
+| `admin.rate-limit-per-minute` | `600` | At least 1. Admin requests per minute per admin key and instance |
+| `admin.rollup-retention-days` | `400` | At least 1. `daily_stats` rows older than this are deleted by the rollup |
+| `admin.rollup.cron` | `0 7 3 * * *` | Spring cron expression (UTC) of `DailyRollupJob` (worker role, runs only when admin is enabled); `-` disables the schedule and the retention guard |
 | `testing.minute-duration` | unset (1 minute = 60 s) | Fast clock, e.g. `1s`. Accepted only with the `e2e` or `demo` profile, must be positive |
 
 Per app, under `apps.<appId>` (the app id matches `[A-Za-z0-9][A-Za-z0-9_-]{0,63}`; at least one app is required, a
@@ -124,6 +128,8 @@ Other useful standard settings: `SERVER_PORT` (default 8080), `LOGGING_LEVEL_<LO
 `SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE` (default 10) and `SPRING_DATASOURCE_HIKARI_CONNECTIONTIMEOUT` (milliseconds;
 the application sets 5000 instead of Hikari's 30000, see "Database pool" below).
 
+The ops dashboard ([admin.md](admin.md)) is served by every instance that serves HTTP and exists only when an admin key is configured.
+
 ## Health and metrics
 
 - Kubernetes probes: `GET /actuator/health/liveness` and `GET /actuator/health/readiness` (probes enabled). Only
@@ -183,9 +189,13 @@ below, all top-level. ThreadContext entries `trace.id` and `rp.*` are top-level;
 | `device.revoked` | Device revoked | same |
 | `tracking.event_accepted` | An event was stored (also late ones) | `rp.event_type`, `rp.late`, `rp.tracking_id`, `rp.device_id`, `rp.app_id`, `rp.user_hash` |
 | `tracking.event_ignored` | Duplicate event (`reason=duplicate`) | same |
-| `auth.failed` (WARN) | Credential rejected | `reason` code only: `missing_key`, `unknown_key`, `missing_token`, `malformed`, `unknown_kid`, `bad_signature`, `wrong_issuer`, `wrong_audience`, `expired`, `not_yet_valid`, `missing_user_claim`, `lifetime_too_long`, `jwks_unavailable`, `revoked`, `unknown_app` (a valid device token of an app no longer configured); `rp.app_id` for device registration |
+| `auth.failed` (WARN) | Credential rejected | `reason` code only: `missing_key`, `unknown_key`, `missing_admin_key`, `unknown_admin_key` (admin API, header `X-Admin-Key`), `missing_token`, `malformed`, `unknown_kid`, `bad_signature`, `wrong_issuer`, `wrong_audience`, `expired`, `not_yet_valid`, `missing_user_claim`, `lifetime_too_long`, `jwks_unavailable`, `revoked`, `unknown_app` (a valid device token of an app no longer configured); `rp.app_id` for device registration |
 | `authz.denied` (WARN) | Event for a `trackingId` of another user (`reason=tracking_id_of_another_user`) | `rp.app_id`, `rp.device_id`, `rp.user_hash`, `rp.tracking_id` |
-| `rate_limit.exceeded` (WARN) | A bucket ran empty | `rate_limit.scope` = `sender`, `device` or `register`, `rp.app_id`, `rp.device_id` or `rp.user_hash` |
+| `rate_limit.exceeded` (WARN) | A bucket ran empty | `rate_limit.scope` = `sender`, `device`, `register` or `admin`, `rp.app_id`, `rp.device_id`, `rp.user_hash` or (admin) `rp.admin_key` |
+| `admin.search` | Admin notification search answered | `rp.admin_key`, `rp.app_id`, `filters` = comma-separated filter names used (never values) |
+| `admin.notification_viewed` | Admin opened a notification detail | `rp.admin_key`, `rp.app_id`, `rp.tracking_id`, `rp.user_hash` |
+| `admin.payload_viewed` | Admin read a stored fallback payload (needs the `payload` permission) | same |
+| `admin.devices_viewed` | Admin listed the devices of a user | `rp.admin_key`, `rp.app_id`, `rp.user_hash` (never the user id) |
 | `fallback.claimed` | The worker claimed a due row | `rp.app_id`, `rp.user_hash`, `rp.attempt` (number of the attempt about to be made) |
 | `fallback.reclaimed` (WARN) | Claimed while the previous lease was still set: the previous holder crashed or was too slow | same |
 | `fallback.dispatched` | Webhook answered `2xx`, row closed `FALLBACK_TRIGGERED` | `rp.attempt`, `event.duration`, `http.response.status_code` |
@@ -193,6 +203,9 @@ below, all top-level. ThreadContext entries `trace.id` and `rp.*` are top-level;
 | `fallback.failed` (WARN) | Final failure or attempts exhausted, `FALLBACK_FAILED` | `reason`, `rp.attempt`, `event.duration` |
 | `fallback.expired` (WARN) | Closed as `FALLBACK_EXPIRED` | `reason` = `trigger_window_passed`, `next_retry_after_trigger_window` or `app_not_configured` |
 | `retention.purged` | Retention job finished | `count` (also 0) |
+| `retention.skipped` (WARN) | Retention did not run: admin is enabled, the rollup schedule is on and either `daily_stats` has no row computed in the last 20 hours, or a rollup was still running after the 30-minute wait | `reason` = `rollup_missing` or `rollup_running` |
+| `rollup.completed` | `DailyRollupJob` wrote the daily statistics | `count` = days written (not logged when another worker held the lock) |
+| `rollup.failed` (WARN) | The rollup failed and rolled back; the stack trace follows at ERROR from logger `io.reliablepush.admin.DailyRollupJob` (the rollup SQL carries no personal data) | `reason` = exception class name |
 
 Webhook failure `reason` codes: `http_<status>`, `timeout`, `io_error`, `interrupted`, `client_error`.
 
@@ -212,6 +225,19 @@ Regenerate the list from the code with
 `retention-days`, in chunks of 1,000 rows, each chunk its own short transaction; events go with them (`ON DELETE
 CASCADE`). Notifications that are not closed are never deleted, whatever their age. Two replicas running it simultaneously
 is harmless. It logs `retention.purged` with the count. Devices are not purged by this job.
+
+Ordering with the rollup: `DailyRollupJob` (worker role, `admin.rollup.cron`, 03:07 UTC by default) runs before retention so
+daily trends survive the notification retention. It recomputes the last `min(7, retention-days)` complete UTC days of every
+configured app (zero rows included) under a PostgreSQL advisory lock (a second worker finds it taken and does nothing), deletes
+`daily_stats` rows older than `admin.rollup-retention-days` and logs `rollup.completed` (or WARN `rollup.failed`). When admin
+is enabled and `admin.rollup.cron` is not `-`, `RetentionJob` first waits for a rollup that is still running (it takes the
+rollup's advisory lock with `lock_timeout = 30min`, because the rollup's rows become visible only when it commits), then
+requires a `daily_stats` row computed in the last 20 hours. Otherwise it deletes nothing and logs WARN `retention.skipped`
+with `reason=rollup_missing` (no fresh row) or `reason=rollup_running` (the rollup still held the lock after 30 minutes),
+and the next night retries both. The wait holds one database connection of the worker for its duration. A rollup that
+regularly takes longer than about 40 minutes (10 minutes to 03:17 plus the 30-minute wait) skips retention every night:
+move `reliable-push.retention.cron` later. With
+admin disabled, or the rollup schedule `-`, retention behaves as before.
 
 ## Scaling and capacity
 

@@ -72,7 +72,16 @@ devices and the fallback receiver. It needs only Docker.
    - **Logs** searches the backend's JSON log by `trace.id`, `rp.tracking_id` or `event.action`.
    - The device list has **Go offline**, to simulate late delivery.
 
-8. **Stop.** Run the `docker compose ... down -v` command that the script printed.
+8. **Open the ops dashboard.** The demo backend serves a read-only dashboard with its own admin key. The key is generated
+   for each run and written to `harness/build/demo/secrets.env` (git-ignored) as `HARNESS_ADMINKEY`. Read it yourself from
+   that file; it is not printed and not in the docs. Open <http://127.0.0.1:8080/admin/>, paste the key and sign in.
+
+   ✅ **Overview** shows the notifications you just sent (use the 24 h window) with delivery and read rates, and the
+   fallbacks triggered. **Search**: app `shop`, user `alice`, then open a result: the timeline lists the `DELIVERED` and
+   `READ` events and, for the `never` push, the webhook attempts (a `FAIL_500` receiver shows `500` attempts before the
+   success). "Show payload" works because this key has the `payload` permission. More: [admin.md](admin.md).
+
+9. **Stop.** Run the `docker compose ... down -v` command that the script printed.
 
 `./scripts/demo.sh --realtime` runs the same demo with real minutes.
 
@@ -136,8 +145,8 @@ Every endpoint is in [api.md](api.md), and every setting in [operations.md](oper
 ./scripts/e2e.sh
 ```
 
-✅ Ends with `[e2e] summary: 17/17 passed`. It runs in about 5 minutes and covers the 16 scenarios plus the console
-smoke test. It includes worker crashes inside and outside the trigger window. Results are in
+✅ Ends with `[e2e] summary: 18/18 passed`. It runs in about 5 minutes and covers the 17 scenarios plus the single `console-smoke`
+entry, which runs both Playwright classes (the web console and the dashboard). It includes worker crashes inside and outside the trigger window. Results are in
 `harness/build/e2e/summary.json`. Run one scenario with `--scenario <name>`, and keep the stack for inspection with
 `--keep`.
 

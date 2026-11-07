@@ -106,6 +106,14 @@ public class ProblemHandler extends ResponseEntityExceptionHandler {
         return validationProblem(List.of(Map.of("field", ex.field(), "message", ex.reason())), ex, request);
     }
 
+    @ExceptionHandler(BadParameterException.class)
+    ResponseEntity<Object> badParameter(BadParameterException ex, WebRequest request) {
+        ProblemDetail body = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, "The request is not valid.");
+        body.setTitle("Bad Request");
+        body.setProperty("errors", List.of(Map.of("field", ex.field(), "message", ex.reason())));
+        return handleExceptionInternal(ex, body, new HttpHeaders(), HttpStatus.BAD_REQUEST, request);
+    }
+
     @ExceptionHandler(RequestBodyTooLargeException.class)
     ResponseEntity<Object> tooLarge(RequestBodyTooLargeException ex, WebRequest request) {
         return payloadTooLarge(ex, request);

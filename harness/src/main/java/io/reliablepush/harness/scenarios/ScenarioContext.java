@@ -189,6 +189,10 @@ public final class ScenarioContext {
             out.add(app.grantSecret());
             out.add(app.hmacSecret());
         }
+        String adminKey = c.properties().adminKey();
+        if (adminKey != null && !adminKey.isBlank()) {
+            out.add(adminKey);
+        }
         addAll(out, c.devices().issuedTokensForLogHygieneScan());
         addAll(out, c.grants().issuedGrantsForLogHygieneScan());
         addAll(out, c.inbox().signaturesForLogHygieneScan());

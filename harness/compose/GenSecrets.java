@@ -21,6 +21,7 @@ import java.util.List;
  * {@code backend.env.template} (default: {@code ./backend.env.template}) followed by, per app ({@code shop},
  * {@code news}, {@code limited}): a random 32-byte sender API key (base64url) for the harness and its SHA-256 hex for
  * the backend, a 32-byte grant secret and a 32-byte webhook HMAC secret (base64url, 43 characters ≥ 32 bytes), plus one
+ * admin key (raw as {@code HARNESS_ADMINKEY}, SHA-256 as {@code RELIABLEPUSH_ADMIN_KEYS_0_KEYSHA256}) and one
  * P-256 device-token signing key pair (PKCS#8 / SPKI PEM) and the database password. Also writes {@code db.env}
  * (only {@code POSTGRES_PASSWORD}) for the database container. Re-running overwrites both files (mode 600).
  *
@@ -67,6 +68,12 @@ public final class GenSecrets {
             env.append("HARNESS_APPS_").append(id).append("_HMACSECRET=").append(hmacSecret).append('\n');
             env.append("HARNESS_APPS_").append(id).append("_GRANTISSUER=").append(GRANT_ISSUER).append('\n');
         }
+
+        // one admin key (ops dashboard): raw value for the harness (admin-dashboard scenario and smoke test), hash for the backend
+        String adminKey = random32();
+        env.append("\n# admin key (id e2e, see backend.env.template)\n");
+        env.append("RELIABLEPUSH_ADMIN_KEYS_0_KEYSHA256=").append(sha256Hex(adminKey)).append('\n');
+        env.append("HARNESS_ADMINKEY=").append(adminKey).append('\n');
 
         KeyPairGenerator generator = KeyPairGenerator.getInstance("EC");
         generator.initialize(new ECGenParameterSpec("secp256r1"), RANDOM);

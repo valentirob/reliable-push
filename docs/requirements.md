@@ -42,6 +42,10 @@ one or more apps.
 - **FR-14** A local web console (part of the test harness, never deployed to production) lets a person create simulated devices, send simulated pushes with configurable device behaviour, watch delivery/read/fallback status live, inspect fallback webhook calls and logs, and run E2E scenarios — for manual testing and demos.
 - **FR-15** The sender API offers a paginated list of notifications per app (filter by user, state, time) in addition to lookup by `trackingId`.
 
+### Ops dashboard
+- **FR-16** A read-only web dashboard served by the backend shows, per app, delivery, read and fallback rates for the last hour, day or week; the current due backlog; daily trends kept for up to 400 days; a search by user, external id, tracking id, state and time; and per notification a timeline of events and webhook attempts.
+- **FR-17** The dashboard and its API are protected by admin API keys from configuration (stored hashed), each scoped to all apps or a list of apps; the fallback payload is shown only to keys with the `payload` permission; every search and view is audit-logged without personal data. With no admin key configured, neither the page nor the API exists.
+
 ## Non-functional requirements
 
 - **NFR-1 Security** All APIs authenticated (sender API key; device JWT). Events accepted only for `trackingId`s of the same app and user as the device token. Rate limiting per device and per app. No secrets in the repo.
@@ -60,4 +64,4 @@ one or more apps.
 - Sending pushes on behalf of the customer (proxy mode).
 - Direct integrations with SMS/email providers (the webhook decouples them; the harness ships a reference receiver).
 - Devices without Google Play services (e.g. Huawei HMS), web push.
-- Full multi-tenant SaaS isolation and admin UI.
+- Full multi-tenant SaaS isolation.

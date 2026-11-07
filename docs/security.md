@@ -14,6 +14,7 @@ Summary of how the backend protects data and authenticates callers. The binding 
 | Forged or replayed device registration | Obtaining a device token for another user | OIDC signature verification against the issuer's JWKS, strict claim checks; signed grants are short-lived and capped |
 | Stolen device token | Reporting events as that device | Short revocation cache, revoke endpoint, `token_version` bump on re-registration, expiry (default 90 days) |
 | Attacker in front of the fallback receiver | Forging fallbacks, replaying old ones | HMAC-SHA256 signature over timestamp and body, timestamp for replay rejection, `Idempotency-Key` for de-duplication |
+| Stolen or leaked admin key | Reading notifications, user ids and fallback payloads through the dashboard | Read-only API; keys scoped to apps; the payload only for keys with `payload`; keys stored as hashes; rate limit per key; every search and view audit-logged; page headers; optionally restricted to an internal network at the ingress. See [Admin keys](#admin-keys) |
 | Operator mistakes | Secrets in config files or logs | Secrets and keys only as `env:NAME` references; inline values are rejected at startup; log deny-list |
 | Malicious identity provider metadata | SSRF through discovery or JWKS URLs | https required (localhost issuers excepted), redirects never followed, 5 s deadline, 64 KB limit, discovery `issuer` must match |
 
@@ -31,6 +32,38 @@ Summary of how the backend protects data and authenticates callers. The binding 
   (startup fails).
 - Each app has exactly one key hash, so rotating a key is a switch-over: deploy the new `sender-api-key-sha256` and update
   the sender at the same time (or accept a short window of `401`s on the sender, which should retry registration).
+
+## Admin keys
+
+The [ops dashboard](admin.md) and its API (`/v1/admin/**`, `/admin/**`) are protected by admin keys. They are configured
+under `reliable-push.admin.keys[]` as `{id, key-sha256, apps, permissions}`; with no key neither the page nor the API exists
+(both answer `404` like an unknown path).
+
+- Create a key and its hash (the hash is not a secret, the key is):
+
+  ```sh
+  KEY=$(openssl rand -base64 32)                    # give this to the person, keep it out of the repo and the logs
+  printf %s "$KEY" | shasum -a 256                  # configure the hash (first column) as key-sha256 (Linux: sha256sum)
+  ```
+
+- `id` (`[a-z0-9-]{1,40}`, not `false`, which would switch the admin beans off) names the key in audit logs instead of the key. `apps` is `["*"]` (every app) or a list of app ids;
+  a key cannot see an app outside its list (`404`). `permissions` can hold `payload`, which allows reading the stored
+  fallback payload; without it the payload route answers `404`.
+- Lookup is by SHA-256 in constant time, as for sender keys. Startup fails on a duplicate id or hash, a malformed hash, an
+  unknown app or permission, and on a hash equal to a sender key hash.
+- **Rotation:** add the new key (new `id` and hash), deploy, hand the new key out, remove the old entry, deploy. Both keys work
+  during the overlap, so nobody is locked out. To revoke a key at once, remove its entry and deploy.
+- **Audit:** every search and view logs `admin.search`, `admin.notification_viewed`, `admin.payload_viewed` or
+  `admin.devices_viewed` with the key `id`, the app, for a notification or payload view the tracking id, and for every view
+  `rp.user_hash`; never the key, a user id, a filter value or a payload.
+  Failed sign-ins log `auth.failed` (`missing_admin_key`, `unknown_admin_key`); a key over its rate limit logs
+  `rate_limit.exceeded` with scope `admin`.
+- **Page headers** on `/admin/**`: `Content-Security-Policy: default-src 'self'; frame-ancestors 'none'; base-uri 'none';
+  form-action 'none'`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `X-Content-Type-Options: nosniff`, and
+  `Cache-Control: no-cache` (files revalidated on every load). Server
+  values are inserted as text, never as HTML. API answers carry `Cache-Control: no-store`. The page keeps the key in
+  `sessionStorage` only and sends it in a header, never in a URL.
+- The `userId` is visible to every admin key; treat an admin key like access to personal data.
 
 ## Device authentication
 
@@ -149,4 +182,5 @@ environment variables.
 - **`azp` is ignored** when verifying OIDC ID tokens; scope tokens by `aud`.
 - **No encryption of `fallback` content at rest** beyond what PostgreSQL storage encryption provides; it lives in
   `notification.fallback_payload` until retention deletes the row (default 30 days after it closed).
+- **Admin keys are shared secrets:** there are no per-person accounts or SSO; restrict who holds a key and where `/admin/` is reachable.
 - **TLS** is terminated at the ingress; the backend speaks plain HTTP inside the cluster.

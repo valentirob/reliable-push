@@ -1,9 +1,10 @@
 {{- if .Values.ingress.enabled }}
-{{- /* Only the public API prefix is routed, to the API Service; /actuator and port 8081 are never exposed. */ -}}
+{{- /* Only the public API prefix (and the ops dashboard page /admin) is routed, to the API Service; /actuator and port 8081 are never exposed. */ -}}
+{{- $adminKeys := dig "admin" "keys" (list) .Values.config }}
 {{- range $h := .Values.ingress.hosts }}
 {{- range $p := $h.paths }}
-{{- if not (or (eq $p "/v1") (hasPrefix "/v1/" $p)) }}
-{{- fail (printf "ingress.hosts: path %q is not allowed, only /v1 and its sub-paths are routed" $p) }}
+{{- if not (or (eq $p "/v1") (hasPrefix "/v1/" $p) (eq $p "/admin") (hasPrefix "/admin/" $p)) }}
+{{- fail (printf "ingress.hosts: path %q is not allowed, only /v1, /admin and their sub-paths are routed" $p) }}
 {{- end }}
 {{- end }}
 {{- end }}
@@ -32,6 +33,15 @@ spec:
         paths:
           {{- range $p := $h.paths }}
           - path: {{ $p | quote }}
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "rp.fullname" $ }}-api
+                port:
+                  name: http
+          {{- end }}
+          {{- if and $adminKeys (not (has "/admin" $h.paths)) }}
+          - path: /admin
             pathType: Prefix
             backend:
               service:

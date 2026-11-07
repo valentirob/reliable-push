@@ -571,3 +571,10 @@ scripts/ (e2e.sh, e2e.ps1, demo.sh, demo.ps1, helm-smoke.sh, load.sh, android-e2
 docs/  requirements.md  STATUS.md  specs/  plans/  architecture.md  api.md
        integration-guide.md  security.md  operations.md  deployment.md  testing.md  android.md  ios.md
 ```
+
+## 13. Cycle 4: ops dashboard (0.2.0)
+
+Cycle 4 adds a read-only ops dashboard (FR-16, FR-17) and changes nothing this spec defines: a new backend module `admin`,
+migration `V4__admin.sql` (`fallback_attempt`, `daily_stats`), a static page at `/admin/` and an admin API at
+`/v1/admin`. The E2E run grows to 18 entries (17 scenarios plus `console-smoke`; "17 entries" and `17/17` above are the cycle 1 values, 18 from cycle 4). Design: [`2026-11-06-ops-dashboard-design.md`](2026-11-06-ops-dashboard-design.md); guide:
+[`../admin.md`](../admin.md).

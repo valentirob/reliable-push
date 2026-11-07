@@ -46,6 +46,32 @@ class SchemaIT extends PostgresTestBase {
     }
 
     @Test
+    void adminTablesAndIndexExist() {
+        List<String> tables = jdbc.sql("select table_name from information_schema.tables where table_schema = current_schema()")
+                .query(String.class)
+                .list();
+
+        assertThat(tables).contains("fallback_attempt", "daily_stats");
+        assertThat(indexDef("notification_app_created")).contains("app_id").contains("created_at");
+    }
+
+    @Test
+    void adminIndexIsBuiltOnlineByItsOwnMigration() {
+        // V5 holds only "create index concurrently": Flyway runs it outside a transaction, so writes are never blocked
+        String script = jdbc.sql("select script from flyway_schema_history where version = '5' and success")
+                .query(String.class)
+                .single();
+        assertThat(script).isEqualTo("V5__admin_index.sql");
+        Boolean valid = jdbc.sql("""
+                        select i.indisvalid from pg_index i join pg_class c on c.oid = i.indexrelid
+                        where c.relname = 'notification_app_created'
+                        """)
+                .query(Boolean.class)
+                .single();
+        assertThat(valid).isTrue();
+    }
+
+    @Test
     void dueIndexIsPartial() {
         assertThat(indexDef("notification_due")).contains("WHERE (due_at IS NOT NULL)");
     }

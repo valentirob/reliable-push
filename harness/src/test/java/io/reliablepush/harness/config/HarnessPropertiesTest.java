@@ -33,6 +33,18 @@ class HarnessPropertiesTest {
     }
 
     @Test
+    void adminKeyRedacted() {
+        String adminKey = "test-admin-key-9e41c07b5a";
+        HarnessProperties props = new HarnessProperties(URI.create("http://localhost:8080"), Path.of("/tmp/rp-logs"),
+                Map.of("shop", app()), null, null, null, null, adminKey);
+
+        assertThat(props.adminKey()).isEqualTo(adminKey);
+        assertThat(props.toString()).doesNotContain(adminKey).contains("adminKey=***");
+        assertThat(props(Map.of("shop", app())).adminKey()).isNull();
+        assertThat(props(Map.of("shop", app())).toString()).contains("adminKey=null");
+    }
+
+    @Test
     void unknownAppThrows() {
         HarnessProperties props = props(Map.of("shop", app()));
 

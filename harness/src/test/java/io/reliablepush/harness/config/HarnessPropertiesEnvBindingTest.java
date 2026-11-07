@@ -29,15 +29,16 @@ class HarnessPropertiesEnvBindingTest {
         new ApplicationContextRunner()
                 .withInitializer(ctx -> ctx.getEnvironment().getPropertySources().addFirst(
                         new SystemEnvironmentPropertySource(StandardEnvironment.SYSTEM_ENVIRONMENT_PROPERTY_SOURCE_NAME,
-                                Map.of("HARNESS_BACKENDURL", "http://backend:8080",
-                                        "HARNESS_DEVICEPROXYTARGET", "http://api:8080",
-                                        "HARNESS_DEVICEPROXYPORT", "8191",
-                                        "HARNESS_DEVICEPROXYBIND", "0.0.0.0",
-                                        "HARNESS_BACKENDLOGDIR", "/var/rp-logs",
-                                        "HARNESS_APPS_SHOP_" + key, "k",
-                                        "HARNESS_APPS_SHOP_" + grant, "g",
-                                        "HARNESS_APPS_SHOP_" + hmac, "h",
-                                        "HARNESS_APPS_SHOP_" + issuer, "https://shop.invalid"))))
+                                Map.ofEntries(Map.entry("HARNESS_BACKENDURL", "http://backend:8080"),
+                                        Map.entry("HARNESS_DEVICEPROXYTARGET", "http://api:8080"),
+                                        Map.entry("HARNESS_DEVICEPROXYPORT", "8191"),
+                                        Map.entry("HARNESS_DEVICEPROXYBIND", "0.0.0.0"),
+                                        Map.entry("HARNESS_BACKENDLOGDIR", "/var/rp-logs"),
+                                        Map.entry("HARNESS_ADMINKEY", "admin-key-value"),
+                                        Map.entry("HARNESS_APPS_SHOP_" + key, "k"),
+                                        Map.entry("HARNESS_APPS_SHOP_" + grant, "g"),
+                                        Map.entry("HARNESS_APPS_SHOP_" + hmac, "h"),
+                                        Map.entry("HARNESS_APPS_SHOP_" + issuer, "https://shop.invalid")))))
                 .withUserConfiguration(Config.class)
                 .run(context -> {
                     assertThat(context).hasNotFailed();
@@ -46,6 +47,7 @@ class HarnessPropertiesEnvBindingTest {
                     assertThat(props.deviceProxyTarget()).isEqualTo(URI.create("http://api:8080"));
                     assertThat(props.proxyListenPort()).isEqualTo(8191);
                     assertThat(props.proxyBindAddress()).isEqualTo("0.0.0.0");
+                    assertThat(props.adminKey()).isEqualTo("admin-key-value");
                     assertThat(props.backendLogDir()).isEqualTo(Path.of("/var/rp-logs"));
                     assertThat(props.app("shop")).isEqualTo(new HarnessApp("k", "g", "h", "https://shop.invalid"));
                 });

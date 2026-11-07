@@ -94,3 +94,69 @@ tests:
       - equal:
           path: spec.rules[0].http.paths[0].backend.service.name
           value: rp-reliable-push-api
+  - it: does not route /admin without admin keys
+    set:
+      ingress.enabled: true
+      ingress.hosts:
+        - host: push.example.com
+          paths: [/v1]
+    asserts:
+      - lengthEqual:
+          path: spec.rules[0].http.paths
+          count: 1
+  - it: routes /admin too when admin keys are configured
+    set:
+      ingress.enabled: true
+      config.admin.keys:
+        - id: ops
+          key-sha256: "0000000000000000000000000000000000000000000000000000000000000000"
+          apps: ["*"]
+      ingress.hosts:
+        - host: push.example.com
+          paths: [/v1]
+    asserts:
+      - equal:
+          path: spec.rules[0].http.paths[1]
+          value:
+            path: /admin
+            pathType: Prefix
+            backend:
+              service:
+                name: rp-reliable-push-api
+                port:
+                  name: http
+      - lengthEqual:
+          path: spec.rules[0].http.paths
+          count: 2
+  - it: keeps explicit /v1 paths and does not duplicate a listed /admin
+    set:
+      ingress.enabled: true
+      config.admin.keys:
+        - id: ops
+          key-sha256: "0000000000000000000000000000000000000000000000000000000000000000"
+          apps: ["*"]
+      ingress.hosts:
+        - host: push.example.com
+          paths: [/v1/notifications, /v1/devices, /admin]
+    asserts:
+      - lengthEqual:
+          path: spec.rules[0].http.paths
+          count: 3
+  - it: accepts /admin and paths below it in the allow-list
+    set:
+      ingress.enabled: true
+      ingress.hosts:
+        - host: push.example.com
+          paths: [/admin, /admin/x]
+    asserts:
+      - isKind:
+          of: Ingress
+  - it: refuses a path that only starts with the letters admin
+    set:
+      ingress.enabled: true
+      ingress.hosts:
+        - host: push.example.com
+          paths: [/administrator]
+    asserts:
+      - failedTemplate:
+          errorPattern: ingress.hosts

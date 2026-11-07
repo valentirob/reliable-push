@@ -154,6 +154,31 @@ curl -sS -X POST http://localhost:8080/v1/events -H "Authorization: Bearer $DEVI
 `occurredAt` is clamped by the server to `[received - 7 days, received]`. Retrying a whole batch is safe: processed items come
 back as `DUPLICATE`.
 
+## Admin API (read-only)
+
+The API of the [ops dashboard](admin.md). Only `GET`. It exists only when at least one admin key is configured; without
+one, `/v1/admin/**` answers `404` like any unknown path.
+
+- Credential: `X-Admin-Key: <key>` (the backend stores only its SHA-256). A missing and a wrong key get the same `401`.
+- Every response carries `Cache-Control: no-store`. Timestamps are ISO-8601 UTC; time ranges are half-open `[from, to)`.
+- `app` must be an app the key may see, otherwise `404` (never `403`).
+- Invalid parameters answer `400` (a malformed value, a span or `limit` out of range, `from` not before `to`). The sender
+  and device APIs keep their `422` for invalid requests; the admin API does not use `422`.
+- Rate limit per admin key and instance (`admin.rate-limit-per-minute`, 600): `429` with `Retry-After`.
+
+| Route | Parameters | Response |
+|---|---|---|
+| `GET /v1/admin/me` | none | `{keyId, apps, permissions}`; `apps` is expanded from `"*"` |
+| `GET /v1/admin/overview` | `app` (default: every visible app), `window` = `1h` \| `24h` \| `7d` (default `24h`) | `{items: [...]}`, one per app: counts, `deliveryRate`, `readRate`, `fallbackRate` (`null` without a denominator) and `now: {pending, dueUnclaimed, dispatching, oldestDueAgeSeconds}` |
+| `GET /v1/admin/stats/daily` | `app` (required), `from`, `to` (dates; default last 30 days; at most 400 days) | `{appId, days: [...]}` oldest first. Days older than the 7-day live window come from the nightly rollup (`live: false`); the others are computed now (`live: true`) |
+| `GET /v1/admin/notifications` | `app` (required), `userId`, `externalId`, `state`, `from`, `to`, `limit` (1-100, default 50), `cursor` | `{items, nextCursor}`, newest first, same cursor format as the sender list |
+| `GET /v1/admin/notifications/{trackingId}` | none | The notification, its `events`, its webhook `attempts` and `payloadBytes`. Unknown, malformed or not visible id: `404` |
+| `GET /v1/admin/notifications/{trackingId}/payload` | none | The stored fallback payload. Needs the `payload` permission; without it the answer is the same `404` as for an unknown id |
+| `GET /v1/admin/devices` | `app`, `userId` (both required) | `{items}`, at most 50, newest first, revoked devices included |
+
+Searches and views are audit-logged without personal data (`admin.search`, `admin.notification_viewed`,
+`admin.payload_viewed`, `admin.devices_viewed`; see [operations.md](operations.md#event-catalogue)). Field-level schemas: `openapi.yaml`, tag `admin`.
+
 ## Errors
 
 Errors are RFC 9457 `application/problem+json` documents; rejected values are never echoed.
@@ -165,9 +190,9 @@ Errors are RFC 9457 `application/problem+json` documents; rejected values are ne
 
 | Status | When |
 |---|---|
-| `400` | Body is not readable JSON (malformed, wrong types, unknown enum value) |
+| `400` | Body is not readable JSON (malformed, wrong types, unknown enum value); on the admin API, any invalid query parameter |
 | `401` | Missing or invalid credential (`WWW-Authenticate: ApiKey` or `Bearer`) |
-| `404` | Unknown id (or an id of another app); unknown `appId` on device registration |
+| `404` | Unknown id (or an id of another app); unknown `appId` on device registration; on the admin API also an app or notification the key may not see |
 | `409` | The notification is not in a state that allows the operation (cancel) |
 | `413` | Body larger than 64 KB |
 | `415` | Unsupported media type (for example multipart) |

@@ -15,6 +15,10 @@ reliable-push:
     revocation-cache-ttl: 0s
   worker:
     poll-interval: 200ms
+  admin:
+    rollup:
+      # never fire the nightly rollup inside a test JVM (DailyRollupIT calls run() directly)
+      cron: "-"
   retention:
     # never fire the daily purge inside a test JVM (RetentionJobIT calls purge() directly)
     cron: "-"

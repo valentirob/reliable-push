@@ -165,7 +165,7 @@ helm install rp deploy/helm/reliable-push -n reliable-push -f deploy/helm/reliab
   default `restricted-v2` SCC admits the pods and assigns an arbitrary UID in group 0; the image is built for that
   (group-writable files). Do not grant `anyuid`. The other security settings (non-root, read-only root filesystem, no
   privilege escalation, all capabilities dropped, `RuntimeDefault` seccomp) already satisfy `restricted-v2`.
-- **Route** (`route.openshift.io/v1`) for `/v1` only, edge TLS with HTTP redirected to HTTPS. An empty `route.host`
+- **Route** (`route.openshift.io/v1`) for `/v1` (plus a second Route for `/admin` when admin keys are set, see [Ops dashboard](#ops-dashboard)), edge TLS with HTTP redirected to HTTPS. An empty `route.host`
   lets the router generate a host; set it in `my-values.yaml` for your own domain.
 - **User workload monitoring:** the overlay enables a `ServiceMonitor` for the `management` port. It is scraped only
   when user workload monitoring is enabled (`enableUserWorkload: true` in the `cluster-monitoring-config` ConfigMap of
@@ -206,6 +206,14 @@ kubectl -n reliable-push rollout status deploy/rp-reliable-push --timeout=180s
   `mode: split` and `worker.strategy: Recreate` (stop all workers, then start the new ones). In combined mode, stop the
   pods first: `kubectl -n reliable-push scale deploy/rp-reliable-push --replicas=0`, wait until they are gone, then
   `helm upgrade` (it sets `api.replicas` again).
+- **V5 (ops dashboard index):** `V5__admin_index.sql` builds `notification_app_created` on `notification (app_id, created_at)`
+  online (`create index concurrently`): sends and device events keep working during the upgrade, but the build time is
+  proportional to the size of `notification` (minutes on tens of millions of rows) and the first new pod is not started
+  until it finishes, while the chart's startup probe allows 180 s (5 s x 36). On a large table build the index beforehand
+  in `psql` with the same statement, `create index concurrently if not exists notification_app_created on notification
+  (app_id, created_at);` (V5 is then a no-op), and upgrade after it completes. If a build is interrupted it leaves an invalid index:
+  drop it (`drop index concurrently notification_app_created;`), delete the failed V5 row from `flyway_schema_history` if
+  there is one, and restart.
 - Add a new app to `config.apps` on all replicas before sending its traffic (one `helm upgrade` does that).
 
 ## Graceful shutdown
@@ -233,6 +241,48 @@ The chart defaults come from the local load runs: [operations.md, "Measured capa
 (NFR-2 result, worker drain rates, how the pools relate to `max-concurrency`) and the formulas under
 [Scaling and capacity](operations.md#scaling-and-capacity). The numbers are relative to the measuring machine: confirm
 them on your cluster, and watch `rp_due_backlog` for the workers.
+
+## Ops dashboard
+
+The [ops dashboard](admin.md) is off until you set `config.admin.keys` in `my-values.yaml`. The entries are the SHA-256
+hashes of the keys, not secrets, so they go in the values file, not in the Secret ([security.md](security.md#admin-keys)).
+
+```yaml
+config:
+  admin:
+    keys:
+      - id: support
+        key-sha256: "<64 lowercase hex characters>"
+        apps: ["shop"]            # or ["*"]
+        permissions: [payload]    # optional: lets this key read the stored fallback payload
+```
+
+Nothing else changes: no new pod, port or Service. Every pod that serves the API also serves `/admin/` and `/v1/admin/`.
+
+With admin keys set, the chart routes the page too:
+
+- **Ingress:** each host also gets the path `/admin` (to the API Service), in addition to its configured `/v1` paths. A listed
+  `/admin` is not duplicated. Without admin keys the Ingress is unchanged.
+- **OpenShift Route:** a second Route, `<release>-reliable-push-admin`, with `path: /admin` and the same host, annotations and TLS
+  as the `/v1` Route. `route.host` is required when admin keys are set (the page calls `/v1/admin` on its own origin, so both
+  Routes must share one host). The two paths are fixed: you cannot route `/v1/...` sub-paths separately with the Route.
+
+`/v1` as a prefix also covers `/v1/admin`. To keep the dashboard off the public host, choose one:
+
+- **Ingress, explicit paths:** list the API paths instead of `/v1`, so `/v1/admin` is not routed, for example
+  `paths: [/v1/notifications, /v1/devices, /v1/events]`, and do not leave `/admin` to the chart: the chart still appends `/admin`
+  when keys exist, so guard it (next bullets) or give the public Ingress no admin keys by using a second release without them.
+- **Internal Ingress:** add your own Ingress for `/admin` and `/v1/admin` on an internal host or behind your SSO proxy, and
+  remove the public rule for `/admin` with a WAF or path rule at the load balancer.
+- **Allow-list:** restrict `/admin/` and `/v1/admin/` by source address with annotations in `ingress.annotations` (for example
+  `nginx.ingress.kubernetes.io/whitelist-source-range`; note that annotations apply to the whole Ingress, so this works best
+  with a second Ingress that carries only the dashboard paths), or with a NetworkPolicy or WAF in front.
+- **Route:** the two Routes cannot be narrowed by path. Use the Route annotation `haproxy.router.openshift.io/ip_whitelist` (it applies
+  to both Routes, so it would also restrict the sender API), or do not set `route.enabled` and expose the API with your own Routes.
+- **No exposure:** `kubectl -n reliable-push port-forward svc/rp-reliable-push-api 8080:80`, then open
+  `http://127.0.0.1:8080/admin/`.
+
+The admin key still protects the API when the page is reachable; without any key both paths answer `404`.
 
 ## Per-IP limits at the ingress
 

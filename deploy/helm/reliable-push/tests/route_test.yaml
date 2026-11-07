@@ -63,3 +63,56 @@ tests:
       - equal:
           path: spec.to.name
           value: rp-reliable-push-api
+  - it: renders a single /v1 Route without admin keys
+    set:
+      route.enabled: true
+    asserts:
+      - hasDocuments:
+          count: 1
+  - it: renders a second Route for /admin when admin keys are configured
+    set:
+      route.enabled: true
+      route.host: push.apps.example.com
+      config.admin.keys:
+        - id: ops
+          key-sha256: "0000000000000000000000000000000000000000000000000000000000000000"
+          apps: ["*"]
+    asserts:
+      - hasDocuments:
+          count: 2
+      - equal:
+          path: spec.path
+          value: /v1
+        documentIndex: 0
+      - equal:
+          path: metadata.name
+          value: rp-reliable-push-admin
+        documentIndex: 1
+      - equal:
+          path: spec.path
+          value: /admin
+        documentIndex: 1
+      - equal:
+          path: spec.host
+          value: push.apps.example.com
+        documentIndex: 1
+      - equal:
+          path: spec.tls
+          value:
+            termination: edge
+            insecureEdgeTerminationPolicy: Redirect
+        documentIndex: 1
+      - equal:
+          path: spec.to.name
+          value: rp-reliable-push-api
+        documentIndex: 1
+  - it: requires route.host when admin keys are configured
+    set:
+      route.enabled: true
+      config.admin.keys:
+        - id: ops
+          key-sha256: "0000000000000000000000000000000000000000000000000000000000000000"
+          apps: ["*"]
+    asserts:
+      - failedTemplate:
+          errorPattern: route.host is required

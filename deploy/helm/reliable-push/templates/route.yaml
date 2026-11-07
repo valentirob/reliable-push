@@ -26,4 +26,37 @@ spec:
     {{- toYaml . | nindent 4 }}
   {{- end }}
   wildcardPolicy: None
+{{- /* With admin keys, a second Route serves the ops dashboard page on the same host and TLS (the page calls /v1/admin on its own origin, so route.host is required). */}}
+{{- if dig "admin" "keys" (list) .Values.config }}
+{{- if not .Values.route.host }}
+{{- fail "route.host is required when config.admin.keys is set: the /admin Route and the /v1 Route must share one host" }}
+{{- end }}
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: {{ include "rp.fullname" . }}-admin
+  labels:
+    {{- include "rp.labels" . | nindent 4 }}
+  {{- with .Values.route.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.route.host }}
+  host: {{ . | quote }}
+  {{- end }}
+  path: /admin
+  to:
+    kind: Service
+    name: {{ include "rp.fullname" . }}-api
+    weight: 100
+  port:
+    targetPort: http
+  {{- with .Values.route.tls }}
+  tls:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  wildcardPolicy: None
+{{- end }}
 {{- end }}

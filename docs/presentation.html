@@ -474,7 +474,7 @@ X-RP-Signature: v1=…   Idempotency-Key: 6f1c…
         <div class="down">↓</div>
         <div class="row">🧱 Filters: trace id · access log · 64 KB limit · auth · rate limit</div>
         <div class="down">↓</div>
-        <div class="row side">🧩 Modules: <b>notifications</b> · <b>devices</b> · <b>tracking</b> · <b>apps</b></div>
+        <div class="row side">🧩 Modules: <b>notifications</b> · <b>devices</b> · <b>tracking</b> · <b>apps</b> · <b>admin</b></div>
         <div class="down">↓</div>
         <div class="row side">🗄️ PostgreSQL (plain SQL, Flyway migrations)</div>
         <div class="down">↑</div>
@@ -484,6 +484,30 @@ X-RP-Signature: v1=…   Idempotency-Key: 6f1c…
         <div class="card side"><h3>Scales out safely</h3><p class="small">Run any number of API and worker replicas. Workers claim rows with <code>FOR NO KEY UPDATE SKIP LOCKED</code>, so no fallback is sent twice by two replicas.</p></div>
         <div class="card"><h3>Crash-safe</h3><p class="small">Each claim has a lease. If a worker dies, another one re-claims the row. Outcomes are fenced on the lease, and receivers de-duplicate on <code>Idempotency-Key</code>.</p></div>
         <div class="card"><h3>Lightweight</h3><p class="small">Java 21, Spring Boot 4, no ORM, no Spring Security. The image is about 105 MB, non-root, with a read-only filesystem.</p></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 9b -->
+<section class="slide" data-title="Ops dashboard">
+  <p class="kicker">Component detail</p>
+  <h2>Ops dashboard: see what happened</h2>
+  <div class="grow">
+    <div class="cols c2">
+      <div class="vflow">
+        <div class="row main">🌐 Browser: <code>/admin/</code> page, admin key kept in the tab only</div>
+        <div class="down">↓</div>
+        <div class="row side">🔒 <code>/v1/admin</code> API: <code>X-Admin-Key</code>, read-only, audit-logged</div>
+        <div class="down">↓</div>
+        <div class="row side">🗄️ PostgreSQL: <code>notification</code> · <code>fallback_attempt</code> · <code>daily_stats</code></div>
+        <div class="down">↑</div>
+        <div class="row" style="border-color:var(--fall);background:var(--fall-soft)">⚙️ Worker: writes each webhook attempt, nightly rollup</div>
+      </div>
+      <div class="cols">
+        <div class="card side"><h3>Three questions</h3><p class="small">Support: did user X get notification Y, and did the fallback fire? Ops: delivery, read and fallback rates, and the due backlog now. Product: daily trends for up to 400 days.</p></div>
+        <div class="card"><h3>Views</h3><p class="small">Overview · Trends · Search by user, external id, tracking id, state and time · Notification timeline with events and webhook attempts · Devices.</p></div>
+        <div class="card"><h3>Safe by default</h3><p class="small">Off until an admin key is configured. Keys are stored hashed and scoped to apps. The fallback payload needs the <code>payload</code> permission. No script from outside, no write actions.</p></div>
       </div>
     </div>
   </div>
@@ -703,7 +727,7 @@ answer 2xx</code></pre>
   <p class="kicker">Where we are</p>
   <h2>Status and what comes next</h2>
   <div class="grow">
-    <div class="cols c2">
+    <div class="cols c3">
       <div class="card ok">
         <h3>Released: v0.1.2 (2026-11-06)</h3>
         <ul class="clean small">
@@ -712,6 +736,14 @@ answer 2xx</code></pre>
           <li>Android SDK and iOS SDK</li>
           <li>CI green: build, tests, CodeQL (Java/Kotlin, Swift)</li>
           <li>0.1.2: iOS burst flush fix, harness device proxy on loopback</li>
+        </ul>
+      </div>
+      <div class="card side">
+        <h3>On develop: 0.2.0 in progress</h3>
+        <ul class="clean small">
+          <li>Ops dashboard: <code>/admin/</code> page and read-only admin API</li>
+          <li>Per-attempt webhook history and daily rollups</li>
+          <li>E2E 18/18 with the new <code>admin-dashboard</code> scenario</li>
         </ul>
       </div>
       <div class="card fall">

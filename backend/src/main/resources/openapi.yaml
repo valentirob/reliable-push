@@ -17,6 +17,8 @@ tags:
     description: Device registration and device tokens
   - name: events
     description: Delivery and read events reported by devices
+  - name: admin
+    description: Read-only ops dashboard API (header `X-Admin-Key`)
 
 paths:
   /v1/notifications:
@@ -298,6 +300,311 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
+  /v1/admin/me:
+    get:
+      tags: [admin]
+      operationId: adminMe
+      summary: The scope of the calling admin key
+      description: |
+        Read-only ops dashboard API. Disabled (`404` everywhere under `/v1/admin`) unless admin keys are configured.
+        Every response carries `Cache-Control: no-store`.
+      security:
+        - AdminKey: []
+      responses:
+        '200':
+          description: The key id, the apps it may see (sorted) and its permissions.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminMe'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+
+  /v1/admin/overview:
+    get:
+      tags: [admin]
+      operationId: adminOverview
+      summary: Counts, rates and the current backlog, per app
+      description: |
+        One entry per app (sorted by id): every visible app, or the one named by `app` (which must be visible,
+        otherwise `404`). The counts cover the notifications created in the last `window`. A rate is
+        `count / (registered - cancelled)` and `null` when that denominator is zero. `now` is the current state,
+        independent of the window: `pending` = `PENDING`/`DELIVERED` rows not yet due, `dueUnclaimed` = such rows
+        already due and not yet claimed by a worker, `dispatching` = rows with a fallback call in flight or waiting for
+        a retry, `oldestDueAgeSeconds` = age of the oldest `dueUnclaimed` row (`null` when there is none).
+      security:
+        - AdminKey: []
+      parameters:
+        - name: app
+          in: query
+          schema:
+            type: string
+        - name: window
+          in: query
+          schema:
+            type: string
+            enum: [1h, 24h, 7d]
+            default: 24h
+      responses:
+        '200':
+          description: The overview of each app.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminOverviews'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /v1/admin/stats/daily:
+    get:
+      tags: [admin]
+      operationId: adminDailyStats
+      summary: Daily counts and rates of one app
+      description: |
+        One entry per UTC day of `[from, to)` (dates; default: the last 30 days up to and including today; span at
+        most 400 days), oldest first. Days older than the rollup window (7 days, fewer when `retention-days` is smaller)
+        come from the stored nightly rollups (`live` false); the window days and today are computed from the
+        notifications now (`live` true, still changing). A day without a stored rollup is omitted. Rates are as in
+        `/v1/admin/overview`.
+      security:
+        - AdminKey: []
+      parameters:
+        - name: app
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: The days of the app.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminDailyStats'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /v1/admin/notifications:
+    get:
+      tags: [admin]
+      operationId: adminSearchNotifications
+      summary: Search the notifications of one app, newest first
+      description: |
+        `app` is required and must be an app the key may see (otherwise `404`, like an unknown app). Filters combine
+        with AND; the time range is half-open `[from, to)` on `createdAt` and `from` must be before `to`. Page with
+        `nextCursor` (the cursor format of the sender list). Each search is audited (`admin.search`, filter names only).
+      security:
+        - AdminKey: []
+      parameters:
+        - name: app
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: userId
+          in: query
+          schema:
+            type: string
+            minLength: 1
+        - name: externalId
+          in: query
+          schema:
+            type: string
+            minLength: 1
+        - name: state
+          in: query
+          schema:
+            $ref: '#/components/schemas/NotificationState'
+        - name: from
+          in: query
+          description: Only notifications created at or after this instant.
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          description: Only notifications created before this instant.
+          schema:
+            type: string
+            format: date-time
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+        - name: cursor
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: A page of notifications.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminNotificationPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /v1/admin/notifications/{trackingId}:
+    parameters:
+      - name: trackingId
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      tags: [admin]
+      operationId: adminNotificationDetail
+      summary: One notification with its events and fallback attempts
+      description: |
+        `404` for an unknown, malformed or not visible id (same body). The payload itself is not part of this
+        response, only its size. Audited (`admin.notification_viewed`).
+      security:
+        - AdminKey: []
+      responses:
+        '200':
+          description: The notification, its events and attempts.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminNotificationDetail'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /v1/admin/notifications/{trackingId}/payload:
+    parameters:
+      - name: trackingId
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      tags: [admin]
+      operationId: adminNotificationPayload
+      summary: The stored fallback payload
+      description: |
+        Needs the `payload` permission; without it, and for an unknown, malformed or not visible id, `404` with the
+        same body. Audited (`admin.payload_viewed`); the payload is never logged.
+      security:
+        - AdminKey: []
+      responses:
+        '200':
+          description: The fallback payload exactly as stored.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /v1/admin/devices:
+    get:
+      tags: [admin]
+      operationId: adminDevices
+      summary: The devices of one user, newest first (at most 50)
+      description: Audited (`admin.devices_viewed`, with `rp.user_hash`); the user id is never logged.
+      security:
+        - AdminKey: []
+      parameters:
+        - name: app
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: userId
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 1
+      responses:
+        '200':
+          description: The devices, revoked ones included.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminDevices'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+
 components:
   securitySchemes:
     SenderApiKey:
@@ -305,6 +612,11 @@ components:
       in: header
       name: X-Api-Key
       description: Per-app sender API key (stored hashed on the server).
+    AdminKey:
+      type: apiKey
+      in: header
+      name: X-Admin-Key
+      description: Admin key of the read-only ops dashboard (stored hashed on the server).
     DeviceToken:
       type: http
       scheme: bearer
@@ -322,6 +634,319 @@ components:
         format: uuid
 
   schemas:
+    AdminNotificationItem:
+      type: object
+      required: [trackingId, externalId, userId, state, policy, createdAt, deliveredAt, readAt, closedAt, fallbackAttempts]
+      properties:
+        trackingId:
+          type: string
+          format: uuid
+        externalId:
+          type: string
+          nullable: true
+        userId:
+          type: string
+        state:
+          $ref: '#/components/schemas/NotificationState'
+        policy:
+          $ref: '#/components/schemas/FallbackPolicy'
+        createdAt:
+          type: string
+          format: date-time
+        deliveredAt:
+          type: string
+          format: date-time
+          nullable: true
+        readAt:
+          type: string
+          format: date-time
+          nullable: true
+        closedAt:
+          type: string
+          format: date-time
+          nullable: true
+        fallbackAttempts:
+          type: integer
+
+    AdminNotificationPage:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminNotificationItem'
+        nextCursor:
+          type: string
+          nullable: true
+
+    AdminNotificationDetailFields:
+      type: object
+      required: [trackingId, externalId, userId, state, policy, createdAt, deliveredAt, readAt, closedAt, fallbackAttempts, timeoutMinutes, dueAt]
+      description: The list fields plus `timeoutMinutes` and `dueAt`.
+      properties:
+        trackingId:
+          type: string
+          format: uuid
+        externalId:
+          type: string
+          nullable: true
+        userId:
+          type: string
+        state:
+          $ref: '#/components/schemas/NotificationState'
+        policy:
+          $ref: '#/components/schemas/FallbackPolicy'
+        createdAt:
+          type: string
+          format: date-time
+        deliveredAt:
+          type: string
+          format: date-time
+          nullable: true
+        readAt:
+          type: string
+          format: date-time
+          nullable: true
+        closedAt:
+          type: string
+          format: date-time
+          nullable: true
+        fallbackAttempts:
+          type: integer
+        timeoutMinutes:
+          type: integer
+        dueAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    AdminEvent:
+      type: object
+      required: [type, occurredAt, receivedAt, late, deviceId, platform]
+      properties:
+        type:
+          $ref: '#/components/schemas/EventType'
+        occurredAt:
+          type: string
+          format: date-time
+        receivedAt:
+          type: string
+          format: date-time
+        late:
+          type: boolean
+        deviceId:
+          type: string
+          format: uuid
+          nullable: true
+          description: "`null` once the device was purged."
+        platform:
+          type: string
+          enum: [IOS, ANDROID]
+          nullable: true
+          description: "`null` once the device was purged."
+
+    AdminAttempt:
+      type: object
+      required: [attempt, startedAt, durationMs, outcome, httpStatus, reason]
+      properties:
+        attempt:
+          type: integer
+        startedAt:
+          type: string
+          format: date-time
+        durationMs:
+          type: integer
+          format: int64
+        outcome:
+          type: string
+          enum: [SUCCESS, RETRYABLE, FINAL]
+        httpStatus:
+          type: integer
+          nullable: true
+        reason:
+          type: string
+          nullable: true
+          description: Short code (`http_503`, `timeout`, ...), never a response body.
+
+    AdminNotificationDetail:
+      type: object
+      required: [notification, events, attempts, payloadBytes]
+      properties:
+        notification:
+          $ref: '#/components/schemas/AdminNotificationDetailFields'
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminEvent'
+        attempts:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminAttempt'
+        payloadBytes:
+          type: integer
+          description: Size of the stored fallback payload as JSON text, in bytes.
+
+    AdminDevice:
+      type: object
+      required: [deviceId, platform, createdAt, lastSeenAt, revokedAt]
+      properties:
+        deviceId:
+          type: string
+          format: uuid
+        platform:
+          type: string
+          enum: [IOS, ANDROID]
+        createdAt:
+          type: string
+          format: date-time
+        lastSeenAt:
+          type: string
+          format: date-time
+        revokedAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    AdminDevices:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminDevice'
+
+    AdminDailyStats:
+      type: object
+      required: [appId, days]
+      properties:
+        appId:
+          type: string
+        days:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminDailyDay'
+
+    AdminDailyDay:
+      type: object
+      required: [day, registered, cancelled, delivered, read, deliveredIos, deliveredAndroid, fallbackTriggered,
+                 fallbackFailed, fallbackExpired, deliveryP50Ms, deliveryP95Ms, deliveryRate, readRate, fallbackRate,
+                 live]
+      properties:
+        day:
+          type: string
+          format: date
+        registered:
+          type: integer
+        cancelled:
+          type: integer
+        delivered:
+          type: integer
+        read:
+          type: integer
+        deliveredIos:
+          type: integer
+        deliveredAndroid:
+          type: integer
+        fallbackTriggered:
+          type: integer
+        fallbackFailed:
+          type: integer
+        fallbackExpired:
+          type: integer
+        deliveryP50Ms:
+          type: integer
+          format: int64
+          nullable: true
+        deliveryP95Ms:
+          type: integer
+          format: int64
+          nullable: true
+        deliveryRate:
+          type: number
+          nullable: true
+        readRate:
+          type: number
+          nullable: true
+        fallbackRate:
+          type: number
+          nullable: true
+        live:
+          type: boolean
+
+    AdminOverviews:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminOverview'
+
+    AdminOverview:
+      type: object
+      required: [appId, window, registered, cancelled, delivered, read, fallbackTriggered, fallbackFailed,
+                 fallbackExpired, deliveryRate, readRate, fallbackRate, now]
+      properties:
+        appId:
+          type: string
+        window:
+          type: string
+          enum: [1h, 24h, 7d]
+        registered:
+          type: integer
+        cancelled:
+          type: integer
+        delivered:
+          type: integer
+        read:
+          type: integer
+        fallbackTriggered:
+          type: integer
+        fallbackFailed:
+          type: integer
+        fallbackExpired:
+          type: integer
+        deliveryRate:
+          type: number
+          nullable: true
+        readRate:
+          type: number
+          nullable: true
+        fallbackRate:
+          type: number
+          nullable: true
+        now:
+          type: object
+          required: [pending, dueUnclaimed, dispatching, oldestDueAgeSeconds]
+          properties:
+            pending:
+              type: integer
+            dueUnclaimed:
+              type: integer
+            dispatching:
+              type: integer
+            oldestDueAgeSeconds:
+              type: integer
+              format: int64
+              nullable: true
+
+    AdminMe:
+      type: object
+      required: [keyId, apps, permissions]
+      properties:
+        keyId:
+          type: string
+        apps:
+          type: array
+          items:
+            type: string
+        permissions:
+          type: array
+          items:
+            type: string
+            enum: [payload]
     FallbackPolicy:
       type: string
       description: |
@@ -549,7 +1174,9 @@ components:
 
   responses:
     BadRequest:
-      description: The body is not readable JSON (malformed, wrong types, unknown enum value).
+      description: |
+        The body is not readable JSON (malformed, wrong types, unknown enum value), or (admin API) a query parameter
+        is missing or malformed: `errors` names the field.
       content:
         application/problem+json:
           schema:
@@ -591,6 +1218,12 @@ components:
           description: Seconds until a request is allowed again.
           schema:
             type: integer
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    MethodNotAllowed:
+      description: The method is not supported on this path.
       content:
         application/problem+json:
           schema:

@@ -130,6 +130,13 @@
     <text x="780" y="728" font-size="14" font-weight="600" fill="#0f172a" text-anchor="middle">PostgreSQL</text>
   </g>
 
+  <!-- Dashboard /admin (read-only ops page and API) -->
+  <line x1="860" y1="717" x2="876" y2="717" stroke="#0d9488" stroke-width="2"/>
+  <rect x="876" y="686" width="102" height="62" rx="10" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>
+  <text x="927" y="708" font-size="13.5" font-weight="700" fill="#115e59" text-anchor="middle">Dashboard</text>
+  <text x="927" y="726" font-size="12.5" font-weight="600" fill="#0f766e" text-anchor="middle">/admin</text>
+  <text x="927" y="742" font-size="11.5" fill="#475569" text-anchor="middle">read-only</text>
+
   <!-- ⑤ reliable-push → fallback service -->
   <line x1="560" y1="640" x2="386" y2="640" stroke="#dc2626" stroke-width="4" marker-end="url(#m-fall)"/>
   <text x="473" y="626" font-size="15" font-weight="700" fill="#991b1b" text-anchor="middle">⑤ webhook</text>

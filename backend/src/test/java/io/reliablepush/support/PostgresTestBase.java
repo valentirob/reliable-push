@@ -22,6 +22,8 @@ public abstract class PostgresTestBase {
     static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:16-alpine");
 
     static {
+        // every distinct Spring context (profile / property combination) keeps its own connection pool for the whole JVM
+        POSTGRES.withCommand("postgres", "-c", "max_connections=300");
         POSTGRES.start();
     }
 
