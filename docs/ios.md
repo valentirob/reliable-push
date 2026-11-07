@@ -10,7 +10,8 @@ Your backend registers each notification with reliable-push and puts the returne
 `rp_tid`: see [integration-guide.md](integration-guide.md) §1 and §2. This page is the app side.
 
 **A sidecar inside your app.** The SDK only observes your pushes:
-- `ReliablePushExtension.didReceive` returns `false` for a notification without `rp_tid` and leaves it to your code.
+- `ReliablePushExtension.didReceive` returns `false` for a notification without `rp_tid` and leaves it to your code;
+  for such a notification it reads nothing, not even the stored configuration.
 - For a tracked notification it always calls the content handler, exactly once, at most `extensionSendTimeout` after
   the push (5 s by default).
 
@@ -140,7 +141,9 @@ final class NotificationService: UNNotificationServiceExtension {
   it reads the notification settings and writes the queue on the calling thread (briefly; the settings read is capped
   at 2 s), and the content handler it takes is the system's plain, non-`Sendable` closure.
 - It returns `false`, without touching the handler, when the request has no valid `rp_tid` (a malformed one is logged
-  as WARN), so your extension can handle its own pushes. Otherwise it returns `true` and calls the handler **exactly
+  as WARN), so your extension can handle its own pushes. The stored configuration (App Group, Keychain) is read only
+  after that check, so your own pushes cost nothing and a misconfigured App Group logs `sdk.app_group_unavailable` only
+  for tracked ones. Otherwise it returns `true` and calls the handler **exactly
   once**: after the send, after `ReliablePushOptions.extensionSendTimeout` (default 5 s, clamped to 0...25), or at
   `serviceExtensionTimeWillExpire`, whichever comes first.
 - `DELIVERED` is recorded only when the device is registered and the notification will actually be shown (alerts

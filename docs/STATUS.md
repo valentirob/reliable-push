@@ -8,6 +8,20 @@ Everything left after `v0.1.0` is in [TODO.md](TODO.md): each item says why it i
 unblocks it. Agents: remind the maintainer of its section 1 (real APNs and the locked-device check, real FCM, Maven
 Central) at the start of a session.
 
+## 2026-11-07 (15) — Claude Code — iOS extension reads nothing for untracked pushes
+
+- **Done:** review of how both SDKs treat a push without `rp_tid`: iOS `ReliablePushExtension.didReceive` and
+  `trackOpen`, Android `ReliablePush.handle` and `trackOpen` all check `rp_tid` first and return `false` / do nothing,
+  and the SDK declares no `FirebaseMessagingService`. One gap fixed (`bugfix/ios-extension-lazy-config`): the iOS
+  extension resolved the stored configuration in its initializer, so every push (the host's own too) opened the App
+  Group and could log `sdk.app_group_unavailable`; it now resolves it in `didReceive` after the `rp_tid` check. Tests
+  added (no read for foreign or malformed pushes, one read for tracked ones, configuration stored after creation is
+  used) and fail on the old code. `docs/ios.md`, overview §8 diagram (no-`rp_tid` edge) and CHANGELOG updated;
+  presentation and at-a-glance picture already say untracked pushes are left alone.
+- **State:** iOS package tests 115 run, 1 skipped, 0 failures; size gate 291,928 bytes (limit 307,200);
+  `./scripts/ios-e2e.sh` `iOS E2E: 8/8 passed, 1 skipped`.
+- **Next:** release 0.2.0 when the maintainer decides; TODO section 1.
+
 ## 2026-11-07 (14) — Claude Code — ops dashboard doc gaps closed
 
 - **Done:** the four docs-only items of entry 13 (`bugfix/ops-dashboard-doc-gaps`, merged into `develop`):

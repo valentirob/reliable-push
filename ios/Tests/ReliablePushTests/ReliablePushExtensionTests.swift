@@ -82,7 +82,56 @@ final class ReliablePushExtensionTests: XCTestCase {
         XCTAssertFalse(makeExtension().didReceive(request([:]), withContentHandler: h.handler))
         wait(for: [h.called], timeout: 0.3)
         XCTAssertEqual(h.count, 0)
+        XCTAssertEqual(fx.queue.count, 0)
         XCTAssertTrue(StubURLProtocol.requests.isEmpty)
+    }
+
+    func testNotOursAndMalformedNeverReadTheStoredConfiguration() {
+        let reads = Locked(0)
+        let env = fx.environment
+        let resolve: @Sendable () -> SDKEnvironment? = {
+            reads.withLock { $0 += 1 }
+            return env
+        }
+        let h = recorder(inverted: true)
+        XCTAssertFalse(ReliablePushExtension(resolve: resolve, options: .init())
+            .didReceive(request(["aps": ["alert": "x"]]), withContentHandler: h.handler))
+        XCTAssertFalse(ReliablePushExtension(resolve: resolve, options: .init())
+            .didReceive(request(["rp_tid": "not-a-uuid"]), withContentHandler: h.handler))
+        wait(for: [h.called], timeout: 0.3)
+        XCTAssertEqual(reads.withLock { $0 }, 0)
+        XCTAssertEqual(fx.queue.count, 0)
+        XCTAssertTrue(StubURLProtocol.requests.isEmpty)
+    }
+
+    func testOursReadsTheStoredConfigurationOnceAndUnavailableGroupPassesThrough() {
+        let reads = Locked(0)
+        let resolve: @Sendable () -> SDKEnvironment? = {
+            reads.withLock { $0 += 1 }
+            return nil // App Group unavailable
+        }
+        let h = recorder()
+        XCTAssertTrue(ReliablePushExtension(resolve: resolve, options: .init())
+            .didReceive(request(["rp_tid": UUID().uuidString]), withContentHandler: h.handler))
+        wait(for: [h.called], timeout: 5)
+        XCTAssertEqual(reads.withLock { $0 }, 1)
+        XCTAssertEqual(h.contents.first?.title, "Original title")
+        XCTAssertEqual(fx.queue.count, 0)
+        XCTAssertTrue(fx.warned("tracking.not_registered"))
+    }
+
+    func testConfigurationStoredAfterTheExtensionIsCreatedIsUsed() {
+        fx.state.config = nil
+        let ext = makeExtension()
+        fx.storeConfig()
+        StubURLProtocol.reset { SDKFixture.acceptAll($0) }
+        let tid = UUID().uuidString
+        let h = recorder()
+        XCTAssertTrue(ext.didReceive(request(["rp_tid": tid]), withContentHandler: h.handler))
+        wait(for: [h.called], timeout: 5)
+        XCTAssertFalse(fx.warned("tracking.not_registered"))
+        XCTAssertEqual(SDKFixture.sentEvents(), ["\(tid)|DELIVERED"])
+        waitForFlushEnd()
     }
 
     func testMalformedRpTidReturnsFalseWithWarn() {
