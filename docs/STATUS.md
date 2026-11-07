@@ -8,6 +8,20 @@ Everything left after `v0.1.0` is in [TODO.md](TODO.md): each item says why it i
 unblocks it. Agents: remind the maintainer of its section 1 (real APNs and the locked-device check, real FCM, Maven
 Central) at the start of a session.
 
+## 2026-11-07 (13) — Claude Code — cycle 4 merged into `develop`
+
+- **Done:** `feature/ops-dashboard` merged into `develop` (`--no-ff`) after the full check: backend `verify -Pimage`, root
+  reactor `verify`, Helm `validate.sh`, `./scripts/e2e.sh` `E2E: 18/18 passed`, `./scripts/ios-e2e.sh`
+  `iOS E2E: 8/8 passed, 1 skipped`. CI on `develop` first failed in `AdminSearchIT` (a seeded `PENDING` row due in
+  March 2026 was claimed by a running worker, so it read back as `FALLBACK_PENDING`); fixed by seeding open rows due in
+  2999 (`bugfix/admin-search-it-claimable-rows`). CI green after it.
+- **Not verified:** the signed-in dashboard views were not looked at by a person (only the Playwright smoke covers them);
+  `scripts/e2e.ps1` was never run (no Windows machine).
+- **Open (docs only):** `architecture.md` diagram label still says Flyway V1..V4; `deployment.md` lacks the
+  `indisvalid` check for an invalid `notification_app_created` left by a cancelled build; spec §2 does not list the
+  reserved id `false`; no note on the combined-mode shared pool for the retention wait or on PgBouncer transaction mode.
+- **Next:** release 0.2.0 when the maintainer decides; the docs-only items above.
+
 ## 2026-11-07 (12) — Claude Code — cycle 4: final-review fix wave (on `feature/ops-dashboard`)
 
 - **Done:** the findings of the final whole-branch review, each test-first:
