@@ -36,6 +36,11 @@ class AdminSearchIT extends PostgresTestBase {
     private static final String ALL_KEY = "test-admin-key-all";
     private static final String PAYLOAD_JSON = "{\"sms\":\"code 123456\"}";
     private static final Instant BASE = Instant.parse("2026-03-01T10:00:00Z");
+    /**
+     * Due time of every open row: far in the future, so no worker (this context runs one, and cached contexts of other
+     * ITs keep theirs) ever claims a seeded PENDING row and turns it into FALLBACK_PENDING mid-test.
+     */
+    private static final Instant NEVER_DUE = Instant.parse("2999-01-01T00:00:00Z");
 
     @Autowired
     JdbcClient jdbc;
@@ -84,7 +89,7 @@ class AdminSearchIT extends PostgresTestBase {
                 .param("payload", PAYLOAD_JSON)
                 .param("state", state)
                 .param("created", Timestamp.from(createdAt))
-                .param("due", closed ? null : Timestamp.from(createdAt.plusSeconds(300)))
+                .param("due", closed ? null : Timestamp.from(NEVER_DUE))
                 .param("closed", closed ? Timestamp.from(createdAt.plusSeconds(400)) : null)
                 .update();
         return id;
