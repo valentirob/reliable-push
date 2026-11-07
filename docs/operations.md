@@ -234,7 +234,9 @@ is enabled and `admin.rollup.cron` is not `-`, `RetentionJob` first waits for a 
 rollup's advisory lock with `lock_timeout = 30min`, because the rollup's rows become visible only when it commits), then
 requires a `daily_stats` row computed in the last 20 hours. Otherwise it deletes nothing and logs WARN `retention.skipped`
 with `reason=rollup_missing` (no fresh row) or `reason=rollup_running` (the rollup still held the lock after 30 minutes),
-and the next night retries both. The wait holds one database connection of the worker for its duration. A rollup that
+and the next night retries both. The wait holds one database connection of the worker for its duration, next to the one the
+running rollup holds; in combined mode both come from the pool the API shares, so size `maximum-pool-size` with two
+connections of headroom for that window. A rollup that
 regularly takes longer than about 40 minutes (10 minutes to 03:17 plus the 30-minute wait) skips retention every night:
 move `reliable-push.retention.cron` later. With
 admin disabled, or the rollup schedule `-`, retention behaves as before.

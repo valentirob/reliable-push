@@ -8,6 +8,17 @@ Everything left after `v0.1.0` is in [TODO.md](TODO.md): each item says why it i
 unblocks it. Agents: remind the maintainer of its section 1 (real APNs and the locked-device check, real FCM, Maven
 Central) at the start of a session.
 
+## 2026-11-07 (14) — Claude Code — ops dashboard doc gaps closed
+
+- **Done:** the four docs-only items of entry 13 (`bugfix/ops-dashboard-doc-gaps`, merged into `develop`):
+  `architecture.md` diagram says Flyway V1..V5; `deployment.md` has the `indisvalid` check and the failed-row delete for
+  an interrupted `V5` build, and a "Connection poolers" note (direct or session mode; PgBouncer transaction pooling not
+  supported because Flyway's migration lock is session-level); spec §2 lists the reserved id `false`; `operations.md`
+  notes the two connections the rollup and the retention wait hold, from the shared pool in combined mode.
+- **State:** docs only, no code or diagram change (overview, at-a-glance picture and presentation unaffected).
+- **Next:** release 0.2.0 when the maintainer decides; TODO section 1 (real APNs and the locked-device check, real FCM,
+  Maven Central).
+
 ## 2026-11-07 (13) — Claude Code — cycle 4 merged into `develop`
 
 - **Done:** `feature/ops-dashboard` merged into `develop` (`--no-ff`) after the full check: backend `verify -Pimage`, root
@@ -20,7 +31,7 @@ Central) at the start of a session.
 - **Open (docs only):** `architecture.md` diagram label still says Flyway V1..V4; `deployment.md` lacks the
   `indisvalid` check for an invalid `notification_app_created` left by a cancelled build; spec §2 does not list the
   reserved id `false`; no note on the combined-mode shared pool for the retention wait or on PgBouncer transaction mode.
-- **Next:** release 0.2.0 when the maintainer decides; the docs-only items above.
+- **Next:** release 0.2.0 when the maintainer decides; the docs-only items above (closed in entry 14).
 
 ## 2026-11-07 (12) — Claude Code — cycle 4: final-review fix wave (on `feature/ops-dashboard`)
 

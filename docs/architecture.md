@@ -23,7 +23,7 @@ flowchart LR
   SB["Sender backend"] -- "POST /v1/notifications<br/>(X-Api-Key)" --> API["api"]
   SDK["Device SDK"] -- "POST /v1/devices<br/>(OIDC ID token)" --> API
   SDK -- "POST /v1/events<br/>(device JWT)" --> API
-  API --> DB[("PostgreSQL<br/>Flyway V1..V4 at startup")]
+  API --> DB[("PostgreSQL<br/>Flyway V1..V5 at startup")]
   WRK["worker"] --> DB
   WRK -- "signed POST" --> FW["Fallback webhook"]
 ```
