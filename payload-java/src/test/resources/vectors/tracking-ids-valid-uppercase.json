@@ -1,6 +1,6 @@
 {
   "name": "tracking-ids-valid-uppercase",
-  "description": "any case, any version",
+  "description": "any case, any version, is valid; the payload builders embed it lower-cased (see the *-uppercase-tracking-id vectors), the form the backend and the SDKs use",
   "operation": "trackingIds.isValid",
   "input": {
     "id": "6F1C2B9E-5D1A-4C55-9A38-0C1F3A7D9E11"

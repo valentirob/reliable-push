@@ -20,7 +20,8 @@ One JSON file per case, named `<name>.json`:
 
 `expect` is either `{"output": <JSON value>}` or `{"error": "<CODE>"}`. For an error, the operation must fail with
 exactly that code (the `PayloadException.Code` names: `INVALID_TRACKING_ID`, `RESERVED_KEY`, `APNS_NO_ALERT`,
-`APNS_TOO_LARGE`, `FCM_NON_STRING_DATA`, `FCM_UNSUPPORTED_NOTIFICATION_FIELD`, `FCM_TOO_LARGE`, `INVALID_JSON`).
+`APNS_TOO_LARGE`, `FCM_NON_STRING_DATA`, `FCM_UNSUPPORTED_NOTIFICATION_FIELD`, `FCM_NO_NOTIFICATION`, `FCM_TOO_LARGE`,
+`INVALID_JSON`).
 
 ## Operations
 
@@ -43,5 +44,9 @@ non-ASCII, is written as UTF-8. Sizes are measured in UTF-8 bytes of the produce
 bytes is `APNS_TOO_LARGE`; for FCM, the compact JSON of the `data` map above 4,096 bytes is `FCM_TOO_LARGE`.
 
 When several rules fail at once, the first of this order wins: `INVALID_TRACKING_ID`, `INVALID_JSON`, then the
-content rules (`RESERVED_KEY`, `APNS_NO_ALERT`, `FCM_UNSUPPORTED_NOTIFICATION_FIELD`, `FCM_NON_STRING_DATA`), then
-the size rule.
+content rules (`RESERVED_KEY`, `APNS_NO_ALERT`, `FCM_UNSUPPORTED_NOTIFICATION_FIELD`, `FCM_NON_STRING_DATA`,
+`FCM_NO_NOTIFICATION`), then the size rule.
+
+A tracking id is valid in any case, and every operation embeds it **lower-cased** (`*-uppercase-tracking-id`
+vectors). An FCM message needs a non-empty `title` or `body` (`FCM_NO_NOTIFICATION`): the SDK shows every tracked
+message, so a silent data-only message stays untracked.

@@ -1,8 +1,13 @@
 package io.reliablepush.payload;
 
+import java.util.Locale;
 import java.util.UUID;
 
-/** Tracking ids: random UUID v4 strings, the value of {@code rp_tid} and the {@code trackingId} of the sender API. */
+/**
+ * Tracking ids: random UUID v4 strings, the value of {@code rp_tid} and the {@code trackingId} of the sender API.
+ * Any case is valid; the payload builders embed the id lower-cased, the form the backend stores and echoes and the
+ * SDKs match on.
+ */
 public final class TrackingIds {
 
     private static final int LENGTH = 36;
@@ -34,5 +39,13 @@ public final class TrackingIds {
             }
         }
         return true;
+    }
+
+    /** The valid id in lower case (how the payloads embed it), or {@code INVALID_TRACKING_ID}. */
+    static String require(String id) {
+        if (!isValid(id)) {
+            throw new PayloadException(PayloadException.Code.INVALID_TRACKING_ID, "trackingId must be a UUID");
+        }
+        return id.toLowerCase(Locale.ROOT);
     }
 }

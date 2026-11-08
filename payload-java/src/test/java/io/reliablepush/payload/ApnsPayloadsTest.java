@@ -62,6 +62,14 @@ class ApnsPayloadsTest {
     }
 
     @Test
+    void upperCaseTrackingIdIsEmbeddedInLowerCase() {
+        String upper = TID.toUpperCase(java.util.Locale.ROOT);
+        assertThat(ApnsPayloads.build(upper, "T", "B", null)).contains("\"rp_tid\":\"" + TID + "\"");
+        assertThat(ApnsPayloads.decorate("{\"aps\":{\"alert\":\"x\"}}", upper)).contains("\"rp_tid\":\"" + TID + "\"");
+        assertThat(ApnsPayloads.decorate(TestMaps.map("aps", TestMaps.map("alert", "x")), upper)).containsEntry("rp_tid", TID);
+    }
+
+    @Test
     void buildRejectsInvalidTrackingId() {
         assertCode(() -> ApnsPayloads.build("nope", "T", "B", null), Code.INVALID_TRACKING_ID);
         assertCode(() -> ApnsPayloads.build(null, "T", "B", null), Code.INVALID_TRACKING_ID);

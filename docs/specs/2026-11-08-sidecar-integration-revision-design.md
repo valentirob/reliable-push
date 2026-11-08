@@ -221,6 +221,7 @@ If `deliver` is not called within 30 s, the run ends `NotLoggedIn`. `callback` r
 ```java
 public final class TrackingIds {
     public static String newId();                                  // random UUID v4, lower-case
+    // any case is valid; every builder embeds rp_tid lower-cased (the backend's and the SDKs' form)
     public static boolean isValid(String id);
 }
 
@@ -260,6 +261,7 @@ for Java 8). Output is compact JSON, keys in input order, with reliable-push key
 | `APNS_TOO_LARGE` | result above 4,096 bytes |
 | `FCM_NON_STRING_DATA` | a data value is not a string |
 | `FCM_UNSUPPORTED_NOTIFICATION_FIELD` | `decorate`: `notification` or `android.notification` holds a field other than `title` and `body` (image, channel, click action...); the message lists the fields |
+| `FCM_NO_NOTIFICATION` | no visible title or body (both null or empty, for example a silent data-only message): it stays untracked, never becomes a blank notification (final review, 2026-11-08) |
 | `FCM_TOO_LARGE` | result above FCM's 4,096-byte data limit |
 | `INVALID_JSON` | `decorate`: input is not a JSON object |
 

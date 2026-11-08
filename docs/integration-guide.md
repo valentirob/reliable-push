@@ -61,7 +61,7 @@ For every push that needs tracking:
 4. send the push through your own APNs / FCM client, always
 ```
 
-Steps 1 and 3 may swap: build the payload first if you want a `PayloadException` to skip the registration.
+Build the payload before registering if you want a `PayloadException` to skip the registration.
 
 ```sh
 curl -sS -X POST "$RP_URL/v1/notifications" --max-time 1 \
@@ -209,7 +209,10 @@ and `FcmPayloads.decorate(myFcmV1Json, tid)` converts your existing message (`no
 ```
 
 Data values are strings only. A `notification` field other than title and body (image, channel, click action) is
-rejected with `FCM_UNSUPPORTED_NOTIFICATION_FIELD`, because the SDK would not show it.
+rejected with `FCM_UNSUPPORTED_NOTIFICATION_FIELD`, because the SDK would not show it. A message with no visible title
+or body (a silent data-only message) is rejected with `FCM_NO_NOTIFICATION`: the SDK shows every tracked message, so
+it would become a blank notification; send it untracked. The jar embeds `rp_tid` lower-cased whatever the case of the
+id you pass.
 
 ### Android: data message, local notification
 
@@ -257,9 +260,10 @@ The rules are defined by language-neutral test files:
 [`payload-java/src/test/resources/vectors/`](../payload-java/src/test/resources/vectors/) (format in its
 [README](../payload-java/src/test/resources/vectors/README.md)). Each file holds an operation, its input and the exact
 expected output or error code. The jar's tests run them all; a Node, .NET or PHP backend can implement the same rules
-and check itself against the same files. Without the jar, the contract is: a UUID tracking id; APNs with a visible
-`aps.alert`, `mutable-content: 1` and a top-level `rp_tid`, at most 4,096 bytes; FCM data-only with `rp_tid`, `title`
-and `body` as strings, `android.priority` `HIGH`, data at most 4,096 bytes.
+and check itself against the same files. Without the jar, the contract is: a UUID tracking id, embedded lower-cased;
+APNs with a visible `aps.alert`, `mutable-content: 1` and a top-level `rp_tid`, at most 4,096 bytes; FCM data-only
+with `rp_tid`, `title` and `body` as strings (at least one of `title` and `body` non-empty), `android.priority`
+`HIGH`, data at most 4,096 bytes.
 
 ## 3. Receive fallbacks
 

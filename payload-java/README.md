@@ -49,7 +49,12 @@ String fcm  = FcmPayloads.decorate(myFcmV1Json, tid);    // {"message":{...}} wi
 
 `FcmPayloads.decorate` moves `message.notification.title/body` and `message.android.notification.title/body` (the
 Android one wins) into `message.data`, removes both `notification` objects, sets `message.android.priority` to `HIGH`
-and adds `rp_tid`. Everything else (`token`/`topic`, `android.ttl`, other `data` keys) stays as it is.
+and adds `rp_tid`. Everything else (`token`/`topic`, `android.ttl`, other `data` keys) stays as it is. A message with
+no visible title or body (a silent data-only message) is rejected with `FCM_NO_NOTIFICATION`: the SDK would turn it
+into a blank notification, so send it untracked.
+
+Tracking ids are valid in any case; every builder embeds `rp_tid` **lower-cased**, the form the backend stores and
+echoes and the SDKs match on.
 
 ## Firebase Admin SDK
 
@@ -94,6 +99,7 @@ try {
 | `APNS_TOO_LARGE` | the payload is above 4,096 bytes (UTF-8 length of the produced JSON) |
 | `FCM_NON_STRING_DATA` | an FCM data value (or a notification title/body) is not a string |
 | `FCM_UNSUPPORTED_NOTIFICATION_FIELD` | `FcmPayloads.decorate`: `notification` or `android.notification` holds a field other than `title` and `body` (image, channel, click action...); the message lists them |
+| `FCM_NO_NOTIFICATION` | the FCM message would carry no visible title or body (both null or empty, for example a silent data-only message): the SDK shows every tracked message, so send it untracked |
 | `FCM_TOO_LARGE` | the FCM `data` map is above 4,096 bytes: the UTF-8 length of its compact JSON serialization, so a slightly conservative bound; the rest of the message is not counted |
 | `INVALID_JSON` | `decorate`: the input is not a JSON object of the expected shape (also: duplicate keys, nesting beyond 64 levels) |
 

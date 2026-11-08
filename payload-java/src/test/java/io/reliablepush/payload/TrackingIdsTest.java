@@ -48,4 +48,12 @@ class TrackingIdsTest {
         assertThat(TrackingIds.isValid(" 6f1c2b9e-5d1a-4c55-9a38-0c1f3a7d9e11")).isFalse();
         assertThat(TrackingIds.isValid("6f1c2b9e-5d1a-4c55-9a38-0c1f3a7d9e11\n")).isFalse();
     }
+
+    @Test
+    void requireReturnsTheLowerCaseFormOrRejects() {
+        assertThat(TrackingIds.require("6F1C2B9E-5D1A-4C55-9A38-0C1F3A7D9E11")).isEqualTo("6f1c2b9e-5d1a-4c55-9a38-0c1f3a7d9e11");
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> TrackingIds.require("nope"))
+                .isInstanceOfSatisfying(PayloadException.class,
+                        e -> assertThat(e.code()).isEqualTo(PayloadException.Code.INVALID_TRACKING_ID));
+    }
 }

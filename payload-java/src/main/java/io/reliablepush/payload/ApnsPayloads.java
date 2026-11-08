@@ -11,7 +11,7 @@ import java.util.Map;
 
 /**
  * Tracked APNs payloads: a visible {@code aps.alert}, {@code aps.mutable-content = 1} (so the Notification Service
- * Extension runs) and the top-level string {@code rp_tid}.
+ * Extension runs) and the top-level string {@code rp_tid} (the tracking id, embedded lower-cased).
  *
  * <p>All methods are static, stateless and thread-safe. JSON output is compact, keys are in input order and the
  * reliable-push keys are appended; numbers are written as given, strings are escaped per RFC 8259 and non-ASCII
@@ -43,7 +43,7 @@ public final class ApnsPayloads {
      * @throws IllegalArgumentException a custom value has an unsupported type
      */
     public static String build(String trackingId, String title, String body, Map<String, ?> custom) {
-        requireTrackingId(trackingId);
+        trackingId = TrackingIds.require(trackingId);
         Map<String, Object> alert = new LinkedHashMap<String, Object>();
         if (title != null && !title.isEmpty()) {
             alert.put("title", title);
@@ -85,8 +85,8 @@ public final class ApnsPayloads {
      *     {@code APNS_TOO_LARGE}
      */
     public static String decorate(String apnsJson, String trackingId) {
-        requireTrackingId(trackingId);
-        return serialize(decorateMap(parseObject(apnsJson), trackingId));
+        String tid = TrackingIds.require(trackingId);
+        return serialize(decorateMap(parseObject(apnsJson), tid));
     }
 
     /**
@@ -98,11 +98,11 @@ public final class ApnsPayloads {
      * @throws IllegalArgumentException a key is not a string or a value has an unsupported type
      */
     public static Map<String, Object> decorate(Map<String, ?> apnsPayload, String trackingId) {
-        requireTrackingId(trackingId);
+        String tid = TrackingIds.require(trackingId);
         if (apnsPayload == null) {
             throw new PayloadException(Code.INVALID_JSON, "the APNs payload is null");
         }
-        Map<String, Object> result = decorateMap(apnsPayload, trackingId);
+        Map<String, Object> result = decorateMap(apnsPayload, tid);
         serialize(result);
         return freezeMap(result);
     }
@@ -192,11 +192,5 @@ public final class ApnsPayloads {
             throw new PayloadException(Code.APNS_TOO_LARGE, "APNs payload is " + size + " bytes; the limit is " + MAX_BYTES);
         }
         return json;
-    }
-
-    private static void requireTrackingId(String trackingId) {
-        if (!TrackingIds.isValid(trackingId)) {
-            throw new PayloadException(Code.INVALID_TRACKING_ID, "trackingId must be a UUID");
-        }
     }
 }

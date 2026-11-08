@@ -12,7 +12,8 @@ import java.util.Map;
 /**
  * Tracked FCM HTTP v1 messages for the Android SDK's default mode: <b>data-only</b> with {@code android.priority}
  * {@value #ANDROID_PRIORITY}; {@code rp_tid}, {@code title} and {@code body} travel in {@code data}, and the SDK posts
- * the visible notification itself.
+ * the visible notification itself. A tracked message therefore needs a visible title or body: a silent data-only
+ * message must be sent untracked ({@code FCM_NO_NOTIFICATION}). The tracking id is embedded lower-cased.
  *
  * <p>All methods are static, stateless and thread-safe. JSON output is compact, keys are in input order and the
  * reliable-push keys are appended; strings are escaped per RFC 8259 and non-ASCII characters are kept (send as
@@ -45,7 +46,7 @@ public final class FcmPayloads {
      *
      * @param fcmToken the device registration token, not empty
      * @param trackingId a UUID, see {@link TrackingIds}
-     * @param title notification title, omitted when null
+     * @param title notification title, omitted when null (at least one of {@code title}, {@code body} must be non-empty)
      * @param body notification body, omitted when null
      * @param data optional custom data (string values only), appended after {@code body}
      * @throws PayloadException see {@link #data(String, String, String, Map)}
@@ -73,13 +74,14 @@ public final class FcmPayloads {
      *
      * @throws PayloadException {@code INVALID_TRACKING_ID}; {@code RESERVED_KEY} ({@code data} contains
      *     {@code rp_tid}, {@code title} or {@code body}); {@code FCM_NON_STRING_DATA} (a value is not a string,
-     *     including {@code null}); {@code FCM_TOO_LARGE} (see the class comment for what is measured)
+     *     including {@code null}); {@code FCM_NO_NOTIFICATION} ({@code title} and {@code body} both null or empty);
+     *     {@code FCM_TOO_LARGE} (see the class comment for what is measured)
      * @throws IllegalArgumentException a key is null
      */
     public static Map<String, String> data(String trackingId, String title, String body, Map<String, String> data) {
-        requireTrackingId(trackingId);
+        String tid = TrackingIds.require(trackingId);
         Map<String, String> out = new LinkedHashMap<String, String>();
-        out.put(TRACKING_KEY, trackingId);
+        out.put(TRACKING_KEY, tid);
         if (title != null) {
             out.put(TITLE, title);
         }
@@ -92,6 +94,7 @@ public final class FcmPayloads {
                 out.put(e.getKey(), (String) e.getValue());
             }
         }
+        requireVisible(title, body);
         requireSize(out);
         return Collections.unmodifiableMap(out);
     }
@@ -108,10 +111,12 @@ public final class FcmPayloads {
      *     {@code message} object, or {@code data}, {@code android}, {@code notification} of the wrong type, duplicate
      *     keys, nesting beyond 64 levels); {@code FCM_UNSUPPORTED_NOTIFICATION_FIELD} (a notification object holds a
      *     field other than {@code title} and {@code body}: the message lists them); {@code FCM_NON_STRING_DATA};
-     *     {@code RESERVED_KEY} (existing data uses {@code rp_tid}, {@code title} or {@code body}); {@code FCM_TOO_LARGE}
+     *     {@code RESERVED_KEY} (existing data uses {@code rp_tid}, {@code title} or {@code body});
+     *     {@code FCM_NO_NOTIFICATION} (no non-empty notification title or body, for example a data-only message);
+     *     {@code FCM_TOO_LARGE}
      */
     public static String decorate(String fcmV1Json, String trackingId) {
-        requireTrackingId(trackingId);
+        String tid = TrackingIds.require(trackingId);
         Map<String, Object> root = object(parse(fcmV1Json), "the FCM request body");
         if (!root.containsKey("message")) {
             throw new PayloadException(Code.INVALID_JSON, "the FCM request body must have a 'message' object");
@@ -138,9 +143,12 @@ public final class FcmPayloads {
                 data.put(e.getKey(), e.getValue());
             }
         }
-        data.put(TRACKING_KEY, trackingId);
-        putText(data, TITLE, pick(androidNotification, topNotification, TITLE));
-        putText(data, BODY, pick(androidNotification, topNotification, BODY));
+        data.put(TRACKING_KEY, tid);
+        Object title = pick(androidNotification, topNotification, TITLE);
+        Object body = pick(androidNotification, topNotification, BODY);
+        putText(data, TITLE, title);
+        putText(data, BODY, body);
+        requireVisible(title, body);
         requireSize(data);
 
         Map<String, Object> newMessage = new LinkedHashMap<String, Object>();
@@ -221,6 +229,18 @@ public final class FcmPayloads {
         }
     }
 
+    /** The SDK shows a tracked message: without a title or body it would be blank, so it must stay untracked. */
+    private static void requireVisible(Object title, Object body) {
+        if (isEmpty(title) && isEmpty(body)) {
+            throw new PayloadException(Code.FCM_NO_NOTIFICATION, "no visible title or body: a tracked FCM message is shown "
+                    + "by the SDK; send a silent data-only message untracked");
+        }
+    }
+
+    private static boolean isEmpty(Object text) {
+        return text == null || ((String) text).isEmpty();
+    }
+
     private static void requireSize(Map<String, ?> data) {
         int size = JsonWriter.utf8Length(JsonWriter.write(data));
         if (size > MAX_DATA_BYTES) {
@@ -257,11 +277,5 @@ public final class FcmPayloads {
             sb.append(p);
         }
         return sb.toString();
-    }
-
-    private static void requireTrackingId(String trackingId) {
-        if (!TrackingIds.isValid(trackingId)) {
-            throw new PayloadException(Code.INVALID_TRACKING_ID, "trackingId must be a UUID");
-        }
     }
 }

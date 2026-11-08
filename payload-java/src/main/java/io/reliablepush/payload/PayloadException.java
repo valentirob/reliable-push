@@ -25,6 +25,11 @@ public final class PayloadException extends IllegalArgumentException {
         FCM_NON_STRING_DATA,
         /** {@code FcmPayloads.decorate}: a {@code notification} object holds a field other than {@code title} and {@code body}. */
         FCM_UNSUPPORTED_NOTIFICATION_FIELD,
+        /**
+         * {@code FcmPayloads}: the message would carry no visible title or body (for example a silent data-only message):
+         * a tracked FCM message is shown by the SDK, so such a message must stay untracked, never become a blank one.
+         */
+        FCM_NO_NOTIFICATION,
         /** The FCM {@code data} map is above 4,096 bytes of UTF-8 (see {@link FcmPayloads}). */
         FCM_TOO_LARGE,
         /** {@code decorate}: the input is not a JSON object of the expected shape. */

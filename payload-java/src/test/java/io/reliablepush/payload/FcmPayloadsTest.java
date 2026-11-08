@@ -136,10 +136,31 @@ class FcmPayloadsTest {
     }
 
     @Test
-    void decorateWithoutNotificationJustTracksTheMessage() {
-        assertThat(FcmPayloads.decorate("{\"message\":{\"token\":\"tok\",\"data\":{\"k\":\"v\"}}}", TID))
-                .isEqualTo("{\"message\":{\"token\":\"tok\",\"data\":{\"k\":\"v\",\"rp_tid\":\"" + TID
-                        + "\"},\"android\":{\"priority\":\"HIGH\"}}}");
+    void decorateRejectsAMessageWithoutVisibleTitleOrBody() {
+        fail(() -> FcmPayloads.decorate("{\"message\":{\"token\":\"tok\",\"data\":{\"k\":\"v\"}}}", TID),
+                Code.FCM_NO_NOTIFICATION);
+        fail(() -> FcmPayloads.decorate("{\"message\":{\"notification\":{}}}", TID), Code.FCM_NO_NOTIFICATION);
+        fail(() -> FcmPayloads.decorate("{\"message\":{\"notification\":{\"title\":\"\",\"body\":\"\"}}}", TID),
+                Code.FCM_NO_NOTIFICATION);
+        fail(() -> FcmPayloads.decorate("{\"message\":{\"android\":{\"notification\":{\"title\":\"\"}}}}", TID),
+                Code.FCM_NO_NOTIFICATION);
+    }
+
+    @Test
+    void dataAndBuildRejectAMessageWithoutVisibleTitleOrBody() {
+        fail(() -> FcmPayloads.data(TID, null, null, null), Code.FCM_NO_NOTIFICATION);
+        fail(() -> FcmPayloads.data(TID, "", "", TestMaps.map("k", "v")), Code.FCM_NO_NOTIFICATION);
+        fail(() -> FcmPayloads.build("tok", TID, null, "", null), Code.FCM_NO_NOTIFICATION);
+        assertThat(FcmPayloads.data(TID, null, "B", null)).containsEntry("body", "B").doesNotContainKey("title");
+    }
+
+    @Test
+    void upperCaseTrackingIdIsEmbeddedInLowerCase() {
+        String upper = TID.toUpperCase(java.util.Locale.ROOT);
+        assertThat(FcmPayloads.data(upper, "T", "B", null)).containsEntry("rp_tid", TID);
+        assertThat(FcmPayloads.build("tok", upper, "T", "B", null)).contains("\"rp_tid\":\"" + TID + "\"");
+        assertThat(FcmPayloads.decorate("{\"message\":{\"notification\":{\"title\":\"T\"}}}", upper))
+                .contains("\"rp_tid\":\"" + TID + "\"");
     }
 
     @Test
