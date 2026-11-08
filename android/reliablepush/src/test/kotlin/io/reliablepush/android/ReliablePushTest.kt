@@ -336,7 +336,7 @@ class ReliablePushTest {
         registered()
         probe(failPost = true)
         assertTrue(ReliablePush.handle(context, push(title = "Hello", body = "World")))
-        assertEquals(listOf("gate queued=0", "post delivered=true sent=0", "minimal delivered=true"), steps)
+        assertEquals(listOf("gate queued=0", "post delivered=true sent=0", "gate queued=1", "minimal delivered=true"), steps)
         val n = posted()!!
         assertEquals("Hello", n.extras.getString(Notification.EXTRA_TITLE))
         assertEquals(tid, shadowOf(n.contentIntent).savedIntent.getStringExtra("rp_tid"))
@@ -399,10 +399,10 @@ class ReliablePushTest {
         assertTrue(ReliablePush.handle(context, push(title = "Hello")))
         assertEquals("Hello", posted()!!.extras.getString(Notification.EXTRA_TITLE))
         settle()
-        // the gate never said "not shown" and the minimal notification is shown: DELIVERED, so no duplicate fallback
+        // no gate said "not shown" (both threw) and the minimal notification is shown: DELIVERED, so no duplicate fallback
         assertEquals(listOf(tid to "DELIVERED"), events())
         assertEquals(0, queueSize())
-        assertEquals(listOf("event=sdk.internal_error error=SecurityException"), internalErrors())
+        assertEquals(List(2) { "event=sdk.internal_error error=SecurityException" }, internalErrors())
     }
 
     @Test
@@ -410,11 +410,41 @@ class ReliablePushTest {
         registered()
         probe(failPrepare = true)
         assertTrue(ReliablePush.handle(context, push()))
-        assertEquals(listOf("minimal delivered=true"), steps)
+        assertEquals(listOf("gate queued=0", "minimal delivered=true"), steps) // the minimal one's gate
         assertNotNull(posted())
         settle()
         assertEquals(listOf(tid to "DELIVERED"), events())
         assertEquals(listOf("event=sdk.internal_error error=IllegalStateException"), internalErrors())
+    }
+
+    @Test
+    fun prepareThrowingWithoutAUsableSdkChannelRecordsNothing() {
+        registered()
+        nm.deleteNotificationChannel("reliablepush_default")
+        // neither the full nor the minimal notification can get a channel: nothing is shown, so the fallback must fire
+        ReliablePush.posterFactory = { _, o ->
+            object : NotificationPoster(context, o) {
+                override fun prepare(trackingId: String, title: String, body: String): Notification =
+                    throw IllegalStateException("prepare failed")
+
+                override fun prepareMinimalChannel() = Unit
+            }
+        }
+        assertFalse(ReliablePush.handle(context, push()))
+        settle()
+        assertEquals(0, queueSize())
+        assertTrue(events().isEmpty())
+    }
+
+    @Test
+    fun prepareThrowingWithNotificationsDisabledRecordsNothing() {
+        registered()
+        shadowOf(nm).setNotificationsEnabled(false) // the system drops the minimal notification too
+        probe(failPrepare = true)
+        assertFalse(ReliablePush.handle(context, push()))
+        settle()
+        assertEquals(0, queueSize())
+        assertTrue(events().isEmpty())
     }
 
     @Test
@@ -455,7 +485,7 @@ class ReliablePushTest {
         probe()
         assertTrue(ReliablePush.handle(context, push()))
         assertNotNull(posted())
-        assertEquals(listOf("gate queued=0", "minimal delivered=false"), steps)
+        assertEquals(listOf("gate queued=0", "gate queued=0", "minimal delivered=false"), steps)
         settle()
         assertEquals(0, queueSize())
         assertEquals(listOf("event=sdk.internal_error error=ClassCastException"), internalErrors())
@@ -482,7 +512,7 @@ class ReliablePushTest {
         registered()
         probe()
         assertTrue(ReliablePush.handle(context, push()))
-        assertEquals(listOf("gate queued=0", "minimal delivered=false"), steps)
+        assertEquals(listOf("gate queued=0", "gate queued=0", "minimal delivered=false"), steps)
         assertNotNull(posted())
         assertEquals(listOf("event=sdk.internal_error error=IllegalStateException"), internalErrors())
     }

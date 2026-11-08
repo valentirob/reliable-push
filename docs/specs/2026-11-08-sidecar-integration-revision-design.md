@@ -203,7 +203,8 @@ If `deliver` is not called within 30 s, the run ends `NotLoggedIn`. `callback` r
   `canShow()`) → persist `DELIVERED` (off the main thread as today) → post → schedule the immediate send.
 - The whole body runs inside a `try/catch (Throwable)`. If anything before the post throws, the SDK still posts a
   minimal notification: data `title`/`body`, else the app label, on the configured channel, with the `rp_tid` tap
-  extra. If that minimal post also throws, `handle` returns `false` and the host may show its own notification. If
+  extra, after the gate on that channel (when the system would drop it, nothing is posted or recorded). If that
+  minimal post also throws, `handle` returns `false` and the host may show its own notification. If
   the post itself fails after `DELIVERED` was persisted, the event stays and no fallback fires (D8, documented).
 - `handle` keeps its signature and return value. `true` means posted, `false` means not ours or not shown.
 - The data contract is unchanged: `rp_tid`, `title`, `body`, high priority, no `notification` block.

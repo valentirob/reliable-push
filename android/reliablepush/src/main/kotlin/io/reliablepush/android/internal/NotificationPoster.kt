@@ -25,6 +25,8 @@ import io.reliablepush.android.ReliablePushOptions
  *    system would drop the notification silently in each of these cases.
  * 3. [notify]: hands the prepared notification to the system.
  * 4. [postMinimal], only when something threw before or in [notify]: the simplest notification that can be built.
+ *    Before it, `handle` calls [prepareMinimalChannel] and the gate on the SDK channel, so `DELIVERED` is written for
+ *    the minimal notification only when the system would show it.
  *
  * Errors of the platform (e.g. a `SecurityException`) propagate from every step, so `handle` can fall back to the
  * minimal notification.
@@ -77,11 +79,7 @@ internal open class NotificationPoster(
      */
     open fun postMinimal(trackingId: String, title: String, body: String) {
         val nm = checkNotNull(manager()) { "no NotificationManager" }
-        try {
-            ensureChannel(nm)
-        } catch (e: RuntimeException) { // post anyway if the channel exists after all
-            SdkLog.warn("notification.channel_failed", "tid" to trackingId, "error" to e.javaClass.simpleName)
-        }
+        prepareMinimalChannel()
         checkNotNull(nm.getNotificationChannel(options.channelId)) { "notification channel missing" }
         val builder = Notification.Builder(context, options.channelId)
             .setSmallIcon(smallIcon())
@@ -94,6 +92,18 @@ internal open class NotificationPoster(
             SdkLog.warn("notification.no_launch_activity", "tid" to trackingId, "error" to e.javaClass.simpleName)
         }
         nm.notify(TAG, trackingId.hashCode(), builder.build())
+    }
+
+    /**
+     * Creates the SDK channel for the minimal notification when it is missing. Never throws: a failure is a WARN
+     * `notification.channel_failed`, and the gate or [postMinimal] then finds the channel missing.
+     */
+    open fun prepareMinimalChannel() {
+        try {
+            manager()?.let { ensureChannel(it) }
+        } catch (e: RuntimeException) { // post anyway if the channel exists after all
+            SdkLog.warn("notification.channel_failed", "error" to e.javaClass.simpleName)
+        }
     }
 
     private fun manager(): NotificationManager? = context.getSystemService(NotificationManager::class.java)

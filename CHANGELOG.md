@@ -125,8 +125,10 @@ All notable changes to this project are documented here. Versions follow [Semant
   notification posted by the SDK. The `fcm-decorate-no-notification` vector is now this error.
 - iOS extension: a notification settings read that does not answer in time counts as shown and records `DELIVERED`
   (iOS shows the content it gets back); only an actual "not shown" answer records nothing.
-- Android `handle`: when something throws before `DELIVERED` was persisted, the SDK is registered and the gate never
-  answered "not shown", `DELIVERED` is persisted before the minimal notification is posted.
+- Android `handle`: when something throws before `DELIVERED` was persisted, the SDK is registered and no gate
+  answered "not shown", `DELIVERED` is persisted before the minimal notification is posted. The minimal notification
+  is gated on its own channel first: when the system would drop it, nothing is posted or recorded and the fallback can
+  fire.
 - Backend: the active-device check includes the token verifier's 60 s clock skew, so a device counts as active exactly
   as long as its token is accepted on the grace routes. The V7 backfill of `device.token_expires_at` is
   `last_seen_at` + 10 years (a conservative upper bound) instead of + 90 days, so no existing device is wrongly treated

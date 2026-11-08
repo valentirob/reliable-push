@@ -157,9 +157,12 @@ app's code, so the SDK is hardened to show it whatever happens to tracking.
 **Robustness.** The whole of `handle` runs inside a catch-all. If anything throws before the notification is posted
 (storage, queue, building, gate or the post), the SDK posts a minimal notification instead: the title and body (else
 the app name) on the configured channel, with the `rp_tid` tap extra, without your customizer. It logs WARN
-`sdk.internal_error` with the exception's class name only. When the error came before `DELIVERED` was written, the SDK
-is configured and registered and the gate never answered "not shown" (it was not reached, or it threw itself),
-`DELIVERED` is written first: the minimal notification is shown, so no fallback should fire for it.
+`sdk.internal_error` with the exception's class name only. Before posting it, the SDK creates the configured channel
+if it is missing and runs the gate on that channel: when the system would drop the minimal notification (notifications
+disabled, the channel missing or blocked), nothing is posted or recorded, `handle` returns `false` and the fallback can
+fire. When the error came before `DELIVERED` was written, the SDK is configured and registered and no gate answered
+"not shown" (it was not reached, or it threw itself), `DELIVERED` is written first: the minimal notification is shown,
+so no fallback should fire for it.
 
 `true` means the notification was posted. `handle` returns `false` only when:
 - the message is not the SDK's (no or malformed `rp_tid`);
@@ -167,9 +170,10 @@ is configured and registered and the gate never answered "not shown" (it was not
   app, `POST_NOTIFICATIONS` denied, or notifications paused;
 - the final channel is unusable: missing, set to none, or in a blocked group (including a channel your customizer
   chose);
-- even the minimal notification could not be posted (also when its channel cannot be created).
+- even the minimal notification could not be posted, or the gate on its channel said "not shown" (also when its
+  channel cannot be created).
 
-Nothing is recorded in the first three cases. In each case your service may show its own notification.
+Nothing is recorded in the first three cases, nor when the minimal notification's gate said "not shown". In each case your service may show its own notification.
 
 **The trade-off: a missed fallback rather than a duplicate one.** `DELIVERED` is on disk before the post, so it
 survives the process being killed right after `handle`. The price: if posting fails after that (the system throws

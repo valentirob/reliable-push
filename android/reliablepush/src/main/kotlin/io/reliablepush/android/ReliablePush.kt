@@ -155,8 +155,10 @@ public object ReliablePush {
      *
      * Display never depends on tracking: nothing thrown inside the SDK escapes (WARN `sdk.internal_error`). If anything
      * throws before the notification is posted, the SDK posts a minimal one instead (title and body, else the app label,
-     * on the configured channel, with the `rp_tid` tap extra). If that happens before `DELIVERED` was written while the
-     * SDK is registered and the gate never answered "not shown", `DELIVERED` is written first (the minimal one is shown).
+     * on the configured channel, with the `rp_tid` tap extra). The minimal one passes the gate on that channel first:
+     * when the system would drop it, nothing is posted or recorded and `handle` returns `false`. If that happens before
+     * `DELIVERED` was written while the SDK is registered and no gate answered "not shown", `DELIVERED` is written first
+     * (the minimal one is shown).
      *
      * `rp_tid` is normalized to lower case (the backend's form) before it is queued or put on the tap intent.
      *
@@ -167,8 +169,9 @@ public object ReliablePush {
      *   - the gate is closed: notifications disabled for the app, `POST_NOTIFICATIONS` denied, notifications paused;
      *   - the final channel is unusable: missing, set to none, or in a blocked group (also a channel the customizer
      *     moved the notification to);
-     *   - even the minimal notification could not be posted.
-     *   Nothing is recorded in the first three cases. The host may then show its own notification.
+     *   - even the minimal notification could not be posted, or the gate on its channel said "not shown".
+     *   Nothing is recorded in the first three cases, nor when the minimal notification's gate said "not shown". The
+     *   host may then show its own notification.
      */
     public fun handle(
         context: Context,
@@ -217,10 +220,25 @@ public object ReliablePush {
             internalError(t)
             val tid = trackingId ?: return false
             posted?.let { return it && showable == true } // threw after the post
-            // Threw before persisting, and the gate never said "not shown": the minimal notification is shown, so
+            val minimal = try {
+                poster ?: NotificationPoster(app, options)
+            } catch (t2: Throwable) {
+                internalError(t2)
+                return false
+            }
+            // The minimal notification goes to the SDK channel: gate it there (after creating the channel). A gate
+            // that throws is unknown, not "not shown".
+            val minimalShowable: Boolean? = if (showable == false) false else try {
+                minimal.prepareMinimalChannel()
+                minimal.canShow(options.channelId)
+            } catch (t2: Throwable) {
+                internalError(t2)
+                null
+            }
+            // Threw before persisting, and neither gate said "not shown": the minimal notification is shown, so
             // DELIVERED is recorded first (a missed fallback is preferred to a duplicate one).
             val sdk = configured?.sdk
-            if (sdk != null && !persistTried && showable != false) {
+            if (sdk != null && !persistTried && minimalShowable != false) {
                 try {
                     val occurredAt = System.currentTimeMillis()
                     if (Sdk.persistBeforePost { sdk.persist(tid, "DELIVERED", occurredAt) } == true) tracking = sdk
@@ -228,9 +246,9 @@ public object ReliablePush {
                     internalError(t2)
                 }
             }
+            if (minimalShowable == false) return false // the system would drop it: the host may show its own
             val shown = try {
-                (poster ?: NotificationPoster(app, options))
-                    .postMinimal(tid, minimalTitleOf(app, data, fallbackTitle), bodyOf(data, fallbackBody))
+                minimal.postMinimal(tid, minimalTitleOf(app, data, fallbackTitle), bodyOf(data, fallbackBody))
                 true
             } catch (t2: Throwable) {
                 internalError(t2)
