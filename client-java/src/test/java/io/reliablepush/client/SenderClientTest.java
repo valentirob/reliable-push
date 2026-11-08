@@ -93,7 +93,7 @@ class SenderClientTest {
             reply(ex, 201, "application/json", NOTIFICATION);
         });
 
-        Notification n = c.register(RegisterRequest.builder().userId("u1").externalId("ord-1")
+        Notification n = c.register(RegisterRequest.builder().trackingId(TID.toString()).userId("u1").externalId("ord-1")
                 .policy(FallbackPolicy.NOT_READ).timeoutMinutes(5).fallback(Map.of("sms", "hello")).build());
 
         assertThat(line.get()).isEqualTo("POST /v1/notifications");
@@ -120,8 +120,8 @@ class SenderClientTest {
             sent.set(body(ex));
             reply(ex, 201, "application/json", NOTIFICATION);
         });
-        c.register(RegisterRequest.builder().userId("u1").fallback(Map.of()).build());
-        assertThat(Json.read(sent.get())).isEqualTo(Map.of("userId", "u1", "fallback", Map.of()));
+        c.register(RegisterRequest.builder().trackingId(TID.toString()).userId("u1").fallback(Map.of()).build());
+        assertThat(Json.read(sent.get())).isEqualTo(Map.of("trackingId", TID.toString(), "userId", "u1", "fallback", Map.of()));
     }
 
     @Test
@@ -203,7 +203,7 @@ class SenderClientTest {
         SenderClient c = start(ex -> reply(ex, 422, "application/problem+json",
                 "{\"type\":\"about:blank\",\"title\":\"Validation failed\",\"status\":422,\"detail\":\"d\","
                         + "\"errors\":[{\"field\":\"fallback\",\"message\":\"too large\"}]}"));
-        assertThatThrownBy(() -> c.register(RegisterRequest.builder().userId("u").fallback(Map.of()).build()))
+        assertThatThrownBy(() -> c.register(RegisterRequest.builder().trackingId(TID.toString()).userId("u").fallback(Map.of()).build()))
                 .isInstanceOfSatisfying(ReliablePushException.class, e -> {
                     assertThat(e.status()).isEqualTo(422);
                     assertThat(e.problem()).contains(new ProblemDetails("about:blank", "Validation failed", 422, "d", "fallback"));
@@ -418,10 +418,45 @@ class SenderClientTest {
 
     @Test
     void registerRequestRequiresUserIdAndFallback() {
-        assertThatThrownBy(() -> RegisterRequest.builder().fallback(Map.of()).build())
+        assertThatThrownBy(() -> RegisterRequest.builder().trackingId(TID.toString()).fallback(Map.of()).build())
                 .isInstanceOf(NullPointerException.class);
-        assertThatThrownBy(() -> RegisterRequest.builder().userId("u").build())
+        assertThatThrownBy(() -> RegisterRequest.builder().trackingId(TID.toString()).userId("u").build())
                 .isInstanceOf(NullPointerException.class);
+    }
+
+    @Test
+    void registerSendsTrackingId() throws Exception {
+        AtomicReference<String> sent = new AtomicReference<>();
+        SenderClient c = start(ex -> {
+            sent.set(body(ex));
+            reply(ex, 201, "application/json", NOTIFICATION);
+        });
+        c.register(RegisterRequest.builder().trackingId(TID.toString()).userId("u1").fallback(Map.of()).build());
+        assertThat(((Map<?, ?>) Json.read(sent.get())).get("trackingId")).isEqualTo(TID.toString());
+    }
+
+    @Test
+    void missingTrackingIdFailsFast() {
+        assertThatThrownBy(() -> RegisterRequest.builder().userId("u").fallback(Map.of()).build())
+                .isInstanceOf(NullPointerException.class).hasMessageContaining("trackingId");
+    }
+
+    @Test
+    void invalidTrackingIdFailsFast() {
+        for (String bad : new String[] {"", "nope", TID.toString().replace("-", ""), TID + "x",
+            "0b0e1f5a-4d6b-4b0a-8f0e-2f6f3c1d9a1g", " " + TID}) {
+            assertThatThrownBy(() -> RegisterRequest.builder().trackingId(bad).userId("u").fallback(Map.of()).build())
+                    .as(bad).isInstanceOf(IllegalArgumentException.class);
+        }
+    }
+
+    @Test
+    void parsesNoDeviceRegistered() throws Exception {
+        SenderClient c = start(ex -> reply(ex, 201, "application/json",
+                NOTIFICATION.replace("FALLBACK_PENDING", "NO_DEVICE_REGISTERED")));
+        Notification n = c.register(RegisterRequest.builder().trackingId(TID.toString()).userId("u1")
+                .fallback(Map.of()).build());
+        assertThat(n.state()).isEqualTo(NotificationState.NO_DEVICE_REGISTERED);
     }
 
     @FunctionalInterface

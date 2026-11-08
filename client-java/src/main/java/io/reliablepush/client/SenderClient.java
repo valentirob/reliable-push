@@ -55,9 +55,10 @@ public final class SenderClient {
         return new SenderClientBuilder();
     }
 
-    /** Registers a push; idempotent per app when {@code externalId} is set. */
+    /** Registers a push under the sender-generated {@code trackingId}; idempotent per app on {@code trackingId}. */
     public Notification register(RegisterRequest r) {
         Map<String, Object> body = new LinkedHashMap<>();
+        body.put("trackingId", r.trackingId());
         body.put("userId", r.userId());
         if (r.externalId() != null) {
             body.put("externalId", r.externalId());
