@@ -253,7 +253,11 @@ paths:
               schema:
                 $ref: '#/components/schemas/DeviceToken'
         '401':
-          $ref: '#/components/responses/Unauthorized'
+          description: "Missing or invalid device token. This route needs an unexpired token (no grace period): past expiry the app registers again with an ID token."
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '503':
@@ -271,7 +275,11 @@ paths:
         '204':
           description: Revoked.
         '401':
-          $ref: '#/components/responses/Unauthorized'
+          description: "Missing or invalid device token. A token expired by less than the app's `device-token-events-grace` is still accepted here; past it, or when the device was revoked or re-registered, the answer is `401`."
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '503':
@@ -305,7 +313,11 @@ paths:
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
-          $ref: '#/components/responses/Unauthorized'
+          description: "Missing or invalid device token. A token expired by less than the app's `device-token-events-grace` (default 90 days) is still accepted here; past it, or when the device was revoked or re-registered, the answer is `401`."
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '413':
           $ref: '#/components/responses/PayloadTooLarge'
         '422':

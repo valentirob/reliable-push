@@ -69,7 +69,7 @@ public class TrackingService {
             Outcome outcome = transactions.execute(status -> processOne(principal, event, receivedAt));
             if (outcome == Outcome.ACCEPTED || outcome == Outcome.LATE) {
                 // counted once the item's transaction has committed, and only for stored rows (not DUPLICATE etc.)
-                metrics.event(event.type(), outcome == Outcome.LATE);
+                metrics.event(event.type(), outcome == Outcome.LATE, principal.inGrace());
             }
             log(principal, event, outcome);
             results.add(new ItemResult(event.trackingId(), outcome));
@@ -113,6 +113,7 @@ public class TrackingService {
         switch (outcome) {
             case ACCEPTED, LATE -> EventLog.info("tracking.event_accepted", Map.of(
                     "event.outcome", "success",
+                    "token_state", principal.inGrace() ? "grace" : "valid",
                     "rp.app_id", principal.appId(),
                     "rp.device_id", principal.deviceId().toString(),
                     "rp.user_hash", UserHash.of(principal.userId()),
@@ -122,6 +123,7 @@ public class TrackingService {
             case DUPLICATE -> EventLog.info("tracking.event_ignored", Map.of(
                     "event.outcome", "success",
                     "reason", "duplicate",
+                    "token_state", principal.inGrace() ? "grace" : "valid",
                     "rp.app_id", principal.appId(),
                     "rp.device_id", principal.deviceId().toString(),
                     "rp.user_hash", UserHash.of(principal.userId()),
@@ -130,6 +132,7 @@ public class TrackingService {
             case FORBIDDEN -> EventLog.warn("authz.denied", Map.of(
                     "event.outcome", "failure",
                     "reason", "tracking_id_of_another_user",
+                    "token_state", principal.inGrace() ? "grace" : "valid",
                     "rp.app_id", principal.appId(),
                     "rp.device_id", principal.deviceId().toString(),
                     "rp.user_hash", UserHash.of(principal.userId()),

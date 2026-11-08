@@ -70,6 +70,84 @@ class DeviceTokenServiceTest {
         assertReason(token, "expired");
     }
 
+    // ---- grace period for expired tokens (events and logout only; the caller decides which routes) ----
+
+    private static final Duration GRACE = Duration.ofDays(90);
+    private static final Duration SKEW = Duration.ofSeconds(60);
+
+    private DeviceClaims verifyWithGrace(String token, Duration grace) {
+        return service.verify(token, appId -> grace);
+    }
+
+    @Test
+    void graceAcceptsATokenExpiredLongerThanSkewButInsideTheGrace() {
+        String token = service.issue(claims()).token();
+        Instant exp = T0.plus(Duration.ofDays(90));
+
+        clock.set(exp.plus(SKEW).plus(GRACE).minusSeconds(1));
+        assertThat(verifyWithGrace(token, GRACE)).isEqualTo(claims());
+        assertThat(service.isInGrace(claims())).isTrue();
+    }
+
+    @Test
+    void graceBoundaryIsExactlyExpPlusSkewPlusGrace() {
+        String token = service.issue(claims()).token();
+        Instant limit = T0.plus(Duration.ofDays(90)).plus(SKEW).plus(GRACE);
+
+        clock.set(limit);
+        assertThat(verifyWithGrace(token, GRACE)).isEqualTo(claims());
+
+        clock.set(limit.plusSeconds(1));
+        assertThatThrownBy(() -> verifyWithGrace(token, GRACE))
+                .isInstanceOfSatisfying(InvalidDeviceTokenException.class, e -> assertThat(e.reason()).isEqualTo("expired"));
+    }
+
+    @Test
+    void withoutGraceTheExpiryIsAsBefore() {
+        String token = service.issue(claims()).token();
+        Instant limit = T0.plus(Duration.ofDays(90)).plus(SKEW);
+
+        clock.set(limit);
+        assertThat(verifyWithGrace(token, Duration.ZERO)).isEqualTo(claims());
+        assertThat(service.verify(token)).isEqualTo(claims());
+
+        clock.set(limit.plusSeconds(1));
+        assertThatThrownBy(() -> verifyWithGrace(token, Duration.ZERO))
+                .isInstanceOfSatisfying(InvalidDeviceTokenException.class, e -> assertThat(e.reason()).isEqualTo("expired"));
+        assertReason(token, "expired");
+    }
+
+    @Test
+    void anUnexpiredTokenIsNotInGrace() {
+        clock.set(T0.plus(Duration.ofDays(90)).plus(SKEW));
+
+        assertThat(service.isInGrace(claims())).isFalse();
+        clock.set(clock.instant().plusSeconds(1));
+        assertThat(service.isInGrace(claims())).isTrue();
+    }
+
+    @Test
+    void graceIsLookedUpByTheTokensApp() {
+        String token = service.issue(claims()).token();
+        clock.set(T0.plus(Duration.ofDays(100)));
+
+        assertThat(service.verify(token, appId -> appId.equals("shop") ? GRACE : Duration.ZERO)).isEqualTo(claims());
+        assertThatThrownBy(() -> service.verify(token, appId -> appId.equals("shop") ? Duration.ZERO : GRACE))
+                .isInstanceOf(InvalidDeviceTokenException.class);
+    }
+
+    @Test
+    void graceDoesNotRelaxSignatureChecks() {
+        String token = service.issue(claims()).token();
+        String[] parts = token.split("\\.");
+        String forgedPayload = new String(Base64.getUrlDecoder().decode(parts[1]), StandardCharsets.UTF_8)
+                .replace("user-42", "user-43");
+        clock.set(T0.plus(Duration.ofDays(100)));
+
+        assertThatThrownBy(() -> verifyWithGrace(parts[0] + "." + b64(forgedPayload) + "." + parts[2], GRACE))
+                .isInstanceOfSatisfying(InvalidDeviceTokenException.class, e -> assertThat(e.reason()).isEqualTo("bad_signature"));
+    }
+
     @Test
     void tamperedRejected() {
         String token = service.issue(claims()).token();

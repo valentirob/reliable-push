@@ -147,10 +147,10 @@ class MetricsIT extends PostgresTestBase {
                 .contains("rp_notifications_registered_total{outcome=\"pending\"}")
                 .contains("rp_notifications_registered_total{outcome=\"no_device_registered\"}")
                 .contains("rp_notification_registration_seconds_bucket{le=\"1.0\"}")
-                .contains("rp_events_total{late=\"false\",type=\"DELIVERED\"}")
-                .contains("rp_events_total{late=\"true\",type=\"DELIVERED\"}")
-                .contains("rp_events_total{late=\"false\",type=\"READ\"}")
-                .contains("rp_events_total{late=\"true\",type=\"READ\"}")
+                .contains("rp_events_total{late=\"false\",token=\"valid\",type=\"DELIVERED\"}")
+                .contains("rp_events_total{late=\"true\",token=\"valid\",type=\"DELIVERED\"}")
+                .contains("rp_events_total{late=\"false\",token=\"valid\",type=\"READ\"}")
+                .contains("rp_events_total{late=\"true\",token=\"valid\",type=\"READ\"}")
                 .contains("rp_fallback_total{outcome=\"triggered\"}")
                 .contains("rp_fallback_total{outcome=\"failed\"}")
                 .contains("rp_fallback_total{outcome=\"expired\"}")
@@ -164,8 +164,8 @@ class MetricsIT extends PostgresTestBase {
                 .contains("rp_fallback_circuit_check_failed_total");
         double registered = value(before, "rp_notifications_registered_total{outcome=\"pending\"}");
         double timed = value(before, "rp_notification_registration_seconds_count");
-        double deliveredOnTime = value(before, "rp_events_total{late=\"false\",type=\"DELIVERED\"}");
-        double deliveredLate = value(before, "rp_events_total{late=\"true\",type=\"DELIVERED\"}");
+        double deliveredOnTime = value(before, "rp_events_total{late=\"false\",token=\"valid\",type=\"DELIVERED\"}");
+        double deliveredLate = value(before, "rp_events_total{late=\"true\",token=\"valid\",type=\"DELIVERED\"}");
         double triggered = value(before, "rp_fallback_total{outcome=\"triggered\"}");
         double latency = value(before, "rp_webhook_latency_seconds_count");
         int hooksBefore = RECEIVER.getAllServeEvents().size();
@@ -195,8 +195,8 @@ class MetricsIT extends PostgresTestBase {
         String after = scrape();
         assertThat(value(after, "rp_notifications_registered_total{outcome=\"pending\"}") - registered).isEqualTo(2.0);
         assertThat(value(after, "rp_notification_registration_seconds_count") - timed).isEqualTo(3.0);
-        assertThat(value(after, "rp_events_total{late=\"false\",type=\"DELIVERED\"}") - deliveredOnTime).isEqualTo(1.0);
-        assertThat(value(after, "rp_events_total{late=\"true\",type=\"DELIVERED\"}") - deliveredLate).isEqualTo(1.0);
+        assertThat(value(after, "rp_events_total{late=\"false\",token=\"valid\",type=\"DELIVERED\"}") - deliveredOnTime).isEqualTo(1.0);
+        assertThat(value(after, "rp_events_total{late=\"true\",token=\"valid\",type=\"DELIVERED\"}") - deliveredLate).isEqualTo(1.0);
         // rows of other ITs may be claimed by the same ticks: the counter equals what the webhook actually received
         double hooks = RECEIVER.getAllServeEvents().size() - hooksBefore;
         assertThat(hooks).isGreaterThanOrEqualTo(1.0);

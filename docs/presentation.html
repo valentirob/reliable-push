@@ -659,7 +659,7 @@ answer 2xx</code></pre>
     <div class="cols c3">
       <div class="card"><div class="icon">🔑</div><h3>Sender API key</h3><p class="small">One key per app. The backend stores only its SHA-256.</p></div>
       <div class="card"><div class="icon">🪪</div><h3>Device identity</h3><p class="small">Devices register with the app's OIDC ID token, or with a short-lived signed grant. The user id always comes from the verified credential.</p></div>
-      <div class="card"><div class="icon">🎟️</div><h3>Device token</h3><p class="small">ES256 JWT, 90 days by default, with key rotation. Revoked on logout and re-registration.</p></div>
+      <div class="card"><div class="icon">🎟️</div><h3>Device token</h3><p class="small">ES256 JWT, 90 days by default, with key rotation. Expired tokens still work for event reports and logout for a grace period (90 days by default). Revoked on logout and re-registration.</p></div>
       <div class="card"><div class="icon">✍️</div><h3>Signed webhook</h3><p class="small">HMAC-SHA256 with a timestamp, plus <code>Idempotency-Key</code>. Redirects are never followed.</p></div>
       <div class="card"><div class="icon">🚦</div><h3>Limits</h3><p class="small">Rate limits per device and per app, a 64 KB body limit, and events accepted only for the device's own app and user.</p></div>
       <div class="card"><div class="icon">🙈</div><h3>Clean logs</h3><p class="small">Structured ECS JSON with no tokens, keys, user ids or message text.</p></div>

@@ -3,6 +3,7 @@ package io.reliablepush.shared.security;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -44,7 +45,7 @@ class DeviceAuthFilterTest {
     DeviceAuthFilterTest() {
         request.addHeader("Authorization", "Bearer some.device.token");
         Instant now = Instant.now();
-        when(tokens.verify("some.device.token"))
+        when(tokens.verify(eq("some.device.token"), any()))
                 .thenReturn(new DeviceClaims("shop", "user-1", UUID.randomUUID(), 0, now, now.plusSeconds(60)));
     }
 

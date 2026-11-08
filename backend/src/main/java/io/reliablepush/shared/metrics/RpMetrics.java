@@ -21,7 +21,8 @@ import org.springframework.stereotype.Component;
  *       (replays of a {@code trackingId} or {@code externalId} are not), by the state they were stored in;</li>
  *   <li>{@code rp_notification_registration_seconds}: server time of {@code POST /v1/notifications} (a histogram, so an
  *       installation can compare it with the sender's registration timeout);</li>
- *   <li>{@code rp_events_total{type,late}}: event rows stored ({@code late=true} when the state transition no longer applied);</li>
+ *   <li>{@code rp_events_total{type,late,token}}: event rows stored ({@code late=true} when the state transition no longer
+ *       applied; {@code token=grace} when the device token was expired but inside the app's grace, else {@code valid});</li>
  *   <li>{@code rp_fallback_total{outcome=triggered|failed|expired}}: fallback outcomes that were persisted;</li>
  *   <li>{@code rp_fallback_suppressed_total{app,reason=circuit_open|fallback_suspended}}: fallbacks the circuit breaker
  *       closed without a call (worker role only, see {@link #registerFallbackSuppressed});</li>
@@ -92,9 +93,12 @@ public class RpMetrics {
                 .serviceLevelObjectives(REGISTRATION_BUCKETS)
                 .register(registry);
         for (EventType type : EventType.values()) {
-            Counter onTime = eventCounter(type, false);
-            Counter late = eventCounter(type, true);
-            events.put(type, new Counter[] {onTime, late});
+            events.put(type, new Counter[] {
+                eventCounter(type, false, "valid"),
+                eventCounter(type, true, "valid"),
+                eventCounter(type, false, "grace"),
+                eventCounter(type, true, "grace")
+            });
         }
         for (String outcome : FALLBACK_OUTCOMES) {
             fallback.put(outcome, Counter.builder(FALLBACK)
@@ -107,11 +111,12 @@ public class RpMetrics {
                 .register(registry);
     }
 
-    private Counter eventCounter(EventType type, boolean late) {
+    private Counter eventCounter(EventType type, boolean late, String token) {
         return Counter.builder(EVENTS)
                 .description("Device events stored")
                 .tag("type", type.name())
                 .tag("late", Boolean.toString(late))
+                .tag("token", token)
                 .register(registry);
     }
 
@@ -134,9 +139,12 @@ public class RpMetrics {
         return registration;
     }
 
-    /** A device event row was stored; {@code late} when the notification could no longer make the transition. */
-    public void event(EventType type, boolean late) {
-        events.get(type)[late ? 1 : 0].increment();
+    /**
+     * A device event row was stored; {@code late} when the notification could no longer make the transition, {@code
+     * inGrace} when the device token was past its expiry and accepted under the app's grace.
+     */
+    public void event(EventType type, boolean late, boolean inGrace) {
+        events.get(type)[(late ? 1 : 0) + (inGrace ? 2 : 0)].increment();
     }
 
     /**

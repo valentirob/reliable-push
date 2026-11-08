@@ -61,6 +61,15 @@ management:
 
 # Logging profile (json | local) is selected in log4j2-spring.xml: ECS JSON unless the "local" profile is active.
 
+# Per-app device token settings (sidecar revision spec 2.4). Defaults shown; a bare number means days.
+# reliable-push:
+#   apps:
+#     shop:
+#       device-token-validity: 90d        # lifetime of issued device tokens
+#       device-token-events-grace: 90d    # POST /v1/events and DELETE /v1/devices/me also accept a token expired by up
+#                                         # less than this (token:refresh does not); 0 = no grace. Also keeps the device
+#                                         # "active" for notification tracking
+
 # Fallback circuit breaker (spec 2026-11-07-fallback-circuit-breaker-design, section 2). Defaults shown; durations
 # without a unit are minutes. Changes take effect on restart (Helm: config.fallback).
 # reliable-push:
