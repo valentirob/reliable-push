@@ -22,6 +22,7 @@ here and record the result in [STATUS.md](STATUS.md).
 | 4.7 | Live-query cost of the 7-day overview and the trends on large tables | Agent | Action: a load run or install with tens of millions of notifications showing slow admin queries |
 | 4.8 | Due-set indexes of the circuit detector have no `app_id` | Agent | Action: an install with many apps (tens or more) or a measurement showing slow circuit checks |
 | 4.9 | Circuit breaker untested under load | Agent | Action: a load run with the breaker on (a mixed burst: one app delivered, one not) |
+| 4.10 | Circuit event times can be up to the lock wait out of order | Agent | Action: clamp the check instant to the circuit's `since` |
 | 5.1 | 0.2.0 release | Maintainer | Action: maintainer decision to release (ops dashboard and fallback circuit breaker) |
 
 ## 1. Maintainer-only: needs personal accounts and credentials
@@ -166,6 +167,15 @@ Agents never create accounts or keys, sign in, or enter credentials. These steps
 - **Why deferred:** the integration tests and the E2E scenario cover the behaviour; cost matters only at scale.
 - **Unblocked by:** a load run with the breaker on, for example a burst split across a delivered and an undelivered app,
   measuring the drain rate of the delivered app and the suppression rate of the other.
+
+### 4.10 Circuit event times can be up to the lock wait out of order (fallback circuit breaker)
+
+- **What:** a tick takes its check instant before waiting for the detector lock (at most 2 s). If another worker or a
+  resume commits a transition during that wait, the next event can carry an `at` (and a new `since`) up to 2 s earlier
+  than the one before it, and `min-open` can effectively shorten by the same amount. The history is ordered by `id`,
+  so the console shows the right order; detection is unaffected.
+- **Why deferred:** cosmetic for the stored times; found by the final review of cycle 5.
+- **Unblocked by:** nothing; clamp the instant to `max(at, current.since)` when writing a transition.
 
 ## 5. Next scope
 
