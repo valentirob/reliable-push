@@ -29,9 +29,10 @@ Each key has an `id` (shown in the page header and in audit logs, never the key 
 | `apps: ["*"]` | The key sees every configured app |
 | `apps: [a, b]` | The key sees only these apps. Any other app, and any notification of it, answers `404` (never `403`) |
 | `permissions: [payload]` | The key may read the stored fallback payload. Without it, the payload route answers `404` and the page shows "hidden (N bytes)" |
+| `permissions: [fallback-control]` | The key may resume the fallbacks of an app whose circuit is open (`POST /v1/admin/fallback-circuits/{appId}:resume`). Without it the route answers `403`. Reading the circuits and their history needs no permission |
 
 `userId` is visible and searchable for every admin key. The fallback payload (SMS text, e-mail body) is the only
-data behind a permission.
+data behind a read permission; `fallback-control` is the only permission that changes something.
 
 ## Signing in
 
@@ -65,6 +66,7 @@ Every search and view is logged (logger `io.reliablepush.event`, INFO) without p
 | `admin.notification_viewed` | `rp.admin_key`, `rp.app_id`, `rp.tracking_id`, `rp.user_hash` |
 | `admin.payload_viewed` | same |
 | `admin.devices_viewed` | `rp.admin_key`, `rp.app_id`, `rp.user_hash` (devices of a user; the user id itself is never logged) |
+| `admin.fallback_resumed` | `rp.admin_key`, `rp.app_id` (an operator resumed the fallbacks of an app) |
 
 A failed sign-in logs `auth.failed` with `reason` `missing_admin_key` or `unknown_admin_key`; a key over its limit logs
 `rate_limit.exceeded` with `rate_limit.scope=admin`. The key, the user id and the payload never appear in a log line.

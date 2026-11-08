@@ -27,6 +27,7 @@ public class AdminKeys {
     private static final String RESERVED_ID = "false";
     private static final String ALL_APPS = "*";
     private static final String PERMISSION_PAYLOAD = "payload";
+    private static final String PERMISSION_FALLBACK_CONTROL = "fallback-control";
 
     private record Entry(byte[] hash, AdminPrincipal principal) {}
 
@@ -69,12 +70,13 @@ public class AdminKeys {
             }
             Set<String> visible = resolveApps(where, key.apps(), appIds);
             for (String permission : key.permissions()) {
-                if (!PERMISSION_PAYLOAD.equals(permission)) {
+                if (!PERMISSION_PAYLOAD.equals(permission) && !PERMISSION_FALLBACK_CONTROL.equals(permission)) {
                     throw new IllegalStateException(where + ".permissions: unknown permission '" + permission + "'");
                 }
             }
             boolean payload = key.permissions().contains(PERMISSION_PAYLOAD);
-            list.add(new Entry(hash, new AdminPrincipal(id, visible, payload)));
+            boolean fallbackControl = key.permissions().contains(PERMISSION_FALLBACK_CONTROL);
+            list.add(new Entry(hash, new AdminPrincipal(id, visible, payload, fallbackControl)));
         }
         this.entries = List.copyOf(list);
         this.ratePerMinute = properties.rateLimitPerMinute();

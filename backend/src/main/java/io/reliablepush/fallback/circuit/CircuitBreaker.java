@@ -45,6 +45,9 @@ public class CircuitBreaker {
     /** How long an evaluation waits for the lock held by another worker before the check fails. */
     static final Duration LOCK_TIMEOUT = Duration.ofSeconds(2);
 
+    /** How long the operator resume waits for the lock before the request fails with 503. */
+    static final Duration FORCE_LOCK_TIMEOUT = Duration.ofSeconds(5);
+
     /** How often (per instance) the lock holder deletes old circuit events. */
     static final Duration PRUNE_INTERVAL = Duration.ofDays(1);
 
@@ -115,12 +118,17 @@ public class CircuitBreaker {
     /**
      * The operator resume (spec 6): the app's circuit becomes FORCED until {@code now + force-hold}, whatever its
      * state, with event {@code FORCED}/{@code forced} and the admin key id. Waits for an evaluation in progress (same
-     * advisory lock, blocking), so a detector transition never overwrites it. Forcing an already FORCED circuit
+     * advisory lock) for at most {@link #FORCE_LOCK_TIMEOUT} ({@code SET LOCAL lock_timeout}), so a detector
+     * transition never overwrites it and the request never hangs. Forcing an already FORCED circuit
      * restarts the hold ({@code forced_until = now + force-hold}) and writes a new {@code FORCED} event. The caller
      * checks {@code suspended} and {@code enabled} first.
+     *
+     * @throws org.springframework.dao.DataAccessException when the lock is not free within
+     *     {@link #FORCE_LOCK_TIMEOUT} (SQL state {@code 55P03} in the cause chain), or on any database error
      */
     public Circuit force(String appId, String adminKeyId) {
         Applied applied = transactions.execute(status -> {
+            jdbc.sql("set local lock_timeout = '" + FORCE_LOCK_TIMEOUT.toMillis() + "ms'").update();
             jdbc.sql("select 1 from pg_advisory_xact_lock(:key)").param("key", LOCK_KEY).query(Integer.class).single();
             Instant now = now();
             Circuit current = circuits.find(appId).orElse(Circuit.closed(appId, Instant.EPOCH));

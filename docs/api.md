@@ -175,9 +175,12 @@ one, `/v1/admin/**` answers `404` like any unknown path.
 | `GET /v1/admin/notifications/{trackingId}` | none | The notification, its `events`, its webhook `attempts` and `payloadBytes`. Unknown, malformed or not visible id: `404` |
 | `GET /v1/admin/notifications/{trackingId}/payload` | none | The stored fallback payload. Needs the `payload` permission; without it the answer is the same `404` as for an unknown id |
 | `GET /v1/admin/devices` | `app`, `userId` (both required) | `{items}`, at most 50, newest first, revoked devices included |
+| `GET /v1/admin/fallback-circuits` | none | `{suspended, enabled, items: [{appId, state, since, forcedUntil, forcedBy, suppressed}]}` for the apps in the key's scope; an app without a stored circuit is `CLOSED` (`since: null`) |
+| `GET /v1/admin/fallback-circuits/{appId}/events` | `limit` (1-200, default 50), `cursor` | `{items, nextCursor}`, the open/close history of the app, newest first. App outside the scope: `404` |
+| `POST /v1/admin/fallback-circuits/{appId}:resume` | none | The new circuit (`FORCED` until now + `force-hold`). Needs `fallback-control` (else `403`); app outside the scope `404`; `409` when `fallback.suspended` is true or the breaker is disabled; `503` with `Retry-After: 5` when a circuit evaluation holds the lock for more than 5 s. Audited (`admin.fallback_resumed`) |
 
 Searches and views are audit-logged without personal data (`admin.search`, `admin.notification_viewed`,
-`admin.payload_viewed`, `admin.devices_viewed`; see [operations.md](operations.md#event-catalogue)). Field-level schemas: `openapi.yaml`, tag `admin`.
+`admin.payload_viewed`, `admin.devices_viewed`, `admin.fallback_resumed`; see [operations.md](operations.md#event-catalogue)). Field-level schemas: `openapi.yaml`, tag `admin`.
 
 ## Errors
 

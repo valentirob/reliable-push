@@ -178,7 +178,18 @@ class AdminController {
         return new Me(
                 principal.keyId(),
                 principal.apps().stream().sorted().toList(),
-                principal.payload() ? List.of("payload") : List.of());
+                permissions(principal));
+    }
+
+    private static List<String> permissions(AdminPrincipal principal) {
+        List<String> permissions = new ArrayList<>();
+        if (principal.payload()) {
+            permissions.add("payload");
+        }
+        if (principal.canControlFallback()) {
+            permissions.add("fallback-control");
+        }
+        return permissions;
     }
 
     @GetMapping("/notifications")
