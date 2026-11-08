@@ -34,11 +34,12 @@ import org.springframework.web.filter.OncePerRequestFilter;
  * revoked, same {@code token_version}; positive answers cached for {@code revocation-cache-ttl}, keyed by device id and
  * version, never by token). On success the {@link DevicePrincipal} is exposed as request attribute
  * {@link DevicePrincipal#ATTR} (with {@code inGrace} for an expired token accepted under the app's
- * {@code device-token-events-grace}, which only {@code POST /v1/events} and {@code DELETE /v1/devices/me} allow) plus {@code rp.app_id} and {@code rp.device_id} for the access log.
+ * {@code device-token-events-grace}, which only {@code POST /v1/events} and {@code DELETE /v1/devices/me} allow,
+ * matched exactly) plus {@code rp.app_id} and {@code rp.device_id} for the access log.
  *
  * <p>A connection-pool timeout during the device lookup is answered 503 with {@code Retry-After}
- * ({@link DatabaseUnavailable}). Every authentication failure gets the very same 401 problem ({@code WWW-Authenticate: Bearer}); only the logged {@code reason}
- * code differs. The token is never logged.
+ * ({@link DatabaseUnavailable}). Every authentication failure gets the very same 401 problem
+ * ({@code WWW-Authenticate: Bearer}); only the logged {@code reason} code differs. The token is never logged.
  */
 public class DeviceAuthFilter extends OncePerRequestFilter {
 
@@ -117,16 +118,27 @@ public class DeviceAuthFilter extends OncePerRequestFilter {
     }
 
     /**
-     * The expiry grace of the token's app, on the two routes that allow it ({@code POST /v1/events}, {@code DELETE
-     * /v1/devices/me}); zero everywhere else, notably {@code token:refresh}, which needs an unexpired token.
+     * The expiry grace of the token's app, on exactly two routes: {@code POST /v1/events} and {@code DELETE
+     * /v1/devices/me}. Both the raw request URI and the normalised servlet path must equal the route; any other
+     * spelling (trailing slash, {@code ;} parameters, dot segments, encodings, case) and every other route, notably
+     * {@code token:refresh}, gets zero (fail closed).
      */
     private Duration graceFor(HttpServletRequest request, String appId) {
-        boolean events = HttpMethod.POST.matches(request.getMethod()) && RequestPaths.isUnder(request, EVENTS_PATH);
-        boolean logout = HttpMethod.DELETE.matches(request.getMethod()) && RequestPaths.isUnder(request, ME_PATH);
-        if (!events && !logout) {
+        if (!isGraceRoute(request)) {
             return Duration.ZERO;
         }
         return apps.byId(appId).map(AppConfig::deviceTokenEventsGrace).orElse(Duration.ZERO);
+    }
+
+    static boolean isGraceRoute(HttpServletRequest request) {
+        String method = request.getMethod();
+        String uri = request.getRequestURI();
+        String servletPath = request.getServletPath();
+        if (uri == null || !uri.equals(servletPath)) {
+            return false;
+        }
+        return (HttpMethod.POST.matches(method) && EVENTS_PATH.equals(uri))
+                || (HttpMethod.DELETE.matches(method) && ME_PATH.equals(uri));
     }
 
     private void reject(HttpServletRequest request, HttpServletResponse response, String reason) throws IOException {

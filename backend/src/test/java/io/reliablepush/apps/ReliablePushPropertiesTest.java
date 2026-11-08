@@ -228,6 +228,12 @@ class ReliablePushPropertiesTest {
         runner.withPropertyValues(asProperties(shop(m -> m.put(SHOP + "device-token-events-grace", "30")))).run(context ->
                 assertThat(context.getBean(AppRegistry.class).byId("shop").orElseThrow().deviceTokenEventsGrace())
                         .isEqualTo(Duration.ofDays(30)));
+        runner.withPropertyValues(asProperties(shop(m -> m.put(SHOP + "device-token-events-grace", "3650")))).run(context ->
+                assertThat(context).hasNotFailed());
+        runner.withPropertyValues(asProperties(shop(m -> m.put(SHOP + "device-token-events-grace", "3651")))).run(context -> {
+            assertThat(context).hasFailed();
+            assertThat(rootMessage(context.getStartupFailure())).contains("device-token-events-grace must not exceed 3650 days");
+        });
         runner.withPropertyValues(asProperties(shop(m -> m.put(SHOP + "device-token-events-grace", "-1")))).run(context -> {
             assertThat(context).hasFailed();
             assertThat(rootMessage(context.getStartupFailure())).contains("device-token-events-grace must not be negative");

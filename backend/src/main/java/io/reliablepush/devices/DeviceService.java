@@ -92,6 +92,10 @@ public class DeviceService {
 
     /** Issues a new token with the same version; the old one stays valid until its own expiry. */
     public DeviceTokenResponse refresh(DevicePrincipal principal) {
+        if (principal.inGrace()) {
+            // defence in depth: the filter grants the grace on events and logout only; an expired token never refreshes
+            throw new UnauthorizedException(TOKEN_REJECTED, DEVICE_CHALLENGE);
+        }
         Instant now = clock.instant().truncatedTo(ChronoUnit.MICROS);
         // DeviceAuthFilter only admits tokens of configured apps; the registry is immutable, so this never fires
         AppConfig app = apps.byId(principal.appId())

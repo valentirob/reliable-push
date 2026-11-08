@@ -163,4 +163,18 @@ class EventsGraceIT extends PostgresTestBase {
 
         assertThat(response.getStatusCode().value()).isEqualTo(401);
     }
+
+    @Test
+    void aGraceTokenNeverReachesTokenRefreshThroughADotSegmentPath() {
+        Device device = device();
+        String bearer = tokenExpiredAgo(device, Duration.ofDays(10));
+
+        for (String path : new String[] {"/v1/events/../devices/token:refresh", "/v1/events/%2e%2e/devices/token:refresh",
+            "/v1/events;x=1/../devices/token:refresh"}) {
+            ResponseEntity<String> response = http.post().uri(path).header("Authorization", "Bearer " + bearer)
+                    .retrieve().onStatus(s -> true, (q, r) -> {}).toEntity(String.class);
+            assertThat(response.getStatusCode().value()).isIn(400, 401, 404);
+            assertThat(response.getBody() == null ? "" : response.getBody()).doesNotContain("\"token\"");
+        }
+    }
 }

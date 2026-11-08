@@ -462,6 +462,15 @@ class DeviceApiIT extends PostgresTestBase {
     }
 
     @Test
+    void anInGracePrincipalCannotRefresh() {
+        String userId = uniqueUser();
+        UUID deviceId = UUID.fromString(deviceId(registerUser(userId, null)));
+
+        assertThatThrownBy(() -> devices.refresh(new DevicePrincipal(APP, userId, deviceId, 0, true)))
+                .isInstanceOf(UnauthorizedException.class);
+    }
+
+    @Test
     void supersededTokenCannotRevokeTheCurrentRegistration() {
         String userId = uniqueUser();
         ResponseEntity<String> first = registerUser(userId, null);
