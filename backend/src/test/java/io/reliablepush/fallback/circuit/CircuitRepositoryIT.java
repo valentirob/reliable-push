@@ -1,6 +1,7 @@
 package io.reliablepush.fallback.circuit;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import io.reliablepush.support.PostgresTestBase;
 import java.math.BigDecimal;
@@ -73,6 +74,16 @@ class CircuitRepositoryIT extends PostgresTestBase {
         assertThat(events.get(1).ratio()).isEqualByComparingTo("0.05");
         assertThat(events.get(0).id()).isGreaterThan(events.get(1).id());
         assertThat(circuits.findAll(List.of("shop", "other"))).containsOnlyKeys("shop");
+    }
+
+    @Test
+    void transitionRejectsAnEventOfAnotherApp() {
+        assertThatThrownBy(() -> circuits.transition(new Circuit("shop", CircuitState.OPEN, T0, null, null, 0),
+                        event("other", T0, "OPENED", "tracking_missing")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("app");
+        assertThat(circuits.find("shop")).isEmpty();
+        assertThat(circuits.events("other", 10, null)).isEmpty();
     }
 
     @Test

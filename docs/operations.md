@@ -66,7 +66,7 @@ says so (minutes for `worker.lease` and `fallback.backoff`, days for `device-tok
 | `retention.cron` | `0 17 3 * * *` | Spring cron expression (six fields, always UTC) of the daily retention run (worker role); `-` disables the schedule |
 | `admin.keys[]` | none (admin disabled) | Admin API keys of the ops dashboard: `{id, key-sha256, apps, permissions}`; `id` matches `[a-z0-9-]{1,40}` and must not be `false` (rejected at startup: the admin beans are switched on by the property `admin.keys[0].id`, which `false` would turn off); see `security.md`. With no key, `/v1/admin/**` and `/admin/**` answer 404 |
 | `admin.rate-limit-per-minute` | `600` | At least 1. Admin requests per minute per admin key and instance |
-| `admin.rollup-retention-days` | `400` | At least 1. `daily_stats` rows older than this are deleted by the rollup |
+| `admin.rollup-retention-days` | `400` | At least 1. `daily_stats` rows older than this are deleted by the rollup; fallback circuit events (`fallback_circuit_event`) older than this are deleted by the circuit detector once a day per worker, also while admin is disabled |
 | `admin.rollup.cron` | `0 7 3 * * *` | Spring cron expression (UTC) of `DailyRollupJob` (worker role, runs only when admin is enabled); `-` disables the schedule and the retention guard |
 | `testing.minute-duration` | unset (1 minute = 60 s) | Fast clock, e.g. `1s`. Accepted only with the `e2e` or `demo` profile, must be positive |
 
@@ -202,6 +202,9 @@ below, all top-level. ThreadContext entries `trace.id` and `rp.*` are top-level;
 | `fallback.retry_scheduled` | Retryable failure, next attempt scheduled | `reason`, `rp.attempt`, `event.duration`, `rp.next_attempt_at`. WARN with `reason=app_not_configured` when the row's app is unknown on this instance |
 | `fallback.failed` (WARN) | Final failure or attempts exhausted, `FALLBACK_FAILED` | `reason`, `rp.attempt`, `event.duration` |
 | `fallback.expired` (WARN) | Closed as `FALLBACK_EXPIRED` | `reason` = `trigger_window_passed`, `next_retry_after_trigger_window` or `app_not_configured` |
+| `fallback.circuit_opened` (WARN) | The circuit detector opened an app's fallback circuit: at least `min-due` fallbacks came due in the window and less than `max-delivered-ratio` of their cohort was delivered | `rp.app_id`, `due` (counted up to `min-due`), `ratio` (delivered share of the cohort) |
+| `fallback.circuit_closed` | An app's circuit closed again: `DELIVERED` events resumed after `min-open` (from OPEN or FORCED), or the forced hold ended | `rp.app_id`, `reason` = `delivered_resumed` or `force_expired`, `suppressed` (fallbacks the finished period suppressed) |
+| `fallback.circuit_forced` (WARN) | An operator forced an app's fallbacks back on for `force-hold` (detection off for that app) | `rp.app_id`, `rp.admin_key` (key id, never the key), `suppressed` |
 | `retention.purged` | Retention job finished | `count` (also 0) |
 | `retention.skipped` (WARN) | Retention did not run: admin is enabled, the rollup schedule is on and either `daily_stats` has no row computed in the last 20 hours, or a rollup was still running after the 30-minute wait | `reason` = `rollup_missing` or `rollup_running` |
 | `rollup.completed` | `DailyRollupJob` wrote the daily statistics | `count` = days written (not logged when another worker held the lock) |

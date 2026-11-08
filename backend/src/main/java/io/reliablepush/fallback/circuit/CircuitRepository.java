@@ -46,8 +46,15 @@ public class CircuitRepository {
                 .optional();
     }
 
-    /** Upserts the circuit row and appends the event, in one transaction (joins the caller's, if any). */
+    /**
+     * Upserts the circuit row and appends the event, in one transaction (joins the caller's, if any).
+     *
+     * @throws IllegalArgumentException when the event belongs to another app than the circuit
+     */
     public void transition(Circuit next, CircuitEvent event) {
+        if (!next.appId().equals(event.appId())) {
+            throw new IllegalArgumentException("circuit and event must belong to the same app");
+        }
         transactions.executeWithoutResult(status -> write(next, event));
     }
 
