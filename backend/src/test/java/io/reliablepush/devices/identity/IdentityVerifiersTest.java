@@ -105,7 +105,7 @@ class IdentityVerifiersTest {
                 new AppConfig.Identity(
                         io.reliablepush.apps.ReliablePushProperties.IdentityType.SIGNED_GRANT,
                         "https://idp.test.example", "adhoc-mobile", "sub", null, new Secret("y".repeat(40))),
-                null, "NOT_DELIVERED", 10, null, null);
+                null, null, "NOT_DELIVERED", 10, null, null);
 
         assertThat(verifiers.forApp(adHoc)).isSameAs(verifiers.forApp(adHoc));
     }

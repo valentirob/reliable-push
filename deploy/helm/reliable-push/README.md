@@ -18,7 +18,8 @@ least one app under `config.apps`. A missing one fails `helm template` with a me
   `<fullname>-api` and `<fullname>-worker`. Services: `<fullname>-api` (port 80, API pods only) and
   `<fullname>-management` (port 8081, all pods; probes and `/actuator/prometheus`, never expose it publicly).
 - **Config:** `config` is rendered under `reliable-push:` in ConfigMap `<fullname>-config`, mounted at `/config`. A
-  changed value changes the `checksum/config` pod annotation, so pods roll on `helm upgrade`.
+  changed value changes the `checksum/config` pod annotation, so pods roll on `helm upgrade`. `config.fallback` tunes or
+  switches off the fallback circuit breaker (commented example in `values.yaml`; docs/deployment.md).
 - **Sizing:** `api.*` (also used in combined mode) and `worker.*` set replicas, resources, Hikari pool size and worker
   concurrency; see docs/operations.md for how they relate. They are env vars, which win over the same keys under
   `config`. PodDisruptionBudgets are rendered for a component with more than one replica (with the API HPA:

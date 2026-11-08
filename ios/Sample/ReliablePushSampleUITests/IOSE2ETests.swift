@@ -6,8 +6,9 @@ import XCTest
 ///
 /// The Simulator runs no Notification Service Extension for simulated pushes, so each push is handed to the app as
 /// `rpsample://debug-push?…`: the app runs the same `ReliablePushExtension` code in-process and adds the resulting
-/// content as a local notification. Every test creates its own user and launches the app with `RP_RESET=1` (a fresh
-/// process, so the one-refresh-per-process gate is reset too).
+/// content as a local notification. Every test creates its own user and launches the app with `RP_RESET=1`. The SDK never
+/// renews the device token on the receive path: the sample calls `ensureRegistered` at launch, on foreground and after
+/// Register.
 @MainActor
 final class IOSE2ETests: XCTestCase {
     override func tearDown() async throws {
@@ -82,12 +83,16 @@ final class IOSE2ETests: XCTestCase {
     }
 
     func testTokenRefreshNearExpiry() async throws {
-        // app news: device tokens valid 20 s; the SDK refreshes when less than 20 % (4 s) is left
+        // app news: device tokens valid 20 s; ensureRegistered refreshes when less than 20 % (4 s) is left
         let sample = try await registeredSample(appId: E2EConfig.news)
         let deviceId = try XCTUnwrap(sample.deviceId)
         // 17 s after the token was issued: 3 s of the 20 s left
         let wait = sample.registeredAt.addingTimeInterval(17).timeIntervalSinceNow
         if wait > 0 { try await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000)) }
+        // back to the foreground (same process): the sample calls ensureRegistered, which refreshes
+        XCUIDevice.shared.press(.home)
+        sample.app.activate()
+        XCTAssertTrue(sample.app.wait(for: .runningForeground, timeout: 5), "the app in the foreground again")
 
         let tid = try await sample.harness.push(appId: sample.appId, userId: sample.userId, title: "Refresh",
                                                 body: "iOS E2E refresh", policy: "NOT_DELIVERED", timeoutMinutes: 30)
@@ -106,8 +111,10 @@ final class IOSE2ETests: XCTestCase {
                                                 body: "iOS E2E logout", policy: "NOT_DELIVERED", timeoutMinutes: 5)
         try await sample.debugPush(tid, title: "Logged out")
         XCTAssertEqual(sample.shownDeviceId, "not registered", "still logged out when the push arrived")
-        try await sample.awaitState(tid, "FALLBACK_TRIGGERED", 30)
-        try await sample.awaitWebhooks(tid, 1)
+        // the user's only device is revoked: the backend stores the push closed, never tracked, no fallback (spec D4)
+        try await sample.awaitState(tid, "NO_DEVICE_REGISTERED", 10)
+        try await Task.sleep(nanoseconds: 7_000_000_000) // past the 5 s timeout (fast clock: 1 min = 1 s)
+        try await sample.awaitWebhooks(tid, 0)
         let delivered = try await sample.harness.timelineHas(tid, "DELIVERED")
         XCTAssertFalse(delivered, "no DELIVERED in the timeline")
     }

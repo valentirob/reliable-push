@@ -8,6 +8,231 @@ Everything left after `v0.1.0` is in [TODO.md](TODO.md): each item says why it i
 unblocks it. Agents: remind the maintainer of its section 1 (real APNs and the locked-device check, real FCM, Maven
 Central) at the start of a session.
 
+## 2026-11-08 (18) — Claude Code — release 0.2.0
+
+- **Done:** cycle 6 (sidecar integration revision) merged into `develop` (`4818e44`) after the final review fix wave
+  and one more Android fix found by its re-review (`6779eca`: the minimal notification is gated on its own channel
+  before `DELIVERED` is recorded, so a notification the system drops never suppresses the fallback). CI on `develop`
+  green: Backend, Android, iOS, Client and harness (payload jar on Java 8 and 21), CodeQL. `release/0.2.0` bumped every
+  component from `0.2.0-SNAPSHOT` to `0.2.0` (Maven modules, Android, iOS, Helm chart `0.2.0`), dated the CHANGELOG,
+  and updated README, guides, TODO 5.1 and the presentation; merged into `main` with tag `v0.2.0` and back into
+  `develop`, which is now `0.3.0-SNAPSHOT`. GitHub release page `reliable-push 0.2.0`.
+- **Verification before the merge:** backend `Tests run: 352` unit and `342` IT; root verify; iOS 135 tests (1
+  skipped), size `292896 bytes (limit 307200)`; Android 149 unit tests; `[e2e] summary: 23/23 passed`; iOS E2E 8/8
+  (1 skipped); Android E2E 7/8 (1 skipped) with only `offline-delivery-is-sent-when-network-returns` failing, the known
+  JobScheduler flake (fails on the pre-fix head too, passes alone: `Android E2E: 1/1 passed`); Helm checks passed.
+- **Open:** make the Android offline-delivery E2E robust (the emulator's JobScheduler leaves the retry job ready and
+  never starts it; no SDK change). V7 was edited in place before the release: local databases migrated on the feature
+  branch need a reset. TODO section 1 (real APNs and the locked-device check, real FCM, Maven Central) still waits for
+  the maintainer.
+- **Next:** TODO 5.1, pick the 0.3.0 scope (for example the push gateway mode, once the sender teams say how much they
+  can change).
+
+## 2026-11-08 (17) — Claude Code — cycle 6: sidecar integration revision (0.2.0, on `feature/sidecar-integration-revision`)
+
+- **Done:** the sidecar integration revision (spec `docs/specs/2026-11-08-sidecar-integration-revision-design.md`,
+  plan `docs/plans/2026-11-08-cycle6-sidecar-integration-revision.md`; FR-1, FR-5, FR-6, NFR-2 changed, FR-20 to FR-24
+  new). The sidecar stays; what changed:
+  - Task 1, payload jar `payload-java/` (Java 8 bytecode, zero dependencies): `TrackingIds`, `ApnsPayloads`,
+    `FcmPayloads`, `PayloadException` (8 codes), 39 golden vectors for other languages; CI runs it on Java 8 and 21.
+  - Tasks 2-3, backend: required sender `trackingId` (lower-cased, idempotent, `409` cross-app and `externalId`
+    mismatch), `NO_DEVICE_REGISTERED` (no active device: stored closed, never a fallback), migration
+    `V7__sidecar_revision.sql`, per-app `device-token-events-grace` (90 days, capped at 3650) on exactly
+    `POST /v1/events` and `DELETE /v1/devices/me`, metrics `rp_notifications_registered_total{outcome}`,
+    `rp_notification_registration_seconds`, `rp_events_total{token}`.
+  - Task 4, `client-java`: `trackingId` required and lower-cased, `NO_DEVICE_REGISTERED`, 1 s timeout advice.
+  - Task 5, iOS: no renewal on receive, `ensureRegistered` (async provider, 30 s cap), extension timeout 2 s, handler
+    exactly once on every path (fault injection tests).
+  - Task 6, Android: no renewal, `ensureRegistered` with a callback provider (no coroutines, NFR-10), `handle` gates on
+    the final channel, persists `DELIVERED`, then posts; catch-all with a minimal notification.
+  - Task 7, harness, load test and device E2E: fake sender and console on the jar, simulator without renewal, four new
+    scenarios (`no-device-registered`, `client-tracking-id`, `registration-lost`, `token-grace`), device logout tests
+    expect `NO_DEVICE_REGISTERED`.
+  - Task 8 (this entry): docs, diagrams and presentation. `integration-guide.md` rewritten around the sender flow
+    (checklist, outcome table, residual case, raw APNs / Pushy / Firebase Admin SDK examples, golden vectors) and the
+    false "the SDK never hides a notification" corrected (Android posts it: data message → local notification, the
+    market-standard model); `ios.md` / `android.md` completed (parked minors: `provider_timeout` in the WARN list, "no
+    NotificationManager" false case, missing Android WARN names); `api.md` and `openapi.yaml` (lower case, `409`
+    cases, validation order, grace only on events and logout); `security.md` (cross-app `409`); `deployment.md` and
+    `operations.md` (V7: one transaction, exclusive lock on `notification` while the state check is re-validated,
+    stop-then-start, backend before senders); `architecture.md`, `getting-started.md`, `requirements.md`, `README.md`,
+    `testing.md`, `CONTRIBUTING.md`, `overview.md` (sender flow with the jar, iOS bounded wait, Android gate → persist →
+    post, `ensureRegistered`), the at-a-glance SVG (PNG re-rendered at 2x with headless Chrome), the presentation (new
+    "Sender flow" slide, Android and iOS slides, sizes, status), `CHANGELOG.md` (cycle 6 entries and the incompatible
+    changes), `TODO.md` (2.1: the jar is the switch point; 4.11 iOS size headroom; 4.12 simulator drops 429/503).
+    Backend minors: V7 kept as is (a `not valid` constraint plus `validate` in the same Flyway transaction would still
+    hold the exclusive lock; documented instead); `EventsGraceIT` sends the dot-segment paths raw (`java.net.URI`), adds
+    `%2E%2E`, and checks that no `deviceToken` comes back.
+- **State:** from the task ledger: payload jar 96 tests (39 vectors); `client-java` 39; iOS package tests 133 (1
+  skipped), size 292,896 bytes; Android 143 unit tests, release AAR 75,197 bytes; `./scripts/e2e.sh`
+  `[e2e] summary: 23/23 passed`; `iOS E2E: 8/8 passed, 1 skipped`; `Android E2E: 8/8 passed, 1 skipped`. Runs of this
+  entry (2026-11-08, after the docs and the `EventsGraceIT` change): `cd backend && ./mvnw -B verify`: unit 352, IT 341,
+  0 failures, line coverage 95.4 %, BUILD SUCCESS; root `./mvnw -B verify`: payload 96, client 39, harness 169 unit +
+  92 IT, loadtest 19, BUILD SUCCESS; `deploy/helm/scripts/validate.sh`: 93 unit tests, all checks passed. Not re-run
+  here: E2E, device suites (no code change since Task 7).
+- **Open:** the Mermaid diagrams were not rendered locally (no Mermaid CLI; GitHub renders them); parked minors from
+  the reviews: Task 7 (check that the load stack's token validity outlasts a run; margin and Javadoc done in the final
+  wave), Task 6 (narrow window between
+  `logout` and a new `ensureRegistered`), Task 5 (weak slot-id assertion in a test); TODO 4.11 (iOS size headroom) and
+  4.12; the Java 8 CI leg of the payload jar has not run yet (first push); TODO section 1 (real APNs and FCM, Maven
+  Central, now with the payload jar).
+- **Final review fix wave (2026-11-08):** the whole-branch review found two important issues, both fixed test first:
+  an upper-case `rp_tid` was never acknowledged (the backend echoes lower case, both SDKs matched exactly): iOS
+  `TrackingId.parse` and Android `handle`/`trackOpen` now normalize to lower case, both `EventSender`s match
+  case-insensitively, the test stubs answer in lower case like the backend, and the payload jar embeds `rp_tid`
+  lower-cased; `FcmPayloads` turned a silent data-only message into a blank notification: new code
+  `FCM_NO_NOTIFICATION` (9 codes, 47 vectors). Minors: an unanswered iOS settings read counts as shown (records
+  `DELIVERED`); Android `handle` persists `DELIVERED` before the minimal notification when it threw before the persist
+  and the gate never said no; the active-device window includes the 60 s verifier skew (`ActiveDeviceWindowIT`); V7
+  backfills `token_expires_at` as `last_seen_at` + 10 years (conservative upper bound; V7 edited in place, it is
+  unreleased); harness `TokenGrace` margin 5 s and the `SKEW` cross-reference; simulator Javadoc on dropped 429/503;
+  docs (`ios.md` blank line, guide wording, README long lines, plan deviation: the extension-timing device E2E of spec
+  §7 is covered by unit tests only). `provider_timeout` in the iOS WARN list and "no `NotificationManager`" in the
+  Android false cases were already there. Runs after the wave: `cd backend && ./mvnw -B verify`: unit 352, IT 342,
+  0 failures, line coverage 95.5 %, BUILD SUCCESS; root `./mvnw -B verify`: payload 108, client 39, harness 169 unit +
+  92 IT, loadtest 19, BUILD SUCCESS; iOS package tests 135 (1 skipped, 0 failures), size gate 292,896 bytes (unchanged,
+  limit 307,200); Android `./gradlew build :sample:compileDebugAndroidTestKotlin` BUILD SUCCESSFUL, 147 unit tests,
+  release AAR 75,592 bytes; `./scripts/e2e.sh` `[e2e] summary: 23/23 passed`; `iOS E2E: 8/8 passed, 1 skipped`;
+  `./scripts/android-e2e.sh`: `Android E2E: 7/8 passed, 1 skipped` in every full run of this session (5 runs):
+  `offline-delivery-is-sent-when-network-returns` times out because the emulator's JobScheduler does not start the
+  SDK's retry job although `dumpsys jobscheduler` shows it `Ready: true` with every constraint satisfied (not in the
+  pending queue). Not caused by this wave: the pre-fix branch head `0a602b3` fails the same way (1 of its 2 full runs;
+  mixed old/new trees passed 2 of 4), and the test passes alone (`--test offlineDeliveryIsSentWhenNetworkReturns`:
+  1/1 passed on both trees); `deploy/helm/scripts/validate.sh`: 93 unit tests, all checks passed.
+- **Next:** look at the flaky Android E2E offline test (emulator JobScheduler leaves a ready one-off job unstarted
+  in a full run; consider a longer wait or `cmd jobscheduler run` as a fallback in the test, not in the SDK), then merge
+  `feature/sidecar-integration-revision` into `develop` (`--no-ff`), push, CI (first run of the payload jar's Java 8
+  leg); then release 0.2.0 when the maintainer decides (TODO 5.1).
+
+## 2026-11-08 (16) — Claude Code — cycle 5: fallback circuit breaker (0.2.0, on `feature/fallback-circuit-breaker`)
+
+- **Done:** the per-app fallback circuit breaker (FR-18, FR-19; spec
+  `docs/specs/2026-11-07-fallback-circuit-breaker-design.md`, plan `docs/plans/2026-11-08-cycle5-fallback-circuit-breaker.md`):
+  - Backend package `io.reliablepush.fallback.circuit`: configuration (`fallback.suspended`, `fallback.circuit-breaker.*`),
+    migration `V6__fallback_circuit.sql`, detection before every claim under the blocking advisory lock `4242002`
+    (2 s `lock_timeout`, fail closed with `fallback.circuit_check_failed`), re-evaluation during long drains,
+    suppression as `FALLBACK_EXPIRED` without a call, daily event prune; admin routes
+    `GET /v1/admin/fallback-circuits`, `.../{appId}/events`, `POST .../{appId}:resume` (permission `fallback-control`,
+    `503` after 5 s on the lock); admin page badge, circuit view and "Resume fallbacks".
+  - Task 7: E2E scenario `fallback-circuit` on a dedicated harness app `circuit` (the E2E stack tunes the breaker for all
+    apps: window 30 s, `min-due` 10, `close-min-delivered` 3, `min-open` 5 s; no other scenario comes near it, and the
+    full run's logs show circuits opening only for `circuit`); Helm `config.fallback` example and a unit test; page fixes
+    (badge fetch no longer retries a 503 before the tiles render; the circuit view re-reads the circuit after a 409/404
+    resume); every doc of spec §8, the at-a-glance SVG/PNG (breaker in front of the webhook; PNG re-rendered at 2x with
+    headless Chrome) and a new presentation slide.
+- **Rulings:** the app `Clock` for detection; breaker disabled in backend tests and the load test; resume allowed from
+  any state, button only for `OPEN`; `fallback.suppressed` only when rows were closed. Spec §7: the E2E burst
+  step asserts fewer than `min-due` calls (guaranteed since the final fix wave: a tick claims only rows its check
+  counted); the batch sent while the circuit is open must get none. Observed: 0 calls, all 15 suppressed in one tick.
+- **State:** `cd backend && ./mvnw -B verify`: unit 310, IT 316, 0 failures, line coverage 95.2 %; root `./mvnw -B verify`:
+  client 34, harness 162 unit + 81 IT, loadtest 19, 0 failures; `deploy/helm/scripts/validate.sh`: 93 unit tests, all
+  checks passed; `./scripts/e2e.sh`: `[e2e] summary: 19/19 passed` (2026-11-08). Android and iOS suites not run (no
+  SDK change).
+- **Open:** TODO 4.8 (due-set indexes without `app_id`) and 4.9 (breaker untested under load); the circuit pages were
+  checked by the Playwright smoke only, not by a person; release 0.2.0 is the maintainer's call.
+- **Final review fix wave** (commits 6dc6f2d..this entry): (1) a tick takes its check instant once and passes it to
+  `CircuitBreaker.evaluate(appIds, at)`, the suppressor and `claimDue` as the due cut-off (lease from the real now; a
+  drain re-check advances it), so no claimed row came due after the check and the E2E burst assertion `fired < min-due`
+  is guaranteed (spec §4/§7 reworded); (2) metrics `rp_fallback_circuit_transitions_total{app,transition}` (once per
+  committed transition, both roles) and `rp_fallback_circuit_check_failed_total` (worker), in `operations.md` with
+  alert hints; (3) a `circuit_open` suppression chunk locks the circuit row and stops once it is no longer `OPEN`;
+  (4) circuit view shows the suspended message whatever `enabled` is, a 404 resume shows "App not found." once;
+  (5) `api.js` retries network errors for GET only; (6) the demo stack sets the breaker back to the production
+  defaults (`demo.override.yml`), `testing.md` says so and adds "bursts go to a dedicated app".
+  State after the wave: `cd backend && ./mvnw -B verify`: unit 317, IT 319, 0 failures, line coverage 95.3 %, BUILD
+  SUCCESS; root `./mvnw -B verify`: client 34, harness 162 unit + 81 IT, loadtest 19, BUILD SUCCESS; `./scripts/e2e.sh`:
+  `[e2e] summary: 19/19 passed` (burst: 0 calls, 15 `FALLBACK_EXPIRED`). Not run: Helm validate (no chart change),
+  Android/iOS suites (no SDK change). Note: transition timestamps use the tick's check instant, taken before the lock
+  wait, so two workers' events can be up to the 2 s lock timeout out of order.
+- **Next:** review loop, merge `feature/fallback-circuit-breaker` into `develop` (`--no-ff`), push, CI.
+
+## 2026-11-07 (15) — Claude Code — iOS extension reads nothing for untracked pushes
+
+- **Done:** review of how both SDKs treat a push without `rp_tid`: iOS `ReliablePushExtension.didReceive` and
+  `trackOpen`, Android `ReliablePush.handle` and `trackOpen` all check `rp_tid` first and return `false` / do nothing,
+  and the SDK declares no `FirebaseMessagingService`. One gap fixed (`bugfix/ios-extension-lazy-config`): the iOS
+  extension resolved the stored configuration in its initializer, so every push (the host's own too) opened the App
+  Group and could log `sdk.app_group_unavailable`; it now resolves it in `didReceive` after the `rp_tid` check. Tests
+  added (no read for foreign or malformed pushes, one read for tracked ones, configuration stored after creation is
+  used) and fail on the old code. `docs/ios.md`, overview §8 diagram (no-`rp_tid` edge) and CHANGELOG updated;
+  presentation and at-a-glance picture already say untracked pushes are left alone.
+- **State:** iOS package tests 115 run, 1 skipped, 0 failures; size gate 291,928 bytes (limit 307,200);
+  `./scripts/ios-e2e.sh` `iOS E2E: 8/8 passed, 1 skipped`.
+- **Next:** release 0.2.0 when the maintainer decides; TODO section 1.
+
+## 2026-11-07 (14) — Claude Code — ops dashboard doc gaps closed
+
+- **Done:** the four docs-only items of entry 13 (`bugfix/ops-dashboard-doc-gaps`, merged into `develop`):
+  `architecture.md` diagram says Flyway V1..V5; `deployment.md` has the `indisvalid` check and the failed-row delete for
+  an interrupted `V5` build, and a "Connection poolers" note (direct or session mode; PgBouncer transaction pooling not
+  supported because Flyway's migration lock is session-level); spec §2 lists the reserved id `false`; `operations.md`
+  notes the two connections the rollup and the retention wait hold, from the shared pool in combined mode.
+- **State:** docs only, no code or diagram change (overview, at-a-glance picture and presentation unaffected).
+- **Next:** release 0.2.0 when the maintainer decides; TODO section 1 (real APNs and the locked-device check, real FCM,
+  Maven Central).
+
+## 2026-11-07 (13) — Claude Code — cycle 4 merged into `develop`
+
+- **Done:** `feature/ops-dashboard` merged into `develop` (`--no-ff`) after the full check: backend `verify -Pimage`, root
+  reactor `verify`, Helm `validate.sh`, `./scripts/e2e.sh` `E2E: 18/18 passed`, `./scripts/ios-e2e.sh`
+  `iOS E2E: 8/8 passed, 1 skipped`. CI on `develop` first failed in `AdminSearchIT` (a seeded `PENDING` row due in
+  March 2026 was claimed by a running worker, so it read back as `FALLBACK_PENDING`); fixed by seeding open rows due in
+  2999 (`bugfix/admin-search-it-claimable-rows`). CI green after it.
+- **Not verified:** the signed-in dashboard views were not looked at by a person (only the Playwright smoke covers them);
+  `scripts/e2e.ps1` was never run (no Windows machine).
+- **Open (docs only):** `architecture.md` diagram label still says Flyway V1..V4; `deployment.md` lacks the
+  `indisvalid` check for an invalid `notification_app_created` left by a cancelled build; spec §2 does not list the
+  reserved id `false`; no note on the combined-mode shared pool for the retention wait or on PgBouncer transaction mode.
+- **Next:** release 0.2.0 when the maintainer decides; the docs-only items above (closed in entry 14).
+
+## 2026-11-07 (12) — Claude Code — cycle 4: final-review fix wave (on `feature/ops-dashboard`)
+
+- **Done:** the findings of the final whole-branch review, each test-first:
+  - Retention no longer stops for good behind a long rollup: `RollupRetentionGuard` takes the rollup's advisory lock
+    (blocking, `lock_timeout = 30min`) before reading `max(computed_at)`; a wait that runs out skips with
+    `retention.skipped reason=rollup_running`. `RetentionGuard` now returns the veto reason (`veto()`).
+  - Overview backlog query adds `due_at is not null`, so `notification_due` serves it (closed `DELIVERED` rows no longer
+    scanned).
+  - `notification_app_created` moved from `V4__admin.sql` (unreleased) to `V5__admin_index.sql`
+    (`create index concurrently`); `spring.flyway.postgresql.transactional-lock=false`, because the index build
+    otherwise hangs on Flyway's open lock transaction (observed: wait on `virtualxid`). Upgrade note in `deployment.md`.
+  - Devices lookup audit-logged (`admin.devices_viewed`, `rp.user_hash`).
+  - Search result links use the app of the search that produced them.
+  - R13: `rollup.failed` also logs the stack trace at ERROR; `/admin/**` sends `Cache-Control: no-cache`; admin key id
+    `false` rejected at startup; TODO 4.5-4.7 (oldest live day with `retention-days <= 7`, no backfill, live-query cost).
+- **State:** `cd backend && ./mvnw -B verify` passed (unit 272, IT 265, 0 failures; coverage gate met); E2E not run by this wave (the controller runs it).
+- **Docs:** `operations.md`, `admin.md`, `security.md`, `api.md`, `deployment.md`, `architecture.md`, spec §3, §3.2, §4,
+  §5, `openapi.yaml`, CHANGELOG, TODO. Diagrams and presentation checked: no change needed (no new component or flow).
+- **Next:** controller E2E run, then merge `feature/ops-dashboard` into `develop`.
+
+## 2026-11-07 (11) — Claude Code — cycle 4: ops dashboard (0.2.0, on `feature/ops-dashboard`)
+
+- **Done:** the read-only ops dashboard (FR-16, FR-17; spec `docs/specs/2026-11-06-ops-dashboard-design.md`, plan
+  `docs/plans/2026-11-06-cycle4-ops-dashboard.md`):
+  - Backend module `admin`: admin keys (hashed, scoped, `payload` permission), `/v1/admin/**` API, the page at `/admin/`,
+    `fallback_attempt` rows written by the worker, `daily_stats` rollup (`DailyRollupJob`), the retention guard,
+    audit events. Migration `V4__admin.sql`.
+  - Helm `config.admin`; harness: `admin-dashboard` scenario, `AdminSmokeE2E`, per-run admin key (`HARNESS_ADMINKEY`).
+  - Docs (task 9): `docs/admin.md`, `api.md`, `security.md`, `architecture.md`, `deployment.md`, `testing.md`,
+    `getting-started.md`, `overview.md` §5 (sections 5-10 became 6-11), at-a-glance SVG and PNG, presentation slide and
+    status slide, README, CHANGELOG `Unreleased`, TODO 5.1.
+- **Rulings:**
+  - R1 admin ITs get their keys from a test profile `admin`; default test contexts keep admin disabled.
+  - R2 `RetentionJob` asks an optional `RetentionGuard` interface, implemented in `admin`, so `notifications` does not depend on `admin`.
+  - R3 the real page replaces the placeholder `index.html`.
+  - R4 with no admin key, `/v1/admin/**` and `/admin/**` answer exactly like an unknown path.
+  - R5 page files live in `resources/admin-ui/`, mapped to `/admin/**` only when admin is enabled.
+  - R6 admin parameter errors are `400`; the sender and device APIs keep `422`.
+  - R7 `/overview` answers `{items}`, `/stats/daily` `{appId, days}`, `/notifications` `{items, nextCursor}`, `/devices` `{items}`.
+  - R8 the page was checked by fetch and Playwright; signed-in views were not checked by a person.
+  - R9 `#app` is the overview app selector, `<main>` has id `view` (the smoke test contract).
+  - R10 task 8 ran the web E2E only; the controller runs the iOS suite once at the end.
+  - R11 with `config.admin.keys` the chart also routes `/admin` (Ingress path appended, second OpenShift Route `-admin`, `route.host` required); unchanged without keys. Helm `validate.sh` passes (92 unit tests).
+- **State:** E2E expected `18/18 passed` (the controller runs it at the end; not run by the docs task).
+- **Open:** `scripts/e2e.ps1` was not run on Windows; the signed-in dashboard views were not checked by a person in a
+  browser; release 0.2.0 is the maintainer's call.
+- **Next:** review loop, full checks, merge `feature/ops-dashboard` into `develop` (`--no-ff`), push, CI.
+
 ## 2026-11-06 (10) — Claude Code — release 0.1.2
 
 - **Done:** release `v0.1.2` (M7 and M12 fixes) through `release/0.1.2`: `main` and tag `v0.1.2`, GitHub release

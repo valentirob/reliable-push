@@ -6,9 +6,24 @@ import android.os.Looper
 import io.reliablepush.android.RegisterResult
 import io.reliablepush.android.ReliablePush
 import java.io.File
+import java.util.concurrent.Callable
+import java.util.concurrent.ExecutionException
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
+
+/** What `ensureRegistered` must do, decided locally (spec §3.2). */
+internal enum class RegistrationNeed {
+    /** A device token with more than 20 % of its validity left and no `renewalNeeded`: nothing. */
+    NONE,
+
+    /** Unexpired, but `renewalNeeded` is set or less than 20 % is left: `POST /v1/devices/token:refresh`. */
+    REFRESH,
+
+    /** No (readable) token, or it is expired: ask the host for an ID token and register. */
+    ID_TOKEN,
+}
 
 /**
  * The one place that composes the SDK's parts for one configuration (base URL, app id, retry job id): [DeviceApi],
@@ -19,15 +34,18 @@ import java.util.concurrent.TimeUnit
  * flushes never overlap. Recording an event ([persist]) is disk-only and runs on the caller's thread or on a second,
  * persist-only thread ([persistOffMain]) that never does network I/O, so an event is on disk without waiting for a
  * flush that may take tens of seconds. `TokenStore` writes with a synchronous `commit()`.
+ *
+ * Token renewal ([refresh], [register]) happens only when the app calls `ensureRegistered` or `register`, never on
+ * the receive path or in a flush (spec §3.1, D5).
  */
 internal class Sdk private constructor(context: Context, val baseUrl: String, val appId: String, val jobId: Int) {
     private val app: Context = context.applicationContext
     val api = DeviceApi(baseUrl, appId, USER_AGENT)
     val store = TokenStore(app, cipherFactory())
-    val queue = EventQueue(queueDir(app))
+    val queue = queueFactory(queueDir(app))
     val scheduler = RetryScheduler(app, jobId)
 
-    fun sender(shouldStop: () -> Boolean = { false }) = EventSender(api, store, queue, clock, shouldStop)
+    fun sender(shouldStop: () -> Boolean = { false }) = EventSender(api, store, queue, shouldStop)
 
     /**
      * Persists this configuration. A stored configuration with another base URL or app id is replaced, and the
@@ -76,6 +94,54 @@ internal class Sdk private constructor(context: Context, val baseUrl: String, va
         }
     }
 
+    /** The local decision of `ensureRegistered`, in the order of spec §3.2; disk only (decrypts the token). */
+    fun registrationNeed(nowMillis: Long = clock()): RegistrationNeed {
+        val stored = store.load() ?: return RegistrationNeed.ID_TOKEN
+        if (stored.token.expiresAt <= nowMillis) return RegistrationNeed.ID_TOKEN
+        return if (store.renewalNeeded() || stored.token.needsRefresh(nowMillis)) {
+            RegistrationNeed.REFRESH
+        } else {
+            RegistrationNeed.NONE
+        }
+    }
+
+    /**
+     * Renews the stored device token (`POST /v1/devices/token:refresh`); saving it clears `renewalNeeded`. Returns
+     * `null` when there is no token or the backend answered `401` (the caller then takes the ID-token path); the
+     * registration is kept then, so the next registration reuses its device id.
+     */
+    fun refresh(): RegisterResult? {
+        val stored = store.load() ?: return null
+        return when (val r = api.refresh(stored.token.raw)) {
+            is ApiResult.Ok ->
+                if (store.save(Registration(stored.deviceId, r.value.deviceToken, r.value.expiresAt))) {
+                    SdkLog.info("token.refreshed", "device_id" to stored.deviceId)
+                    RegisterResult.Success(stored.deviceId)
+                } else {
+                    SdkLog.warn("device.register_failed", "reason" to "token_not_stored", "call" to "refresh")
+                    RegisterResult.Failed(null)
+                }
+            is ApiResult.Http -> when (r.status) {
+                401 -> {
+                    SdkLog.warn("auth.failed", "status" to 401, "call" to "refresh")
+                    null
+                }
+                429 -> {
+                    SdkLog.warn("rate_limit.exceeded", "retry_after" to r.retryAfterSeconds, "call" to "refresh")
+                    RegisterResult.Failed(429)
+                }
+                else -> {
+                    SdkLog.warn("device.register_failed", "status" to r.status, "call" to "refresh")
+                    RegisterResult.Failed(r.status)
+                }
+            }
+            is ApiResult.NetworkError -> {
+                SdkLog.warn("device.register_failed", "reason" to "network", "call" to "refresh")
+                RegisterResult.Failed(null)
+            }
+        }
+    }
+
     /** Best-effort revoke, then local cleanup in any case. True when the backend confirmed or nothing was registered. */
     fun logout(): Boolean {
         val reg = store.load()
@@ -102,6 +168,9 @@ internal class Sdk private constructor(context: Context, val baseUrl: String, va
             return false
         }
         queue.add(QueuedEvent(trackingId, type, occurredAtMillis))
+        // If the OS refuses the job, schedule() logs WARN retry.schedule_failed and never throws: the event stays
+        // queued and goes out with the next flush (this push's immediate send, the next push, a successful
+        // ensureRegistered/register, or the next configure).
         scheduler.schedule()
         return true
     }
@@ -114,7 +183,8 @@ internal class Sdk private constructor(context: Context, val baseUrl: String, va
     /**
      * Flushes the queue under the retry-job policy: the job is scheduled before a flush that has events (so a process
      * death mid-flush still leaves a retry behind), cancelled when the flush empties the queue or nothing can be sent
-     * (not registered; `register` flushes again), and rescheduled for a server `Retry-After` above the backoff start.
+     * (not registered, or the token was rejected with `401`; a successful `ensureRegistered` or `register` flushes
+     * again), and rescheduled for a server `Retry-After` above the backoff start.
      */
     fun flush() {
         if (queue.size() == 0) return
@@ -149,6 +219,13 @@ internal class Sdk private constructor(context: Context, val baseUrl: String, va
         /** Test hook: Robolectric has no AndroidKeyStore. */
         @Volatile
         var cipherFactory: () -> TokenCipher = { KeystoreTokenCipher() }
+
+        /** Test hook: fault injection on the queue. */
+        @Volatile
+        var queueFactory: (File) -> EventQueue = { EventQueue(it) }
+
+        /** Longest wait of a main-thread `handle` for its `DELIVERED` write before posting anyway. */
+        const val MAIN_PERSIST_WAIT_MS = 500L
 
         private val clock: () -> Long = System::currentTimeMillis
 
@@ -187,6 +264,28 @@ internal class Sdk private constructor(context: Context, val baseUrl: String, va
             if (Looper.myLooper() == Looper.getMainLooper()) persistExecutor.execute { guarded(task) } else guarded(task)
         }
 
+        /**
+         * Runs disk-only [task] and returns its result before the caller goes on: `handle` posts only once `DELIVERED`
+         * is on disk. Off the main thread (the FCM entry point) it runs inline. On the main thread it runs on the
+         * persist-only thread and the caller waits at most [MAIN_PERSIST_WAIT_MS]: past that (a stuck disk) it returns
+         * `null`, the write completes later and the post is not held up. What [task] throws is rethrown.
+         */
+        fun <T> persistBeforePost(task: () -> T): T? {
+            if (Looper.myLooper() != Looper.getMainLooper()) return task()
+            val future = persistExecutor.submit(Callable { task() })
+            return try {
+                future.get(MAIN_PERSIST_WAIT_MS, TimeUnit.MILLISECONDS)
+            } catch (e: ExecutionException) {
+                throw e.cause ?: e
+            } catch (e: TimeoutException) {
+                SdkLog.warn("tracking.persist_slow", "wait_ms" to MAIN_PERSIST_WAIT_MS)
+                null
+            } catch (e: InterruptedException) {
+                Thread.currentThread().interrupt()
+                null
+            }
+        }
+
         private fun guarded(task: () -> Unit) {
             try {
                 task()
@@ -197,6 +296,15 @@ internal class Sdk private constructor(context: Context, val baseUrl: String, va
 
         fun onMain(block: () -> Unit) {
             mainHandler.post(block)
+        }
+
+        /** Runs [block] on the main thread after [delayMillis] (a timeout); [cancelOnMain] removes it. */
+        fun onMainDelayed(delayMillis: Long, block: Runnable) {
+            mainHandler.postDelayed(block, delayMillis)
+        }
+
+        fun cancelOnMain(block: Runnable) {
+            mainHandler.removeCallbacks(block)
         }
 
         /** Test hook: waits until the persist-only thread has run everything submitted so far. */

@@ -2,6 +2,7 @@ package io.reliablepush.devices;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -26,8 +27,9 @@ class DeviceRepository {
 
     void insert(Device d) {
         jdbc.sql("""
-                        insert into device (id, app_id, user_id, platform, token_version, created_at, last_seen_at)
-                        values (:id, :appId, :userId, :platform, :version, :createdAt, :lastSeenAt)
+                        insert into device (id, app_id, user_id, platform, token_version, created_at, last_seen_at,
+                                            token_expires_at)
+                        values (:id, :appId, :userId, :platform, :version, :createdAt, :lastSeenAt, :tokenExpiresAt)
                         """)
                 .param("id", d.id())
                 .param("appId", d.appId())
@@ -36,12 +38,13 @@ class DeviceRepository {
                 .param("version", d.tokenVersion())
                 .param("createdAt", timestamp(d.createdAt()))
                 .param("lastSeenAt", timestamp(d.lastSeenAt()))
+                .param("tokenExpiresAt", timestamp(d.tokenExpiresAt()))
                 .update();
     }
 
     Optional<Device> findById(UUID id) {
-        return jdbc.sql("select id, app_id, user_id, platform, token_version, created_at, last_seen_at, revoked_at"
-                        + " from device where id = :id")
+        return jdbc.sql("select id, app_id, user_id, platform, token_version, created_at, last_seen_at, revoked_at,"
+                        + " token_expires_at from device where id = :id")
                 .param("id", id)
                 .query(DeviceRepository::map)
                 .optional();
@@ -49,19 +52,22 @@ class DeviceRepository {
 
     /**
      * Re-registration of an existing device of the same app and user: bumps {@code token_version} (all older tokens
-     * stop working), clears {@code revoked_at} and updates platform and last-seen.
+     * stop working), clears {@code revoked_at} and updates platform, last-seen and the token expiry ({@code
+     * tokenExpiresAt}: the older tokens are dead, so the new one's expiry replaces whatever was stored).
      *
      * @return the new token version, empty when no such device belongs to this app and user
      */
-    Optional<Integer> reRegister(UUID id, String appId, String userId, Device.Platform platform, Instant now) {
+    Optional<Integer> reRegister(
+            UUID id, String appId, String userId, Device.Platform platform, Instant now, Instant tokenExpiresAt) {
         return jdbc.sql("""
                         update device set token_version = token_version + 1, revoked_at = null,
-                                          platform = :platform, last_seen_at = :now
+                                          platform = :platform, last_seen_at = :now, token_expires_at = :expires
                         where id = :id and app_id = :appId and user_id = :userId
                         returning token_version
                         """)
                 .param("platform", platform.name())
                 .param("now", timestamp(now))
+                .param("expires", timestamp(tokenExpiresAt))
                 .param("id", id)
                 .param("appId", appId)
                 .param("userId", userId)
@@ -87,6 +93,48 @@ class DeviceRepository {
                         .param("version", tokenVersion)
                         .update()
                 == 1;
+    }
+
+    /**
+     * Token refresh: like {@link #touch}, and records the expiry of the token about to be issued. The stored expiry
+     * never moves backwards (the older tokens of this version stay valid until their own expiry).
+     *
+     * @return {@code true} if the device is active with this version
+     */
+    boolean touchForRefresh(UUID id, String appId, String userId, int tokenVersion, Instant now, Instant tokenExpiresAt) {
+        return jdbc.sql("""
+                                update device set last_seen_at = :now,
+                                                  token_expires_at = greatest(token_expires_at, :expires)
+                                where id = :id and app_id = :appId and user_id = :userId
+                                  and token_version = :version and revoked_at is null
+                                """)
+                        .param("now", timestamp(now))
+                        .param("expires", timestamp(tokenExpiresAt))
+                        .param("id", id)
+                        .param("appId", appId)
+                        .param("userId", userId)
+                        .param("version", tokenVersion)
+                        .update()
+                == 1;
+    }
+
+    /**
+     * Whether the user has an active device for the app (sidecar revision spec 2.3): not revoked, and its newest token
+     * still accepted on the grace routes at {@code now}, that is {@code now <= token_expires_at + skew + grace} with the
+     * verifier's {@link DeviceTokenService#SKEW}, so the active window equals token acceptance. Served by the
+     * {@code device_app_user} index.
+     */
+    boolean hasActiveDevice(String appId, String userId, Instant now, Duration grace) {
+        return jdbc.sql("""
+                                select exists (select 1 from device
+                                               where app_id = :appId and user_id = :userId
+                                                 and revoked_at is null and token_expires_at >= :threshold)
+                                """)
+                .param("appId", appId)
+                .param("userId", userId)
+                .param("threshold", timestamp(now.minus(grace).minus(DeviceTokenService.SKEW)))
+                .query(Boolean.class)
+                .single();
     }
 
     /**
@@ -137,6 +185,7 @@ class DeviceRepository {
                 rs.getInt("token_version"),
                 rs.getObject("created_at", OffsetDateTime.class).toInstant(),
                 rs.getObject("last_seen_at", OffsetDateTime.class).toInstant(),
-                revoked == null ? null : revoked.toInstant());
+                revoked == null ? null : revoked.toInstant(),
+                rs.getObject("token_expires_at", OffsetDateTime.class).toInstant());
     }
 }

@@ -387,6 +387,31 @@ class DeviceApiIT extends PostgresTestBase {
     }
 
     @Test
+    void registerRefreshAndReRegisterStoreTheIssuedTokensExpiry() {
+        String userId = uniqueUser();
+        ResponseEntity<String> registered = registerUser(userId, null);
+        UUID deviceId = UUID.fromString(deviceId(registered));
+        assertThat(storedExpiry(deviceId)).isEqualTo(Instant.parse(JsonPath.read(registered.getBody(), "$.expiresAt")));
+
+        // refresh moves an older expiry forward to the new token's
+        jdbc.sql("update device set token_expires_at = now() - interval '1 day' where id = :id").param("id", deviceId).update();
+        ResponseEntity<String> refreshed = refresh(bearer(registered));
+        assertThat(storedExpiry(deviceId)).isEqualTo(Instant.parse(JsonPath.read(refreshed.getBody(), "$.expiresAt")));
+
+        // re-registration kills every older token: its expiry replaces the stored one, even a later one
+        jdbc.sql("update device set token_expires_at = now() + interval '1000 days' where id = :id")
+                .param("id", deviceId).update();
+        ResponseEntity<String> again = registerUser(userId, deviceId.toString());
+        assertThat(deviceId(again)).isEqualTo(deviceId.toString());
+        assertThat(storedExpiry(deviceId)).isEqualTo(Instant.parse(JsonPath.read(again.getBody(), "$.expiresAt")));
+    }
+
+    private Instant storedExpiry(UUID deviceId) {
+        return jdbc.sql("select token_expires_at from device where id = :id").param("id", deviceId)
+                .query(java.time.OffsetDateTime.class).single().toInstant();
+    }
+
+    @Test
     void refreshAndRevokeLogEventsWithoutIdentifiersOfTheUser(CapturedOutput output) {
         String userId = uniqueUser();
         ResponseEntity<String> registered = registerUser(userId, null);
@@ -434,6 +459,15 @@ class DeviceApiIT extends PostgresTestBase {
                 .isEqualTo(1);
         // other devices are not affected
         assertThat(refresh(other).getStatusCode().value()).isEqualTo(200);
+    }
+
+    @Test
+    void anInGracePrincipalCannotRefresh() {
+        String userId = uniqueUser();
+        UUID deviceId = UUID.fromString(deviceId(registerUser(userId, null)));
+
+        assertThatThrownBy(() -> devices.refresh(new DevicePrincipal(APP, userId, deviceId, 0, true)))
+                .isInstanceOf(UnauthorizedException.class);
     }
 
     @Test
@@ -494,8 +528,8 @@ class DeviceApiIT extends PostgresTestBase {
         String userId = uniqueUser();
         UUID deviceId = UUID.randomUUID();
         jdbc.sql("""
-                insert into device (id, app_id, user_id, platform, token_version, created_at, last_seen_at)
-                values (?, 'removed-app', ?, 'ANDROID', 0, now(), now())
+                insert into device (id, app_id, user_id, platform, token_version, created_at, last_seen_at, token_expires_at)
+                values (?, 'removed-app', ?, 'ANDROID', 0, now(), now(), now() + interval '90 days')
                 """).params(deviceId, userId).update();
         Instant now = Instant.now();
         String token = tokens.issue(new DeviceClaims("removed-app", userId, deviceId, 0, now, now.plus(Duration.ofDays(1))))

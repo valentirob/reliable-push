@@ -9,7 +9,7 @@ with a message naming the key instead of failing the first request.
 | Profile | Effect |
 |---|---|
 | `api` | Marks an API-only instance: activate it **without** `worker` to run no background jobs. The HTTP endpoints themselves are not gated by it: every instance serves them |
-| `worker` | Enables the fallback scheduler (`FallbackScheduler`), the webhook client, `RetentionJob` and `DueBacklogJob` (`rp_due_backlog`) |
+| `worker` | Enables the fallback scheduler (`FallbackScheduler`), the webhook client, `RetentionJob`, `DailyRollupJob` (when admin is enabled) and `DueBacklogJob` (`rp_due_backlog`) |
 | `json` | ECS JSON log lines on stdout (default whenever `local` is not active) |
 | `local` | Human-readable log pattern for development (`%d{ISO8601} %-5level [%t] %c{1.} [trace=...] - %m`) |
 | `e2e`, `demo` | Allow the fast clock (`reliable-push.testing.minute-duration`), used by the local harness only. Also append the same ECS JSON log lines to the file `RP_LOG_FILE` (default `/tmp/rp-logs/backend.json`, append, no rotation; stdout unchanged), which the harness tails from a shared volume |
@@ -48,7 +48,8 @@ Database connection (Spring Boot): `SPRING_DATASOURCE_URL` (`jdbc:postgresql://h
 ### Configuration reference (`reliable-push.*`)
 
 Durations take a unit (`500ms`, `30s`, `2m`, `1h`, `90d`). A bare number is read in the key's own unit where the table
-says so (minutes for `worker.lease` and `fallback.backoff`, days for `device-token-validity`), otherwise as milliseconds
+says so (minutes for `worker.lease`, `fallback.backoff` and the `fallback.circuit-breaker` durations, days for
+`device-token-validity`), otherwise as milliseconds
 (Spring's default), so always write the unit for `poll-interval`, `revocation-cache-ttl` and `http-timeout`.
 
 | Key | Default | Validation / notes |
@@ -64,6 +65,18 @@ says so (minutes for `worker.lease` and `fallback.backoff`, days for `device-tok
 | `worker.backlog-refresh-interval` | `30s` | Optional; how often `rp_due_backlog` is recomputed |
 | `retention-days` | `30` | At least 1. Closed notifications older than this are deleted daily |
 | `retention.cron` | `0 17 3 * * *` | Spring cron expression (six fields, always UTC) of the daily retention run (worker role); `-` disables the schedule |
+| `admin.keys[]` | none (admin disabled) | Admin API keys of the ops dashboard: `{id, key-sha256, apps, permissions}`; `id` matches `[a-z0-9-]{1,40}` and must not be `false` (rejected at startup: the admin beans are switched on by the property `admin.keys[0].id`, which `false` would turn off); see `security.md`. With no key, `/v1/admin/**` and `/admin/**` answer 404 |
+| `admin.rate-limit-per-minute` | `600` | At least 1. Admin requests per minute per admin key and instance |
+| `admin.rollup-retention-days` | `400` | At least 1. `daily_stats` rows older than this are deleted by the rollup; fallback circuit events (`fallback_circuit_event`) older than this are deleted by the circuit detector once a day per worker, also while admin or the circuit breaker is disabled |
+| `admin.rollup.cron` | `0 7 3 * * *` | Spring cron expression (UTC) of `DailyRollupJob` (worker role, runs only when admin is enabled); `-` disables the schedule and the retention guard |
+| `fallback.suspended` | `false` | `true`: no fallback for any app, whatever its circuit (also `FORCED`); due fallbacks end `FALLBACK_EXPIRED` without a call. Wins over everything (see "Fallback circuit breaker" below) |
+| `fallback.circuit-breaker.enabled` | `true` | `false`: no detection, every circuit reads as `CLOSED` (the behaviour before 0.2.0) |
+| `fallback.circuit-breaker.window` | `5m` | Positive; detection window. A bare number means minutes. Never scaled by the fast clock |
+| `fallback.circuit-breaker.min-due` | `50` | At least 1; a circuit opens only when at least this many fallbacks of the app came due in the window |
+| `fallback.circuit-breaker.max-delivered-ratio` | `0.10` | Greater than 0 and at most 1; opens when less than this share of those notifications' cohort was delivered |
+| `fallback.circuit-breaker.close-min-delivered` | `10` | At least 1; closes when this many notifications created after the open were delivered |
+| `fallback.circuit-breaker.min-open` | `1m` | Positive; an open circuit stays open at least this long. A bare number means minutes |
+| `fallback.circuit-breaker.force-hold` | `60m` | Positive; how long an operator resume keeps detection off for the app. A bare number means minutes |
 | `testing.minute-duration` | unset (1 minute = 60 s) | Fast clock, e.g. `1s`. Accepted only with the `e2e` or `demo` profile, must be positive |
 
 Per app, under `apps.<appId>` (the app id matches `[A-Za-z0-9][A-Za-z0-9_-]{0,63}`; at least one app is required, a
@@ -79,6 +92,7 @@ configuration without any app fails the start):
 | `identity.jwks-uri` | discovery | Optional; otherwise `<issuer>/.well-known/openid-configuration` is used. https (http only for a local issuer) |
 | `identity.grant-secret-ref` | none | Required for `signed-grant` (`env:NAME`, at least 32 bytes), rejected for other types |
 | `device-token-validity` | `90d` | Positive duration (a bare number means days); lifetime of issued device tokens |
+| `device-token-events-grace` | `90d` | Duration, not negative (a bare number means days; `0` = no grace). Maximum 3650 days (startup fails above). A device whose newest token expired less than this ago still counts as active, so the user's notifications are tracked; without an active device a registration is stored as `NO_DEVICE_REGISTERED`. The same grace applies to the device token itself: `POST /v1/events` and `DELETE /v1/devices/me` accept a token expired by up to this long (`token:refresh` does not; the app registers again); signature, issuer, version and revocation checks still apply |
 | `default-policy` | `NOT_DELIVERED` | `NOT_DELIVERED` or `NOT_READ`; used when a registration omits `policy` |
 | `default-timeout-minutes` | `10` | At least 1; used when a registration omits `timeoutMinutes` |
 | `rate-limits.device-per-minute` | `60` | At least 1; per device, and per user for registration |
@@ -124,6 +138,8 @@ Other useful standard settings: `SERVER_PORT` (default 8080), `LOGGING_LEVEL_<LO
 `SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE` (default 10) and `SPRING_DATASOURCE_HIKARI_CONNECTIONTIMEOUT` (milliseconds;
 the application sets 5000 instead of Hikari's 30000, see "Database pool" below).
 
+The ops dashboard ([admin.md](admin.md)) is served by every instance that serves HTTP and exists only when an admin key is configured.
+
 ## Health and metrics
 
 - Kubernetes probes: `GET /actuator/health/liveness` and `GET /actuator/health/readiness` (probes enabled). Only
@@ -136,15 +152,26 @@ the application sets 5000 instead of Hikari's 30000, see "Database pool" below).
 
 | Metric | Type | Meaning |
 |---|---|---|
-| `rp_notifications_registered_total` | counter | Notifications inserted (replays of an `externalId` are not counted) |
-| `rp_events_total{type,late}` | counter | Event rows stored; `type` = `DELIVERED`/`READ`, `late` = `true` when the transition no longer applied |
-| `rp_fallback_total{outcome}` | counter | Fallback outcomes persisted by the worker: `triggered`, `failed`, `expired` |
+| `rp_notifications_registered_total{outcome}` | counter | Notifications inserted (replays of a `trackingId` are not counted); `outcome` = `pending` (tracked) or `no_device_registered` (the user had no active device: stored closed, never falls back) |
+| `rp_notification_registration_seconds` | histogram | Server time of `POST /v1/notifications` (`_bucket` with `le` = 5 ms … 5 s, `_count`, `_sum`, `_max`). Compare it with the sender's registration timeout (1 s recommended): a registration slower than the timeout and the whole push delivery can cause one needless fallback |
+| `rp_events_total{type,late,token}` | counter | Event rows stored; `type` = `DELIVERED`/`READ`, `late` = `true` when the transition no longer applied, `token` = `valid` or `grace` (the device token was expired but inside `device-token-events-grace`; a rising `grace` share means apps are not reopened often enough to refresh) |
+| `rp_fallback_total{outcome}` | counter | Fallback outcomes persisted by the worker: `triggered`, `failed`, `expired` (`expired` includes the fallbacks suppressed by the circuit breaker) |
+| `rp_fallback_suppressed_total{app,reason}` | counter | Fallbacks closed as `FALLBACK_EXPIRED` without a call by the circuit breaker; `reason` = `circuit_open` or `fallback_suspended`. **Worker role only** |
+| `rp_fallback_circuit_transitions_total{app,transition}` | counter | Committed circuit transitions, one per stored `fallback_circuit_event`; `transition` = `OPENED`, `CLOSED`, `FORCED` or `FORCE_ENDED`. Both roles (a resume is counted by the API replica that served it): sum over the replicas |
+| `rp_fallback_circuit_check_failed_total` | counter | Worker circuit checks that failed (database error, detector lock not obtained in 2 s): that tick claimed nothing (fail closed). **Worker role only** |
 | `rp_webhook_latency_seconds` | timer | Duration of every webhook call (`_count`, `_sum`, `_max`) |
 | `rp_due_backlog` | gauge | Rows the worker could claim now, refreshed every 30 s. **Worker role only**: an `api`-only replica does not expose it |
 
-Tags are fixed enumerations (never app, user or tracking ids); all series exist at 0 from startup. Useful alerts:
+Tags are fixed enumerations (never user or tracking ids; an app id only as `app` of `rp_fallback_suppressed_total` and
+`rp_fallback_circuit_transitions_total`, one series per configured app and reason or transition); all series exist at 0
+from startup. Useful alerts:
 `rp_due_backlog` staying above a few `batch-size` values (the worker cannot keep up), `rate(rp_fallback_total{outcome="failed"})`
-or `expired` rising (receiver down, window too tight), and `up` of the worker role.
+or `expired` rising (receiver down, window too tight), a circuit open:
+`increase(rp_fallback_circuit_transitions_total{transition="OPENED"}[5m]) > 0` or `rp_fallback_suppressed_total{reason="circuit_open"}`
+rising (tracking is missing for that app: [runbook](#runbook-circuit-open)), `transition="FORCED"` (an operator resumed
+fallbacks, for the audit trail), sustained check failures: `rate(rp_fallback_circuit_check_failed_total[5m]) > 0` for
+several minutes (no fallback fires while the check fails; also WARN `fallback.circuit_check_failed`), and `up` of the
+worker role.
 
 ## Logs
 
@@ -175,24 +202,38 @@ below, all top-level. ThreadContext entries `trace.id` and `rp.*` are top-level;
 | Event | Emitted when | Main fields |
 |---|---|---|
 | `api.request` | Every HTTP request completes | `http.request.method`, `url.path` (route template), `http.response.status_code`, `event.duration` (ns), `event.outcome` (`success` below 400), `rp.app_id`, `rp.device_id` when authenticated |
-| `notification.registered` | A notification was inserted | `rp.app_id`, `rp.tracking_id`, `rp.user_hash` |
-| `notification.duplicate` | A registration repeated an existing `externalId` | same |
+| `notification.registered` | A notification was inserted and is tracked (`PENDING`) | `rp.app_id`, `rp.tracking_id`, `rp.user_hash` |
+| `notification.no_device_registered` | A notification was inserted for a user without an active device: stored as `NO_DEVICE_REGISTERED`, no fallback | same |
+| `notification.duplicate` | A registration repeated an existing `trackingId` (nothing inserted) | same |
 | `notification.cancelled` | Sender cancelled a notification | `rp.app_id`, `rp.tracking_id` |
 | `device.registered` | Device registered or re-registered | `rp.app_id`, `rp.device_id`, `rp.user_hash` |
 | `device.token_refreshed` | Device token refreshed | same |
 | `device.revoked` | Device revoked | same |
-| `tracking.event_accepted` | An event was stored (also late ones) | `rp.event_type`, `rp.late`, `rp.tracking_id`, `rp.device_id`, `rp.app_id`, `rp.user_hash` |
+| `tracking.event_accepted` | An event was stored (also late ones) | `rp.event_type`, `rp.late`, `token_state` (`valid` or `grace`), `rp.tracking_id`, `rp.device_id`, `rp.app_id`, `rp.user_hash` |
 | `tracking.event_ignored` | Duplicate event (`reason=duplicate`) | same |
-| `auth.failed` (WARN) | Credential rejected | `reason` code only: `missing_key`, `unknown_key`, `missing_token`, `malformed`, `unknown_kid`, `bad_signature`, `wrong_issuer`, `wrong_audience`, `expired`, `not_yet_valid`, `missing_user_claim`, `lifetime_too_long`, `jwks_unavailable`, `revoked`, `unknown_app` (a valid device token of an app no longer configured); `rp.app_id` for device registration |
-| `authz.denied` (WARN) | Event for a `trackingId` of another user (`reason=tracking_id_of_another_user`) | `rp.app_id`, `rp.device_id`, `rp.user_hash`, `rp.tracking_id` |
-| `rate_limit.exceeded` (WARN) | A bucket ran empty | `rate_limit.scope` = `sender`, `device` or `register`, `rp.app_id`, `rp.device_id` or `rp.user_hash` |
+| `auth.failed` (WARN) | Credential rejected | `reason` code only: `missing_key`, `unknown_key`, `missing_admin_key`, `unknown_admin_key` (admin API, header `X-Admin-Key`), `missing_token`, `malformed`, `unknown_kid`, `bad_signature`, `wrong_issuer`, `wrong_audience`, `expired`, `not_yet_valid`, `missing_user_claim`, `lifetime_too_long`, `jwks_unavailable`, `revoked`, `unknown_app` (a valid device token of an app no longer configured); `rp.app_id` for device registration |
+| `authz.denied` (WARN) | Event for a `trackingId` of another user (`reason=tracking_id_of_another_user`) | `token_state`, `rp.app_id`, `rp.device_id`, `rp.user_hash`, `rp.tracking_id` |
+| `rate_limit.exceeded` (WARN) | A bucket ran empty | `rate_limit.scope` = `sender`, `device`, `register` or `admin`, `rp.app_id`, `rp.device_id`, `rp.user_hash` or (admin) `rp.admin_key` |
+| `admin.search` | Admin notification search answered | `rp.admin_key`, `rp.app_id`, `filters` = comma-separated filter names used (never values) |
+| `admin.notification_viewed` | Admin opened a notification detail | `rp.admin_key`, `rp.app_id`, `rp.tracking_id`, `rp.user_hash` |
+| `admin.payload_viewed` | Admin read a stored fallback payload (needs the `payload` permission) | same |
+| `admin.devices_viewed` | Admin listed the devices of a user | `rp.admin_key`, `rp.app_id`, `rp.user_hash` (never the user id) |
+| `admin.fallback_resumed` | An operator resumed the fallbacks of an app through the admin API (needs the `fallback-control` permission); `fallback.circuit_forced` follows from the same action | `rp.admin_key` (key id, never the key), `rp.app_id` |
 | `fallback.claimed` | The worker claimed a due row | `rp.app_id`, `rp.user_hash`, `rp.attempt` (number of the attempt about to be made) |
 | `fallback.reclaimed` (WARN) | Claimed while the previous lease was still set: the previous holder crashed or was too slow | same |
 | `fallback.dispatched` | Webhook answered `2xx`, row closed `FALLBACK_TRIGGERED` | `rp.attempt`, `event.duration`, `http.response.status_code` |
 | `fallback.retry_scheduled` | Retryable failure, next attempt scheduled | `reason`, `rp.attempt`, `event.duration`, `rp.next_attempt_at`. WARN with `reason=app_not_configured` when the row's app is unknown on this instance |
 | `fallback.failed` (WARN) | Final failure or attempts exhausted, `FALLBACK_FAILED` | `reason`, `rp.attempt`, `event.duration` |
 | `fallback.expired` (WARN) | Closed as `FALLBACK_EXPIRED` | `reason` = `trigger_window_passed`, `next_retry_after_trigger_window` or `app_not_configured` |
+| `fallback.circuit_opened` (WARN) | The circuit detector opened an app's fallback circuit: at least `min-due` fallbacks came due in the window and less than `max-delivered-ratio` of their cohort was delivered | `rp.app_id`, `due` (counted up to `min-due`), `ratio` (delivered share of the cohort) |
+| `fallback.circuit_closed` | An app's circuit closed again: `DELIVERED` events resumed (from OPEN after `min-open`, or from FORCED), or the forced hold ended | `rp.app_id`, `reason` = `delivered_resumed` or `force_expired`, `suppressed` (fallbacks the finished period suppressed) |
+| `fallback.circuit_forced` (WARN) | An operator forced an app's fallbacks back on for `force-hold` (detection off for that app) | `rp.app_id`, `rp.admin_key` (key id, never the key), `suppressed` |
+| `fallback.suppressed` (WARN) | The worker closed an app's claimable fallbacks as `FALLBACK_EXPIRED` without calling the webhook, because its circuit is open or `fallback.suspended` is `true`. One line per tick and app (only when rows were closed), never one per notification | `rp.app_id`, `count` (rows closed this tick), `reason` = `circuit_open` or `fallback_suspended` |
+| `fallback.circuit_check_failed` (WARN) | The circuit evaluation or the suppression failed (database error, or the detector lock `4242002` held by another worker for more than 2 s): the tick claims nothing more, so no fallback fires unchecked; the next tick tries again. The stack trace follows at ERROR from logger `io.reliablepush.fallback.FallbackScheduler`. **Sustained, it means no fallback fires at all** | `reason` = exception class name |
 | `retention.purged` | Retention job finished | `count` (also 0) |
+| `retention.skipped` (WARN) | Retention did not run: admin is enabled, the rollup schedule is on and either `daily_stats` has no row computed in the last 20 hours, or a rollup was still running after the 30-minute wait | `reason` = `rollup_missing` or `rollup_running` |
+| `rollup.completed` | `DailyRollupJob` wrote the daily statistics | `count` = days written (not logged when another worker held the lock) |
+| `rollup.failed` (WARN) | The rollup failed and rolled back; the stack trace follows at ERROR from logger `io.reliablepush.admin.DailyRollupJob` (the rollup SQL carries no personal data) | `reason` = exception class name |
 
 Webhook failure `reason` codes: `http_<status>`, `timeout`, `io_error`, `interrupted`, `client_error`.
 
@@ -206,12 +247,79 @@ fails (logging never breaks a request).
 Regenerate the list from the code with
 `grep -rhoE '(EventLog\.(info|warn)\(|logEvent\(|logDevice\()"[a-z_.]+"' backend/src/main/java | sort -u`.
 
+## Fallback circuit breaker
+
+Every fallback costs money (SMS). When `DELIVERED` events stop reaching the backend for a systemic reason (API or
+ingress down, an SDK bug, a bad app release), every notification of that period would come due unmet and fire a
+fallback nobody needed. The circuit breaker stops that storm **per app**: a missed fallback is preferred to a storm of
+needless ones. Design: [spec](specs/2026-11-07-fallback-circuit-breaker-design.md); keys in the configuration reference
+above (Helm: `config.fallback`); changes take effect on restart.
+
+- **Detection** (worker role, every tick before any claim, and again during a drain longer than one poll interval): one
+  worker at a time (advisory lock `4242002`, waited for at most 2 s) reads, per app and at the instant the tick took
+  before waiting for the lock, the fallbacks of the last `window`
+  (rows due and not yet fired, calls in progress, and rows closed `FALLBACK_TRIGGERED`/`FALLBACK_FAILED` in the window).
+  With at least `min-due` of them, it reads their cohort (the app's notifications created in the same time range, at most
+  1,000) and opens the circuit when less than `max-delivered-ratio` of the cohort has `delivered_at` set. A campaign
+  whose users are partly offline does not trip it (most of the cohort was delivered); `READ` plays no part. The claims
+  that follow take only rows due at or before that instant, so every fallback fired was counted by a check: a burst of
+  untracked notifications due within one window fires fewer than `min-due` calls before its circuit opens.
+- **While `OPEN`:** the app's claimable fallbacks are closed as `FALLBACK_EXPIRED` in chunks of 1,000, without a webhook
+  call, and are **never resumed** (no queue to restore); events that arrive later are stored as `late`. One WARN
+  `fallback.suppressed` per tick and app; `rp_fallback_suppressed_total{app,reason}` and
+  `rp_fallback_total{outcome="expired"}` grow. Each chunk first checks that the circuit is still `OPEN`, so a resume
+  stops a long pass at the next chunk. Other apps are not affected.
+- **Closing:** by itself, once `min-open` has passed and at least `close-min-delivered` notifications created after the
+  open were delivered (`fallback.circuit_closed`, `reason=delivered_resumed`). An operator with the admin permission
+  `fallback-control` can force it (`FORCED`, detection off for `force-hold`) from the circuit view of the ops dashboard
+  ([admin.md](admin.md)); `FORCED` ends after `force-hold` or as soon as deliveries resume.
+- **Fail closed:** if the check fails (database error, lock not obtained in 2 s) the tick claims nothing
+  (`fallback.circuit_check_failed`, `rp_fallback_circuit_check_failed_total`); the next tick tries again.
+- **History:** every transition is stored in `fallback_circuit_event` (kept `admin.rollup-retention-days`) with what the
+  detector saw (`due`, `ratio`) and, on a close, how many fallbacks the open period suppressed; it is also counted in
+  `rp_fallback_circuit_transitions_total{app,transition}`.
+
+### Runbook: circuit open
+
+Signals: WARN `fallback.circuit_opened` (`rp.app_id`), `rp_fallback_circuit_transitions_total{transition="OPENED"}`
+growing, `rp_fallback_suppressed_total{reason="circuit_open"}` rising, the
+`OPEN` badge on the dashboard overview.
+
+1. **Check tracking ingestion for that app.** Does `POST /v1/events` still answer 2xx (ingress, API pods, `api.request`
+   log lines with status 4xx/5xx on `/v1/events`)? Do `tracking.event_accepted` lines with that `rp.app_id` still
+   appear? The overview's delivery rate of the app tells the same story. Typical causes: API or ingress down, expired or
+   revoked device tokens (`401`), an app release or SDK change that stopped reporting.
+2. **Tracking is broken:** fix it and wait. The circuit closes by itself once deliveries are reported again (after
+   `min-open`). The fallbacks of the open period stay `FALLBACK_EXPIRED`; senders that must reach those users can find
+   them by state ([integration-guide.md](integration-guide.md)).
+3. **Tracking works but users really were not reached** (for example the push provider itself failed, so nothing was
+   delivered and the fallbacks are wanted): resume with "Resume fallbacks" (needs `fallback-control`, audit-logged as
+   `admin.fallback_resumed`). Detection stays off for that app for `force-hold`; fallbacks already suppressed are not
+   re-sent. Without the permission, wait: the circuit closes when deliveries come back.
+4. **Stop every fallback deliberately** (receiver incident, cost emergency): set `fallback.suspended: true` and restart;
+   set it back to `false` to resume. Resume is refused (`409`) while it is set.
+
 ## Retention
 
 `RetentionJob` (worker role) runs daily at 03:17 UTC (`reliable-push.retention.cron`, always UTC; `-` disables it) and deletes closed notifications whose `closed_at` is older than
 `retention-days`, in chunks of 1,000 rows, each chunk its own short transaction; events go with them (`ON DELETE
 CASCADE`). Notifications that are not closed are never deleted, whatever their age. Two replicas running it simultaneously
 is harmless. It logs `retention.purged` with the count. Devices are not purged by this job.
+
+Ordering with the rollup: `DailyRollupJob` (worker role, `admin.rollup.cron`, 03:07 UTC by default) runs before retention so
+daily trends survive the notification retention. It recomputes the last `min(7, retention-days)` complete UTC days of every
+configured app (zero rows included) under a PostgreSQL advisory lock (a second worker finds it taken and does nothing), deletes
+`daily_stats` rows older than `admin.rollup-retention-days` and logs `rollup.completed` (or WARN `rollup.failed`). When admin
+is enabled and `admin.rollup.cron` is not `-`, `RetentionJob` first waits for a rollup that is still running (it takes the
+rollup's advisory lock with `lock_timeout = 30min`, because the rollup's rows become visible only when it commits), then
+requires a `daily_stats` row computed in the last 20 hours. Otherwise it deletes nothing and logs WARN `retention.skipped`
+with `reason=rollup_missing` (no fresh row) or `reason=rollup_running` (the rollup still held the lock after 30 minutes),
+and the next night retries both. The wait holds one database connection of the worker for its duration, next to the one the
+running rollup holds; in combined mode both come from the pool the API shares, so size `maximum-pool-size` with two
+connections of headroom for that window. A rollup that
+regularly takes longer than about 40 minutes (10 minutes to 03:17 plus the 30-minute wait) skips retention every night:
+move `reliable-push.retention.cron` later. With
+admin disabled, or the rollup schedule `-`, retention behaves as before.
 
 ## Scaling and capacity
 
@@ -265,11 +373,17 @@ is harmless. It logs `retention.purged` with the count. Devices are not purged b
 - **Mixed-version deployments:** migrations are forward-only and run at startup. `V3` adds `notification.lease_until`
   and a CHECK that only `DISPATCHING` rows hold a lease; older API instances are unaffected, but do not run pre-V3 and
   current workers side by side (an old worker that re-claims a row left with a lease would fail to close it). Replace worker
-  replicas with a stop-then-start (`Recreate`) rollout across that boundary.
+  replicas with a stop-then-start (`Recreate`) rollout across that boundary. The same holds for `V7` (0.2.0) for every
+  replica, API included: pre-V7 instances cannot register devices or read `NO_DEVICE_REGISTERED` rows, and V7 locks
+  `notification` while it re-checks its state constraint ([deployment.md](deployment.md#upgrades)).
 - **Config skew during rollouts:** a worker without an app's configuration leaves that app's due rows alone (retried
   after one lease) and expires them 20 minutes after `due_at`; add new apps to all replicas before sending traffic.
+- **Circuit detection cost:** per tick, every configured app costs two small reads of the due-set indexes (and a
+  bounded cohort read of at most 1,000 rows when `min-due` rows are due). Those partial indexes have no `app_id`, so each
+  app's read scans the window's rows of all apps; fine for a few apps, revisit with many apps or very large due windows
+  ([TODO.md](TODO.md)). The breaker is untested under load: the load test runs with it disabled.
 - **Fast clock:** only for local tests: `testing.minute-duration` scales the notification timeout, trigger window, webhook
-  backoff and lease alike.
+  backoff and lease alike. The circuit-breaker durations are never scaled.
 
 ### Measured capacity
 

@@ -17,6 +17,10 @@ spring:
     banner-mode: off
   flyway:
     enabled: true
+    # session-level migration lock instead of a lock held in an open transaction: an open transaction would make
+    # V5's "create index concurrently" wait for it forever (Flyway 9+ default)
+    postgresql:
+      transactional-lock: false
   datasource:
     hikari:
       # milliseconds a request waits for a pooled connection before failing with 503 + Retry-After (Hikari's default is
@@ -56,3 +60,26 @@ management:
         enabled: true
 
 # Logging profile (json | local) is selected in log4j2-spring.xml: ECS JSON unless the "local" profile is active.
+
+# Per-app device token settings (sidecar revision spec 2.4). Defaults shown; a bare number means days.
+# reliable-push:
+#   apps:
+#     shop:
+#       device-token-validity: 90d        # lifetime of issued device tokens
+#       device-token-events-grace: 90d    # POST /v1/events and DELETE /v1/devices/me also accept a token expired by up
+#                                         # less than this (token:refresh does not); 0 = no grace. Also keeps the device
+#                                         # "active" for notification tracking
+
+# Fallback circuit breaker (spec 2026-11-07-fallback-circuit-breaker-design, section 2). Defaults shown; durations
+# without a unit are minutes. Changes take effect on restart (Helm: config.fallback).
+# reliable-push:
+#   fallback:
+#     suspended: false                  # true: no fallback for any app, always; wins over everything
+#     circuit-breaker:
+#       enabled: true                   # false: no detection, every circuit reads as CLOSED
+#       window: 5m                      # detection window
+#       min-due: 50                     # trip only when at least this many fallbacks came due in the window
+#       max-delivered-ratio: 0.10       # trip when less than this share of the cohort was delivered
+#       close-min-delivered: 10         # close when this many notifications created after the open were delivered
+#       min-open: 1m                    # an open circuit stays open at least this long
+#       force-hold: 60m                 # how long a forced resume keeps detection off

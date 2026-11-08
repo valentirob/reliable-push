@@ -21,7 +21,8 @@ public record HarnessProperties(
         @Positive Integer minuteSeconds,
         URI deviceProxyTarget,
         @Positive Integer deviceProxyPort,
-        String deviceProxyBind) {
+        String deviceProxyBind,
+        String adminKey) {
 
     /** Address the device-traffic proxy binds when none is set: loopback, so it is never reachable from the LAN (M12). */
     public static final String DEFAULT_DEVICE_PROXY_BIND = "127.0.0.1";
@@ -37,11 +38,25 @@ public record HarnessProperties(
     }
 
     public HarnessProperties(URI backendUrl, Path backendLogDir, Map<String, HarnessApp> apps) {
-        this(backendUrl, backendLogDir, apps, null, null, null, null);
+        this(backendUrl, backendLogDir, apps, null, null, null, null, null);
     }
 
     public HarnessProperties(URI backendUrl, Path backendLogDir, Map<String, HarnessApp> apps, Integer minuteSeconds) {
-        this(backendUrl, backendLogDir, apps, minuteSeconds, null, null, null);
+        this(backendUrl, backendLogDir, apps, minuteSeconds, null, null, null, null);
+    }
+
+    public HarnessProperties(URI backendUrl, Path backendLogDir, Map<String, HarnessApp> apps, Integer minuteSeconds,
+                             URI deviceProxyTarget, Integer deviceProxyPort, String deviceProxyBind) {
+        this(backendUrl, backendLogDir, apps, minuteSeconds, deviceProxyTarget, deviceProxyPort, deviceProxyBind, null);
+    }
+
+    /** The secret admin key ({@code HARNESS_ADMINKEY}) is never printed. */
+    @Override
+    public String toString() {
+        return "HarnessProperties[backendUrl=" + backendUrl + ", backendLogDir=" + backendLogDir + ", apps=" + apps
+                + ", minuteSeconds=" + minuteSeconds + ", deviceProxyTarget=" + deviceProxyTarget
+                + ", deviceProxyPort=" + deviceProxyPort + ", deviceProxyBind=" + deviceProxyBind
+                + ", adminKey=" + (adminKey == null ? "null" : "***") + "]";
     }
 
     /** Address the proxy listens on: {@code harness.device-proxy-bind}, loopback when unset or blank. Compose sets

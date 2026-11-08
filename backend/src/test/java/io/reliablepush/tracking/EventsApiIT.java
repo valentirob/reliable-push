@@ -10,6 +10,7 @@ import io.reliablepush.notifications.NotificationState;
 import io.reliablepush.shared.logging.UserHash;
 import io.reliablepush.support.OpenApiAssert;
 import io.reliablepush.support.PostgresTestBase;
+import io.reliablepush.support.TestDevices;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
@@ -57,16 +58,19 @@ class EventsApiIT extends PostgresTestBase {
     private Device device(String appId, String userId) {
         UUID id = UUID.randomUUID();
         jdbc.sql("""
-                insert into device (id, app_id, user_id, platform, token_version, created_at, last_seen_at)
-                values (?, ?, ?, 'ANDROID', 0, now(), now() - interval '1 hour')
+                insert into device (id, app_id, user_id, platform, token_version, created_at, last_seen_at, token_expires_at)
+                values (?, ?, ?, 'ANDROID', 0, now(), now() - interval '1 hour', now() + interval '90 days')
                 """).params(id, appId, userId).update();
         Instant now = Instant.now();
         String token = tokens.issue(new DeviceClaims(appId, userId, id, 0, now, now.plus(Duration.ofDays(1)))).token();
         return new Device(appId, userId, id, token);
     }
 
+    /** Registers a tracked notification: the user gets an active device in the key's app first (no device: untracked). */
     private String register(String apiKey, String userId, FallbackPolicyName policy) {
-        String body = "{\"userId\":\"" + userId + "\",\"policy\":\"" + policy + "\",\"fallback\":{\"sms\":\"hi\"}}";
+        TestDevices.insertActive(jdbc, apiKey.equals(SHOP_KEY) ? SHOP : OTHER, userId);
+        String body = "{\"trackingId\":\"" + UUID.randomUUID() + "\",\"userId\":\"" + userId + "\",\"policy\":\""
+                + policy + "\",\"fallback\":{\"sms\":\"hi\"}}";
         ResponseEntity<String> response = http.post()
                 .uri("/v1/notifications")
                 .contentType(MediaType.APPLICATION_JSON)

@@ -12,7 +12,7 @@ import UserNotifications
 /// registration also the host's ID token. Never notification content.
 public enum ReliablePush {
     /// The SDK version, sent as `User-Agent: reliable-push-ios/<version>`.
-    public static let version = "0.1.2"
+    public static let version = "0.2.0"
 
     /// Configures the SDK. Call it in `application(_:didFinishLaunchingWithOptions:)` on every launch, before any
     /// other method.
@@ -37,8 +37,52 @@ public enum ReliablePush {
         try configure(baseURL: baseURL, appId: appId, appGroup: appGroup, options: options, environment: nil)
     }
 
+    /// Makes sure this installation is registered and its device token is fresh. This is the only place the SDK renews
+    /// the device token: the extension and the event sends never do. Call it at app start or foreground and right after
+    /// login; the app decides.
+    ///
+    /// Returns at once; the work runs in the background and never blocks the caller. Only one run at a time: a call
+    /// while one is in progress joins it (its provider is not called). The decision is local, with no network call
+    /// unless needed, in this order:
+    /// 1. no device token, or the stored one is expired: `idTokenProvider` is called; `nil` gives `.notLoggedIn` and
+    ///    nothing else, an ID token gives `POST /v1/devices` (as `register(idToken:)`);
+    /// 2. the token is valid and either an event send was answered 401 (`renewalNeeded`, also when seen by the
+    ///    extension) or less than 20 % of its validity is left: `POST /v1/devices/token:refresh`; a 401 there takes
+    ///    path 1;
+    /// 3. otherwise `.alreadyRegistered`, no call.
+    ///
+    /// On success the new token is stored, `renewalNeeded` is cleared and the queued events are sent. Failures map to
+    /// `RegisterResult` values; it never throws. `logout()` is still required on a user switch: it clears the token, so
+    /// the next call registers the new user.
+    ///
+    /// - Parameters:
+    ///   - idTokenProvider: Returns the signed-in user's OIDC ID token (or signed grant), or `nil` when nobody is
+    ///     logged in. Called only on path 1. Never logged. No answer within 30 s counts as `nil` (`.notLoggedIn`);
+    ///     a late answer is ignored.
+    ///   - completion: Called on the main actor with the result; `.failed(httpStatus: nil)` if `configure` has not
+    ///     been called.
+    public static func ensureRegistered(idTokenProvider: @escaping @Sendable () async -> String?,
+                                        completion: (@MainActor @Sendable (RegisterResult) -> Void)? = nil) {
+        Task {
+            let result = await ensureRegistered(idTokenProvider: idTokenProvider)
+            await completion?(result)
+        }
+    }
+
+    /// Async variant of `ensureRegistered(idTokenProvider:completion:)`.
+    ///
+    /// - Returns: `.success(deviceId:)`, `.alreadyRegistered`, `.notLoggedIn`, or `.failed(httpStatus:)`.
+    public static func ensureRegistered(idTokenProvider: @escaping @Sendable () async -> String?) async -> RegisterResult {
+        guard let sdk = SDK.current else {
+            SDKLog.warn("device.register_failed", ["reason": "not_configured"])
+            return .failed(httpStatus: nil)
+        }
+        return await sdk.ensureRegistered(idTokenProvider: idTokenProvider)
+    }
+
     /// Registers this installation for the signed-in user, exchanging the app's ID token for a device token stored in
-    /// the shared Keychain. Call it after login and on app start. A successful registration then flushes the queue.
+    /// the shared Keychain, whatever is stored now. Prefer `ensureRegistered(idTokenProvider:)`, which registers only
+    /// when needed. A successful registration then flushes the queue.
     ///
     /// - Parameters:
     ///   - idToken: The OIDC ID token (or signed grant) of the signed-in user. Never logged.

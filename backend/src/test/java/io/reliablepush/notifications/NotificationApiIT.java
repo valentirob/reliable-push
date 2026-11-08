@@ -7,6 +7,7 @@ import com.jayway.jsonpath.JsonPath;
 import io.reliablepush.shared.logging.UserHash;
 import io.reliablepush.support.OpenApiAssert;
 import io.reliablepush.support.PostgresTestBase;
+import io.reliablepush.support.TestDevices;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -69,16 +70,25 @@ class NotificationApiIT extends PostgresTestBase {
                 .toEntity(String.class);
     }
 
-    private static String uniqueUser() {
-        return "user-" + UUID.randomUUID();
+    /** A fresh user with an active device, so that its notifications are tracked ({@code PENDING}). */
+    private String uniqueUser() {
+        String userId = "user-" + UUID.randomUUID();
+        TestDevices.insertActive(jdbc, "shop", userId);
+        TestDevices.insertActive(jdbc, "other", userId);
+        return userId;
+    }
+
+    /** The body with a fresh {@code trackingId} as its first field (required by the sender API). */
+    private static String tracked(String body) {
+        return "{\"trackingId\":\"" + UUID.randomUUID() + "\"," + body.substring(1);
     }
 
     private static String registerBody(String userId) {
-        return "{\"userId\":\"" + userId + "\",\"fallback\":{\"sms\":\"Your order shipped\"}}";
+        return tracked("{\"userId\":\"" + userId + "\",\"fallback\":{\"sms\":\"Your order shipped\"}}");
     }
 
     private static String registerBody(String userId, String externalId) {
-        return "{\"userId\":\"" + userId + "\",\"externalId\":\"" + externalId + "\",\"fallback\":{\"sms\":\"hi\"}}";
+        return tracked("{\"userId\":\"" + userId + "\",\"externalId\":\"" + externalId + "\",\"fallback\":{\"sms\":\"hi\"}}");
     }
 
     private String register(String userId) {
@@ -110,8 +120,8 @@ class NotificationApiIT extends PostgresTestBase {
         String userId = uniqueUser();
         ResponseEntity<String> response = post(
                 SHOP_KEY,
-                "{\"userId\":\"" + userId + "\",\"policy\":\"NOT_READ\",\"timeoutMinutes\":5,\"externalId\":\"ext-"
-                        + UUID.randomUUID() + "\",\"fallback\":{\"sms\":\"secret fallback text\"}}");
+                tracked("{\"userId\":\"" + userId + "\",\"policy\":\"NOT_READ\",\"timeoutMinutes\":5,\"externalId\":\"ext-"
+                        + UUID.randomUUID() + "\",\"fallback\":{\"sms\":\"secret fallback text\"}}"));
 
         assertThat(response.getStatusCode().value()).isEqualTo(201);
         String body = response.getBody();
@@ -134,7 +144,7 @@ class NotificationApiIT extends PostgresTestBase {
     @Test
     void registerAppliesAppDefaultsAndIgnoresUnknownFields() {
         ResponseEntity<String> response = post(
-                SHOP_KEY, "{\"userId\":\"" + uniqueUser() + "\",\"fallback\":{},\"somethingNew\":[1,2]}");
+                SHOP_KEY, tracked("{\"userId\":\"" + uniqueUser() + "\",\"fallback\":{},\"somethingNew\":[1,2]}"));
 
         assertThat(response.getStatusCode().value()).isEqualTo(201);
         assertThat(JsonPath.<String>read(response.getBody(), "$.policy")).isEqualTo("NOT_DELIVERED");
@@ -142,12 +152,13 @@ class NotificationApiIT extends PostgresTestBase {
     }
 
     @Test
-    void duplicateExternalIdReturnsExisting(CapturedOutput output) {
+    void repeatedRegistrationReturnsExisting(CapturedOutput output) {
         String externalId = "ext-" + UUID.randomUUID();
         String userId = uniqueUser();
+        String body = registerBody(userId, externalId);
 
-        ResponseEntity<String> first = post(SHOP_KEY, registerBody(userId, externalId));
-        ResponseEntity<String> second = post(SHOP_KEY, registerBody(userId, externalId));
+        ResponseEntity<String> first = post(SHOP_KEY, body);
+        ResponseEntity<String> second = post(SHOP_KEY, body);
 
         assertThat(first.getStatusCode().value()).isEqualTo(201);
         assertThat(second.getStatusCode().value()).isEqualTo(201);
@@ -180,6 +191,7 @@ class NotificationApiIT extends PostgresTestBase {
     void concurrentRegistrationsWithSameExternalIdCreateOneRow() throws Exception {
         String externalId = "ext-race-" + UUID.randomUUID();
         String userId = uniqueUser();
+        String body = registerBody(userId, externalId);
         int threads = 8;
         ExecutorService pool = Executors.newFixedThreadPool(threads);
         try {
@@ -188,7 +200,7 @@ class NotificationApiIT extends PostgresTestBase {
             for (int i = 0; i < threads; i++) {
                 Callable<ResponseEntity<String>> call = () -> {
                     go.await();
-                    return post(SHOP_KEY, registerBody(userId, externalId));
+                    return post(SHOP_KEY, body);
                 };
                 futures.add(pool.submit(call));
             }
@@ -228,32 +240,32 @@ class NotificationApiIT extends PostgresTestBase {
                 new Case("string fallback", "{\"userId\":\"u\",\"fallback\":\"sms\"}", "fallback"));
 
         for (Case c : cases) {
-            ResponseEntity<String> response = post(SHOP_KEY, c.body());
+            ResponseEntity<String> response = post(SHOP_KEY, tracked(c.body()));
             assertProblem(response, 422);
             assertThat(errorFields(response)).as(c.name()).contains(c.field());
         }
         // limits are inclusive
-        assertThat(post(SHOP_KEY, "{\"userId\":\"" + "u".repeat(256) + "\",\"externalId\":\"" + "e".repeat(128)
-                        + "\",\"timeoutMinutes\":10080," + ok + "}")
+        assertThat(post(SHOP_KEY, tracked("{\"userId\":\"" + "u".repeat(256) + "\",\"externalId\":\"" + "e".repeat(128)
+                        + "\",\"timeoutMinutes\":10080," + ok + "}"))
                 .getStatusCode()
                 .value())
                 .isEqualTo(201);
-        assertThat(post(SHOP_KEY, "{\"userId\":\"u\",\"timeoutMinutes\":1," + ok + "}").getStatusCode().value()).isEqualTo(201);
+        assertThat(post(SHOP_KEY, tracked("{\"userId\":\"u\",\"timeoutMinutes\":1," + ok + "}")).getStatusCode().value()).isEqualTo(201);
     }
 
     @Test
     void unreadableBodyIs400() {
-        assertProblem(post(SHOP_KEY, "{\"userId\":\"u\",\"policy\":\"SOMETIMES\",\"fallback\":{}}"), 400);
+        assertProblem(post(SHOP_KEY, tracked("{\"userId\":\"u\",\"policy\":\"SOMETIMES\",\"fallback\":{}}")), 400);
         assertProblem(post(SHOP_KEY, "{not json"), 400);
     }
 
     @Test
     void fallbackOver4KbIs413or422() {
         // 4096 bytes serialized is allowed, one byte more is not
-        ResponseEntity<String> atLimit = post(SHOP_KEY, "{\"userId\":\"" + uniqueUser() + "\",\"fallback\":" + fallbackOfSerializedSize(4096) + "}");
+        ResponseEntity<String> atLimit = post(SHOP_KEY, tracked("{\"userId\":\"" + uniqueUser() + "\",\"fallback\":" + fallbackOfSerializedSize(4096) + "}"));
         assertThat(atLimit.getStatusCode().value()).isEqualTo(201);
 
-        ResponseEntity<String> over = post(SHOP_KEY, "{\"userId\":\"" + uniqueUser() + "\",\"fallback\":" + fallbackOfSerializedSize(4097) + "}");
+        ResponseEntity<String> over = post(SHOP_KEY, tracked("{\"userId\":\"" + uniqueUser() + "\",\"fallback\":" + fallbackOfSerializedSize(4097) + "}"));
         assertProblem(over, 422);
         assertThat(errorFields(over)).containsExactly("fallback");
         // the rejected content is not echoed
@@ -264,7 +276,7 @@ class NotificationApiIT extends PostgresTestBase {
     void multiByteFallbackOver4KbIs422() {
         // 2100 characters but about 4200 UTF-8 bytes
         String fallback = "{\"k\":\"" + "\u00e9".repeat(2100) + "\"}";
-        ResponseEntity<String> response = post(SHOP_KEY, "{\"userId\":\"" + uniqueUser() + "\",\"fallback\":" + fallback + "}");
+        ResponseEntity<String> response = post(SHOP_KEY, tracked("{\"userId\":\"" + uniqueUser() + "\",\"fallback\":" + fallback + "}"));
         assertProblem(response, 422);
         assertThat(errorFields(response)).containsExactly("fallback");
     }

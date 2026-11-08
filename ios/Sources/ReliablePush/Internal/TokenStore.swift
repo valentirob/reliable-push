@@ -20,15 +20,22 @@ final class TokenStore: Sendable {
         self.appId = appId
     }
 
-    /// Stores the registration. False when the token is not a valid device token or the Keychain refuses it.
+    /// Stores the registration and clears `renewalNeeded` (a new token needs no renewal). False when the token is not
+    /// a valid device token or the Keychain refuses it.
     func save(_ r: Registration) -> Bool {
         guard DeviceToken.parse(r.deviceToken) != nil,
               let data = JSON.data(["deviceId": r.deviceId, "token": r.deviceToken]),
               secrets.write(data, account: appId) else { return false }
         state.deviceId = r.deviceId
         state.expiresAt = r.expiresAt
+        state.renewalNeeded = false
         return true
     }
+
+    /// True after `/v1/events` answered 401 with the stored token (App Group state, shared with the extension).
+    var renewalNeeded: Bool { state.renewalNeeded }
+
+    func markRenewalNeeded() { state.renewalNeeded = true }
 
     func load() -> TokenLoad {
         switch secrets.read(account: appId) {

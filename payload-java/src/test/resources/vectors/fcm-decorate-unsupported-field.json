@@ -1,0 +1,19 @@
+{
+  "name": "fcm-decorate-unsupported-field",
+  "operation": "fcm.decorate",
+  "input": {
+    "trackingId": "6f1c2b9e-5d1a-4c55-9a38-0c1f3a7d9e11",
+    "fcm": {
+      "message": {
+        "token": "tok",
+        "notification": {
+          "title": "T",
+          "image": "https://example.com/i.png"
+        }
+      }
+    }
+  },
+  "expect": {
+    "error": "FCM_UNSUPPORTED_NOTIFICATION_FIELD"
+  }
+}

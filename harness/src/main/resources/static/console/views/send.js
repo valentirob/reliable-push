@@ -44,7 +44,7 @@ export function mount(root, ctx) {
       return el('div', { class: 'row', 'data-device': d.deviceId },
         el('span', {}, d.platform + ' ', el('code', { text: d.deviceId.slice(0, 8) })),
         field('Behaviour', sel), field('Override', custom));
-    }) : [el('p', { class: 'muted', text: 'This user has no simulated device: the push reaches nobody.' })]));
+    }) : [el('p', { class: 'muted', text: 'This user has no simulated device: the push reaches nobody and, without any registered device, the backend stores it as NO_DEVICE_REGISTERED (no fallback).' })]));
   }
 
   function perDeviceValues() {
@@ -87,6 +87,16 @@ export function mount(root, ctx) {
       return el('div', { class: 'card' }, el('h3', { text: name }), btn, el('pre', { text: payload }));
     }));
   }
+  // spec 1: the push goes out whatever the registration outcome; say what that means for tracking and fallback
+  function describeRegistration(r) {
+    if (!r.registered) {
+      return 'registration failed (backend status ' + r.registrationStatus + '): the push went out untracked, no fallback.';
+    }
+    if (r.state === 'NO_DEVICE_REGISTERED') {
+      return 'NO_DEVICE_REGISTERED: the user has no active device, so no tracking and never a fallback.';
+    }
+    return 'registered ' + r.state + '.';
+  }
   const form = el('form', { class: 'card', onsubmit: async (ev) => {
     ev.preventDefault();
     if (loading) return;
@@ -96,7 +106,7 @@ export function mount(root, ctx) {
       const r = await api('/push', { method: 'POST', body: {
         appId: app.value, userId: user.value, title: title.value, body: text.value, policy: policy.value,
         timeoutMinutes: Number(timeout.value) || null, perDevice: perDeviceValues() } });
-      result.textContent = 'Sent. Tracking id: ' + r.trackingId;
+      result.textContent = 'Sent. Tracking id: ' + r.trackingId + '. ' + describeRegistration(r);
       await showPreviews(r.trackingId);
     } catch (e) { err.show(e); }
   } },

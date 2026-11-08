@@ -1,0 +1,15 @@
+{
+  "name": "fcm-data-non-string",
+  "operation": "fcm.data",
+  "input": {
+    "trackingId": "6f1c2b9e-5d1a-4c55-9a38-0c1f3a7d9e11",
+    "title": "T",
+    "body": "B",
+    "data": {
+      "count": 5
+    }
+  },
+  "expect": {
+    "error": "FCM_NON_STRING_DATA"
+  }
+}

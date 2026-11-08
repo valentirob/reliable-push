@@ -27,15 +27,16 @@ Reports: `target/surefire-reports/` (unit), `target/failsafe-reports/` (integrat
 
 | Level | Naming / tooling | Runs in | Covers |
 |---|---|---|---|
-| Unit | `*Test`, JUnit 5 + AssertJ, Mockito as a Java agent | surefire (`test`) | Pure logic: `FallbackDecision` (trigger window, retry and backoff rules), `WebhookSigner`, device token issue and strict verification, signing-key parsing, identity verifiers (`SignedGrantVerifier`, URL rules), rate limiter, `TimeScale`, secret references, configuration validation, `EventLog` and the ECS template, `RpMetrics` |
-| Integration | `*IT`, extends `PostgresTestBase` (the full application on a random port against a real PostgreSQL 16 Testcontainer, no database mocking), WireMock for webhook receivers, `FakeOidc` for an OIDC issuer and JWKS | failsafe (`integration-test`) | REST endpoints (`NotificationApiIT`, `DeviceApiIT`, `EventsApiIT`, `SenderApiKeyIT`, `ProblemHandlerIT`), schema and constraints (`SchemaIT`), the fallback worker with concurrent claiming, leases, re-claim and fenced outcomes (`FallbackSchedulerIT`), the signed webhook client against WireMock (`HttpWebhookClientIT`), retention (`RetentionJobIT`), access log and JSON output (`AccessLogIT`, `JsonLogOutputIT`), metrics (`MetricsIT`), OIDC verification and JWKS caching (`OidcIdTokenVerifierIT`), application startup (`ApplicationStartsIT`) |
+| Unit | `*Test`, JUnit 5 + AssertJ, Mockito as a Java agent | surefire (`test`) | Pure logic: `FallbackDecision` (trigger window, retry and backoff rules), `WebhookSigner`, device token issue and strict verification, signing-key parsing, identity verifiers (`SignedGrantVerifier`, URL rules), rate limiter, `TimeScale`, secret references, configuration validation, `EventLog` and the ECS template, `RpMetrics`, the fallback circuit transition table (`CircuitTransitionsTest`) and its configuration (`CircuitBreakerPropertiesTest`) |
+| Integration | `*IT`, extends `PostgresTestBase` (the full application on a random port against a real PostgreSQL 16 Testcontainer, no database mocking), WireMock for webhook receivers, `FakeOidc` for an OIDC issuer and JWKS | failsafe (`integration-test`) | REST endpoints (`NotificationApiIT`, `DeviceApiIT`, `EventsApiIT`, `SenderApiKeyIT`, `ProblemHandlerIT`), schema and constraints (`SchemaIT`), the fallback worker with concurrent claiming, leases, re-claim and fenced outcomes (`FallbackSchedulerIT`), the signed webhook client against WireMock (`HttpWebhookClientIT`), retention (`RetentionJobIT`), access log and JSON output (`AccessLogIT`, `JsonLogOutputIT`), metrics (`MetricsIT`), OIDC verification and JWKS caching (`OidcIdTokenVerifierIT`), application startup (`ApplicationStartsIT`), the ops dashboard API (`AdminApiIT`, `AdminOverviewIT`, `AdminSearchIT`, `AdminRateLimitIT`, `AdminDisabledIT`: no admin key means `404`), the nightly rollup (`DailyRollupIT`), the webhook attempt rows (`FallbackAttemptIT`), and the fallback circuit breaker: detection, cohort and advisory lock (`CircuitBreakerIT`), storage (`CircuitRepositoryIT`), suppression (`SuppressorIT`) and the admin routes (`AdminFallbackCircuitIT`, `AdminFallbackCircuitSuspendedIT`, `AdminFallbackCircuitDisabledIT`). The breaker is disabled in the shared test configuration and enabled by the tests that need it |
 | Contract | `OpenApiContractTest` and `OpenApiAssert` (swagger-request-validator, test scope) | surefire + the ITs | Real responses are validated against `backend/src/main/resources/openapi.yaml`, so the contract and the implementation cannot drift |
 | Container image | `ContainerImageIT`, tagged `image` | failsafe, only with `-Pimage` | Starts as an arbitrary non-root UID, stays below the 250 MB budget (sum of uncompressed layers), read-only root filesystem with a writable `/tmp`, JSON-only stdout |
 | Logging assertions | inside the ITs and `EcsTemplateTest` | both | Catalogue events are emitted, fields are unique, and no secrets, tokens, user ids or message content reach the log |
 | Client | `client-java/`, JUnit 5 against a local HTTP server | surefire | The Java sender client: requests, problem details, timeouts, redirects, `Retry-After`; an enforcer rule keeps it free of runtime dependencies |
+| Payload jar | `payload-java/`, JUnit 5 + AssertJ, `GoldenVectorsTest` | surefire (JDK 21; CI also forks a Java 8 JVM) | Tracking ids, APNs and FCM build and decorate, every `PayloadException` code, the JSON parser, and every golden vector in `src/test/resources/vectors/`; an enforcer rule keeps it free of runtime dependencies; it compiles with `--release 8` |
 | Harness | `harness/`, JUnit 5, `*Test` and `*IT` (Spring on a random port, no Docker needed) | surefire / failsafe | The harness itself: device simulator, signed grants, fallback receiver, fake sender, tracking poller, scenario runner, console REST and SSE |
-| End-to-end | `harness/`, `./scripts/e2e.sh` | local only, never in CI | 16 scenarios across the real backend (one API, two workers), PostgreSQL, the fallback receiver and the device simulator, with the fast clock |
-| Console smoke | Playwright for Java against the harness web console | local only | The 17th entry of the E2E run: a headless browser registers a device, sends a push and sees `DELIVERED` and the fallback in the inbox |
+| End-to-end | `harness/`, `./scripts/e2e.sh` | local only, never in CI | 22 scenarios across the real backend (one API, two workers), PostgreSQL, the fallback receiver and the device simulator, with the fast clock |
+| Console smoke | Playwright for Java against the harness web console | local only | The 23rd entry of the E2E run: `ConsoleSmokeE2E` (a headless browser registers a device, sends a push and sees `DELIVERED` and the fallback in the inbox) and `AdminSmokeE2E` (signs in to `/admin/` with the per-run admin key, checks the overview, a search, a notification detail and the fallback circuit view) |
 | Load | `loadtest/`, Gatling (Java DSL), `./scripts/load.sh` | local only, never in CI (CI compiles the simulations and runs the module's unit tests) | NFR-2 ingest (`EventIngestSimulation`) and the fallback burst drained by the workers (`FallbackBurstSimulation` + `BurstDrainProbe`) |
 | Helm chart | helm-unittest, `helm lint --strict`, kubeconform (`deploy/helm/scripts/validate.sh`); kind smoke install (`./scripts/helm-smoke.sh`) | validate: CI and local; kind: local only | Required values and secret rules, rendering per mode and platform, schemas; a real install with a worker rollout during dispatch |
 | Mobile | Robolectric and emulator tests (Android), XCTest unit tests and Simulator UI tests (iOS) | unit tests: CI (`android-ci.yml`, `ios-ci.yml`); emulator and Simulator suites: local only | See the Android and iOS sections below |
@@ -55,11 +56,13 @@ Reports: `target/surefire-reports/` (unit), `target/failsafe-reports/` (integrat
 
 ## Client and harness builds
 
-Run from the repository root (one Maven wrapper for `client-java` and `harness`; the backend keeps `backend/mvnw`):
+Run from the repository root (one Maven wrapper for `client-java`, `payload-java`, `harness` and `loadtest`; the backend
+keeps `backend/mvnw`):
 
 | Goal | Command |
 |---|---|
 | Client build and tests (what CI runs) | `./mvnw -B -pl client-java verify` |
+| Payload jar build and tests, golden vectors included (CI also runs them on Java 8: `-Djvm=<path to java 8>`) | `./mvnw -B -pl payload-java verify` |
 | Harness build and tests, including `client-java` (what CI runs) | `./mvnw -B -pl harness -am verify` |
 | Console smoke test against a running stack (needs Playwright's Chromium, about 150 MB, downloaded on first use) | `./mvnw -B -pl harness -am verify -Pconsole-smoke` |
 | Loadtest module: compiles the simulations, runs the unit tests, never starts Gatling (what CI runs) | `./mvnw -B -pl loadtest verify` |
@@ -71,21 +74,49 @@ The default build never downloads Playwright. GitHub Actions runs the client, ha
 
 `./scripts/e2e.sh [--scenario <name>] [--keep]` (Windows, PowerShell 7: `pwsh scripts/e2e.ps1 [-Scenario <name>] [-Keep]`; the
 PowerShell scripts have not been run on Windows). Needs Docker with the compose plugin, `curl`, and ports 8080, 8090 and 8091 free
-on 127.0.0.1. The images build inside Docker, but `console-smoke` (so the full 17-entry run) calls the host `./mvnw`: it needs
+on 127.0.0.1. The images build inside Docker, but `console-smoke` (so the full 23-entry run) calls the host `./mvnw`: it needs
 JDK 21 and network access (Maven artifacts, Playwright's Chromium). With Colima: `export DOCKER_HOST=unix://$HOME/.colima/default/docker.sock`.
 
 - **Stack:** `harness/compose/docker-compose.yml`: PostgreSQL, one API, two workers (`worker-a`, `worker-b`) and the
   harness. A one-shot container generates new secrets for every run into `harness/build/e2e/secrets.env` (git-ignored).
   Devices register through the backend's `signed-grant` identity (the harness signs the grants).
-- **Fast clock:** 1 product minute = 1 s, worker poll 500 ms, lease 12 minutes (= 12 s). The whole run takes about 5 minutes.
-- **Scenarios** (16, plus `console-smoke`): `delivered-before-timeout`, `read-policy-delivered-only`, `read-policy-read`,
+- **Fast clock:** 1 product minute = 1 s, worker poll 500 ms, lease 12 minutes (= 12 s). The whole run takes about 8 minutes (`token-grace` alone about 90 s).
+- **Scenarios** (22, plus `console-smoke`): `delivered-before-timeout`, `read-policy-delivered-only`, `read-policy-read`,
   `not-delivered-single-fallback`, `late-delivery-after-fallback`, `multi-device`, `cancellation`,
   `token-refresh-near-expiry`, `rate-limited`, `receiver-retries-then-succeeds`, `receiver-final-failure`,
-  `retries-exhausted-fails`, `worker-crash-inside-window`, `worker-crash-outside-window`, `log-catalogue`, `log-hygiene`.
+  `retries-exhausted-fails`, `worker-crash-inside-window`, `worker-crash-outside-window`, `log-catalogue`, `log-hygiene`, `admin-dashboard`,
+  `fallback-circuit`, `no-device-registered`, `client-tracking-id`, `registration-lost`, `token-grace`.
+  The fake sender follows the sender flow of the sidecar integration: it generates the tracking id with the payload jar
+  (`TrackingIds.newId()`), builds the APNs and FCM payloads with the jar, registers with that `trackingId` and always
+  delivers the push to the simulated devices, whatever the registration outcome. Like the SDKs, the device simulator never
+  renews its token on the event path: a `401` keeps the event queued and sets `renewalNeeded`, and only its
+  `ensureRegistered` (console button "Ensure registered") registers or refreshes. Scenarios that expect tracking or a
+  fallback register a device first: a user without an active device gets `NO_DEVICE_REGISTERED`.
+  `token-refresh-near-expiry` (app `news`, token valid 20 s) checks that an event near expiry leaves the token alone and
+  that `ensureRegistered` then refreshes it (and does nothing when called again). `no-device-registered`: a user who never
+  registered and one whose device was revoked get `201 NO_DEVICE_REGISTERED` (final: cancel `409`, a later `DELIVERED` is
+  `LATE`), no webhook; with a device the next push is tracked. `client-tracking-id`: two retries with the sender's id return
+  the same row, the push uses it, exactly one fallback; another id with the same `externalId` is `409`.
+  `registration-lost`: a push whose registration was never stored (skipped, or rejected `422`) is `NOT_FOUND` on the
+  device, no row, no webhook. `token-grace` uses its own app `grace` (token validity 5 s, events grace 15 s; the verifier
+  adds 60 s of clock skew, so the grace window is `exp + 60 s` to `exp + 75 s`): an event inside it is accepted with
+  `token_state=grace`, one past it is `401` and stays queued until `ensureRegistered` re-registers and flushes it. The demo
+  stack (`demo.override.yml`) gives `grace` production-like token settings (90 days each).
+  `admin-dashboard` registers notifications, lets the simulated device confirm some and the others fall back (the receiver answers
+  500 once, then 200), then checks `/v1/admin/overview`, the search and the detail with its events and attempts. The per-run admin
+  key (`HARNESS_ADMINKEY`) is generated next to the other secrets and never printed. `fallback-circuit` uses its own app
+  `circuit`: a burst of 15 notifications that are never confirmed opens the app's circuit (they end `FALLBACK_EXPIRED`;
+  fewer than `min-due` calls are guaranteed, because a tick claims only rows its circuit check counted; in practice none), 5 more while it is open end `FALLBACK_EXPIRED` with no call,
+  3 confirmed notifications close it (history `OPENED`/`tracking_missing`, `CLOSED`/`delivered_resumed`), and a later
+  unmet notification fires its webhook. The stack tunes the breaker for every app in `harness/compose/backend.env.template`
+  (window 30 s, `min-due` 10, `close-min-delivered` 3, `min-open` 5 s, real time); no other scenario comes near 10 unmet
+  fallbacks of one app in 30 s. `console-smoke` runs `ConsoleSmokeE2E` and `AdminSmokeE2E`.
+- **Writing a scenario:** send bursts to a dedicated app (as `fallback-circuit` uses `circuit`): the E2E stack trips any
+  app's circuit at 10 unmet fallbacks in 30 s, and an open circuit closes the app's later fallbacks without a call.
 - **Worker-crash scenarios** are driven by the script, not the harness container: it stops `worker-b`, asks the harness to
   `prepare`, waits until the webhook call is in flight, kills `worker-a`, waits (inside or outside the trigger window), starts
   both workers and asks the harness to `verify`.
-- **Results:** exit code 0 only if all 17 entries PASSED. `harness/build/e2e/summary.json`
+- **Results:** exit code 0 only if all 23 entries PASSED (`E2E: 23/23 passed`). `harness/build/e2e/summary.json`
   (`{scenario, status, durationMs, failure: {expected, actual, hint}, logs}`), JUnit XML in `harness/build/e2e/junit/`,
   container logs and the backend JSON logs in `harness/build/e2e/logs/`. Logs are collected and the stack is torn down even
   when scenarios fail (unless `--keep`).
@@ -118,7 +149,9 @@ The release build is minified with R8 (`android/reliablepush/proguard-rules.pro`
 `ANDROID_AVD`; it is stopped again if the script started it), runs the sample's instrumented tests and the library's
 Keystore tests, and writes `harness/build/android-e2e/` (`summary.json`, `junit/`, `logs/`); it ends with `Android E2E: 8/8 passed, 1 skipped`
 (the skipped entry is `fcm-real-delivery`, see the next section). The emulator reaches the stack at `10.0.2.2`
-(`8080` backend, `8090` harness). On Android 17 the E2E grants the sample `ACCESS_LOCAL_NETWORK`. The workflow
+(`8080` backend, `8090` harness). On Android 17 the E2E grants the sample `ACCESS_LOCAL_NETWORK`. Since 0.2.0 the sample calls `ensureRegistered`
+at start and after login, and the logout test expects `NO_DEVICE_REGISTERED` and no webhook; the fault injection in
+`handle` (store, queue, gate or poster throwing) is covered by the Robolectric unit tests. The workflow
 `.github/workflows/android-ci.yml` never runs it: CI has no emulator and no Firebase files.
 
 ## iOS SDK tests
@@ -138,7 +171,10 @@ Versions are pinned in `ios/README.md`. No Docker for the unit tests.
 `harness/build/ios-e2e/` (`summary.json`, result bundles, `logs/`); it ends with `iOS E2E: 8/8 passed, 1 skipped`. The
 Simulator does not run a Notification Service Extension for `xcrun simctl push` or `.apns` files, so the tests open the
 sample's debug URL `rpsample://debug-push?...`, which runs the same `ReliablePushExtension` code in the app process and
-shows the result as a local notification that the test taps. "Offline" is the harness device proxy's online/offline switch
+shows the result as a local notification that the test taps. Since 0.2.0 the sample calls `ensureRegistered` at start and after login, the token
+refresh test drives it by bringing the app to the foreground, and the logout test expects `NO_DEVICE_REGISTERED` and no
+webhook (the user's only device is revoked). The extension's bounded wait (handler on time, exactly once, also with a
+hanging settings read or a failing Keychain) is covered by the package tests, not by the Simulator suite. "Offline" is the harness device proxy's online/offline switch
 (the Simulator shares the Mac's network and has no airplane mode). `.github/workflows/ios-ci.yml` never runs it: CI builds
 and unit-tests the package, builds the sample (Debug and Release) and checks the size and the manifest.
 
@@ -208,6 +244,9 @@ generated in the test and a local stub; they never contact Apple.
 `reliable-push-demo` and opens the console at <http://127.0.0.1:8090/>. The default is the fast clock; `--realtime` uses real
 minutes. It keeps running; the script prints the stop command:
 `docker compose -p reliable-push-demo -f harness/compose/docker-compose.yml -f harness/compose/demo.override.yml down -v`.
+The demo stack sets the fallback circuit breaker back to the production defaults (window 5 min, `min-due` 50,
+`close-min-delivered` 10, `min-open` 1 min; `harness/compose/demo.override.yml`), not the E2E tuning of
+`backend.env.template`, so sending a few dozen unconfirmed pushes in the console does not open a circuit.
 
 The console has six screens: Devices, Send push, Live tracking, Fallback inbox, Scenarios and Logs. A permanent banner reads
 "Test harness — simulated data, not for production". No secret is shown in the page or exposed by its API; live updates use
@@ -245,9 +284,12 @@ the backend to your network.
 - **Stack:** the E2E compose file plus `loadtest/compose/load.override.yml` (project `reliable-push-load`, real clock, API
   limited to 2 CPUs / 1 GiB, workers on the management port 8081) and a Gatling container on the same compose network,
   so host port forwarding never caps the throughput. Its Maven cache is the external volume `reliable-push-gatling-m2`.
+  The fallback circuit breaker is off in the workers: the burst (never-delivered notifications) is exactly what it stops.
 - **Simulations:** `ingest` is the NFR-2 criterion: 500 `POST /v1/notifications`/s and 1,000 `POST /v1/events`/s (one
   event each) for 5 minutes after a 60 s ramp, asserting ≤ 0.1 % failed requests, p95 ≤ 100 ms and p99 ≤ 250 ms per
-  request group. `burst` registers `LOAD_BURST_SIZE` notifications (default 30,000 at 1,500/s) that fall due together;
+  request group. Both simulations first provision `LOAD_DEVICES` devices and register every notification for one of
+  those users with its own `trackingId` (a user without an active device would get `NO_DEVICE_REGISTERED`, which is never
+  tracked and never falls back). `burst` registers `LOAD_BURST_SIZE` notifications (default 30,000 at 1,500/s) that fall due together;
   `BurstDrainProbe` samples the workers' `/actuator/prometheus` until all are triggered; a warm-up before the burst
   (`LOAD_BURST_WARMUP`, default 30 s, request name `notify-warm-up`) keeps the cold JIT out of the asserted `notify`
   requests, so `burst` alone works on a fresh stack. `all` runs ingest first.

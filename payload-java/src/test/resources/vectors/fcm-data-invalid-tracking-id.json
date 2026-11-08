@@ -1,0 +1,12 @@
+{
+  "name": "fcm-data-invalid-tracking-id",
+  "operation": "fcm.data",
+  "input": {
+    "trackingId": "nope",
+    "title": "T",
+    "body": "B"
+  },
+  "expect": {
+    "error": "INVALID_TRACKING_ID"
+  }
+}

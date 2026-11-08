@@ -23,6 +23,7 @@ import java.util.Date;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.function.Function;
 import org.springframework.stereotype.Service;
 
 /**
@@ -39,7 +40,12 @@ import org.springframework.stereotype.Service;
 public class DeviceTokenService {
 
     static final String ISSUER = "reliable-push";
-    private static final Duration SKEW = Duration.ofSeconds(60);
+    /**
+     * Clock skew allowed on {@code iat}/{@code nbf}/{@code exp}. Also bounds the active-device window
+     * ({@link DeviceRepository#hasActiveDevice}); the harness {@code TokenGrace} scenario and
+     * {@code harness/compose/backend.env.template} (the short grace it runs with) rely on it: change them together.
+     */
+    static final Duration SKEW = Duration.ofSeconds(60);
     /** Real tokens are a few hundred bytes; anything this large is rejected before parsing. */
     private static final int MAX_TOKEN_LENGTH = 8192;
     /** Year 9999: keeps {@code Instant} arithmetic far from overflow for absurd {@code exp} values. */
@@ -107,6 +113,16 @@ public class DeviceTokenService {
      *     bad_signature}, {@code wrong_issuer} or {@code expired}
      */
     public DeviceClaims verify(String token) {
+        return verify(token, appId -> Duration.ZERO);
+    }
+
+    /**
+     * Like {@link #verify(String)}, but a token whose {@code exp} (plus the 60 s skew) is in the past by at most the
+     * app's grace is still accepted. {@code graceByApp} maps the token's (signed) {@code aud} to that grace; zero
+     * means no grace. Only the expiry check is relaxed. Callers use it for the grace routes only; use {@link
+     * #isInGrace} to tell whether the accepted token is past its normal expiry.
+     */
+    public DeviceClaims verify(String token, Function<String, Duration> graceByApp) {
         if (token == null || token.isBlank() || token.length() > MAX_TOKEN_LENGTH) {
             throw new InvalidDeviceTokenException(MALFORMED);
         }
@@ -143,10 +159,15 @@ public class DeviceTokenService {
             }
             throw new InvalidDeviceTokenException(BAD_SIGNATURE);
         }
-        return checkClaims(jwt);
+        return checkClaims(jwt, graceByApp);
     }
 
-    private DeviceClaims checkClaims(SignedJWT jwt) {
+    /** True if the (verified) claims are past their normal expiry (exp + skew), so only a grace route accepts them. */
+    public boolean isInGrace(DeviceClaims claims) {
+        return clock.instant().isAfter(claims.expiresAt().plus(SKEW));
+    }
+
+    private DeviceClaims checkClaims(SignedJWT jwt, Function<String, Duration> graceByApp) {
         // raw JSON values, not JWTClaimsSet: its typed getters coerce (a numeric "sub" becomes a string, "aud" becomes a
         // list), which strict verification must not accept
         Map<String, Object> claims;
@@ -176,7 +197,8 @@ public class DeviceTokenService {
         if (issuedAt.isAfter(latestAllowedStart) || (notBefore != null && notBefore.isAfter(latestAllowedStart))) {
             throw new InvalidDeviceTokenException(MALFORMED);
         }
-        if (now.isAfter(expiresAt.plus(SKEW))) {
+        Duration grace = graceByApp.apply(appId);
+        if (now.isAfter(expiresAt.plus(SKEW).plus(grace == null ? Duration.ZERO : grace))) {
             throw new InvalidDeviceTokenException(EXPIRED);
         }
         return new DeviceClaims(appId, userId, deviceId, version, issuedAt, expiresAt);

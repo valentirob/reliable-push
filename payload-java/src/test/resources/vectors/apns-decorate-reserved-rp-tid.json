@@ -1,0 +1,16 @@
+{
+  "name": "apns-decorate-reserved-rp-tid",
+  "operation": "apns.decorate",
+  "input": {
+    "trackingId": "6f1c2b9e-5d1a-4c55-9a38-0c1f3a7d9e11",
+    "apns": {
+      "aps": {
+        "alert": "x"
+      },
+      "rp_tid": "y"
+    }
+  },
+  "expect": {
+    "error": "RESERVED_KEY"
+  }
+}

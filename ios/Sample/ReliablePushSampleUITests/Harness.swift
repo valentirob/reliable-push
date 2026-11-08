@@ -8,7 +8,7 @@ enum E2EConfig {
     static let baseURL = value("RP_BASE_URL", "http://127.0.0.1:8091")
     static let harnessURL = value("RP_HARNESS_URL", "http://127.0.0.1:8090")
     static let shop = "shop"
-    /// Device tokens valid 20 s (the harness's `news` app): the SDK refreshes when less than 4 s are left.
+    /// Device tokens valid 20 s (the harness's `news` app): `ensureRegistered` refreshes when less than 4 s are left.
     static let news = "news"
 
     private static func value(_ name: String, _ fallback: String) -> String {

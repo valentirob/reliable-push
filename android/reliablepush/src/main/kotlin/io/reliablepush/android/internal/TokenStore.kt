@@ -1,5 +1,6 @@
 package io.reliablepush.android.internal
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.content.SharedPreferences
 import android.util.Base64
@@ -8,8 +9,15 @@ internal data class StoredRegistration(val deviceId: String, val token: DeviceTo
 
 /**
  * Registration and config in private SharedPreferences. Only the device token is encrypted;
- * `deviceId` and `expiresAt` are plain. A token that cannot be read is dropped (not registered).
+ * `deviceId`, `expiresAt` and the `renewalNeeded` flag are plain. A token that cannot be read is dropped (not
+ * registered).
+ *
+ * `renewalNeeded` is set when the events endpoint answered `401` (the token is past the backend's grace period or
+ * revoked); `ensureRegistered` then renews the token. Saving a new token or clearing the registration clears it.
  */
+// commit(), not apply(), on purpose: a push entry point may be killed as soon as it returns, so every write (token,
+// renewalNeeded, config) must be on disk before the call that made it returns.
+@SuppressLint("ApplySharedPref")
 internal class TokenStore(context: Context, private val cipher: TokenCipher) {
     private val prefs: SharedPreferences =
         context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -36,6 +44,7 @@ internal class TokenStore(context: Context, private val cipher: TokenCipher) {
             .putString(KEY_DEVICE_ID, state.deviceId)
             .putString(KEY_TOKEN, Base64.encodeToString(encrypted, Base64.NO_WRAP))
             .putLong(KEY_EXPIRES_AT, state.expiresAt)
+            .remove(KEY_RENEWAL_NEEDED)
             .commit()
         return true
     }
@@ -58,7 +67,13 @@ internal class TokenStore(context: Context, private val cipher: TokenCipher) {
     fun deviceId(): String? = if (prefs.contains(KEY_TOKEN)) prefs.getString(KEY_DEVICE_ID, null) else null
 
     fun clear() {
-        prefs.edit().remove(KEY_DEVICE_ID).remove(KEY_TOKEN).remove(KEY_EXPIRES_AT).commit()
+        prefs.edit().remove(KEY_DEVICE_ID).remove(KEY_TOKEN).remove(KEY_EXPIRES_AT).remove(KEY_RENEWAL_NEEDED).commit()
+    }
+
+    fun renewalNeeded(): Boolean = prefs.getBoolean(KEY_RENEWAL_NEEDED, false)
+
+    fun setRenewalNeeded() {
+        prefs.edit().putBoolean(KEY_RENEWAL_NEEDED, true).commit()
     }
 
     fun saveConfig(baseUrl: String, appId: String) {
@@ -83,6 +98,7 @@ internal class TokenStore(context: Context, private val cipher: TokenCipher) {
         const val KEY_DEVICE_ID = "device_id"
         const val KEY_TOKEN = "token"
         const val KEY_EXPIRES_AT = "expires_at"
+        const val KEY_RENEWAL_NEEDED = "renewal_needed"
         const val KEY_BASE_URL = "base_url"
         const val KEY_APP_ID = "app_id"
     }

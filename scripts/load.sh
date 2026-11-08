@@ -248,7 +248,7 @@ rp_log "compiling loadtest and resolving the Gatling plugin (downloads on the fi
 gexec ./mvnw -B -pl loadtest test-compile gatling:help >"$RP_OUT/logs/prepare.log" 2>&1 \
     || { tail -n 40 "$RP_OUT/logs/prepare.log" >&2; failed "loadtest compile failed"; }
 
-# CPU of the Gatling container: from the start of the injection (simulation.log exists; for ingest also the devices are
+# CPU of the Gatling container: from the start of the injection (simulation.log exists and the devices are
 # provisioned) until Gatling starts generating the report, a sample at once and then every 5 s.
 # Lines: "S <start epoch>", then "<epoch> <percent>" (docker stats: 100 % = one core = the container's limit).
 # $1 samples file, $2 gatling log, $3 1 when the log prints "Provisioned" before the injection, $4 done-flag file
@@ -283,8 +283,8 @@ CONFIG_JSON="$CONFIG_JSON,\"workerCpus\":\"$WORKER_CPUS\",\"workerMemory\":\"$WO
 # Sets SIM_RC, SIM_REASON, SIM_ASSERTIONS, SIM_CPU (used for INVALID), SIM_CPU_INJECTION, SIM_CPU_STEADY
 run_gatling() {
     local name="$1" class="$2" expected="$3" skip="$4" samples="$RP_OUT/logs/cpu-$1.txt" glog="$RP_OUT/logs/gatling-$1.log"
-    local doneflag="$RP_OUT/logs/cpu-$1.done" prov=0 report start
-    [ "$name" = ingest ] && prov=1
+    # both simulations provision their devices first (the burst's users need one: NO_DEVICE_REGISTERED never falls back)
+    local doneflag="$RP_OUT/logs/cpu-$1.done" prov=1 report start
     rm -rf "$RP_ROOT/loadtest/target/gatling" "$doneflag"
     : >"$samples"
     : >"$glog"

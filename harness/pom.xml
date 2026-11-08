@@ -14,7 +14,7 @@
 
     <groupId>io.reliablepush</groupId>
     <artifactId>reliable-push-harness</artifactId>
-    <version>0.1.2</version>
+    <version>0.2.0</version>
     <name>reliable-push-harness</name>
     <description>Local test/demo harness (fallback receiver, device simulator, fake sender, console). Never deployed.</description>
 
@@ -70,6 +70,12 @@
             <artifactId>reliable-push-client</artifactId>
             <version>${project.version}</version>
         </dependency>
+        <dependency>
+            <!-- tracking ids and the tracked APNs / FCM payloads, exactly as a customer backend builds them -->
+            <groupId>io.reliablepush</groupId>
+            <artifactId>reliable-push-payload</artifactId>
+            <version>${project.version}</version>
+        </dependency>
 
         <!-- test (Playwright is added by the console-smoke profile only) -->
         <dependency>
@@ -94,6 +100,7 @@
                 <configuration>
                     <testExcludes>
                         <testExclude>**/console/ConsoleSmokeE2E.java</testExclude>
+                        <testExclude>**/console/AdminSmokeE2E.java</testExclude>
                     </testExcludes>
                 </configuration>
             </plugin>
@@ -196,6 +203,7 @@
             <id>console-smoke</id>
             <properties>
                 <console.url>http://127.0.0.1:8090</console.url>
+                <admin.url>http://127.0.0.1:8080</admin.url>
                 <jacoco.skip>true</jacoco.skip>
                 <argLine></argLine>
             </properties>
@@ -230,9 +238,11 @@
                             <groups>console</groups>
                             <includes>
                                 <include>**/ConsoleSmokeE2E.java</include>
+                                <include>**/AdminSmokeE2E.java</include>
                             </includes>
                             <systemPropertyVariables>
                                 <console.url>${console.url}</console.url>
+                                <admin.url>${admin.url}</admin.url>
                             </systemPropertyVariables>
                         </configuration>
                     </plugin>

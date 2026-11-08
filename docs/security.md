@@ -12,8 +12,9 @@ Summary of how the backend protects data and authenticates callers. The binding 
 | Stolen or guessed sender API key | Registering or cancelling notifications | Keys are compared as SHA-256 hashes in constant time; one key per app; the key gives access only to that app's data |
 | A device or user | Reading or reporting events for another user's notifications | `appId`/`userId` come from the verified credential or token, never from a body; an event for another user's `trackingId` is `FORBIDDEN`, for another app's `NOT_FOUND` |
 | Forged or replayed device registration | Obtaining a device token for another user | OIDC signature verification against the issuer's JWKS, strict claim checks; signed grants are short-lived and capped |
-| Stolen device token | Reporting events as that device | Short revocation cache, revoke endpoint, `token_version` bump on re-registration, expiry (default 90 days) |
+| Stolen device token | Reporting events as that device | Short revocation cache, revoke endpoint, `token_version` bump on re-registration, expiry (default 90 days) plus the events grace (below) |
 | Attacker in front of the fallback receiver | Forging fallbacks, replaying old ones | HMAC-SHA256 signature over timestamp and body, timestamp for replay rejection, `Idempotency-Key` for de-duplication |
+| Stolen or leaked admin key | Reading notifications, user ids and fallback payloads through the dashboard | Read-only API; keys scoped to apps; the payload only for keys with `payload`; keys stored as hashes; rate limit per key; every search and view audit-logged; page headers; optionally restricted to an internal network at the ingress. See [Admin keys](#admin-keys) |
 | Operator mistakes | Secrets in config files or logs | Secrets and keys only as `env:NAME` references; inline values are rejected at startup; log deny-list |
 | Malicious identity provider metadata | SSRF through discovery or JWKS URLs | https required (localhost issuers excepted), redirects never followed, 5 s deadline, 64 KB limit, discovery `issuer` must match |
 
@@ -31,6 +32,45 @@ Summary of how the backend protects data and authenticates callers. The binding 
   (startup fails).
 - Each app has exactly one key hash, so rotating a key is a switch-over: deploy the new `sender-api-key-sha256` and update
   the sender at the same time (or accept a short window of `401`s on the sender, which should retry registration).
+- **Sender-generated tracking ids.** The sender supplies `trackingId` (spec 2026-11-08, sidecar revision). A
+  `trackingId` that already exists for **another app** answers `409`, so a sender can learn that an id exists in another
+  app of the same deployment, and nothing else (no state, user or content). Low risk: ids are random UUIDs
+  (`TrackingIds.newId()`), all apps belong to one organisation, and a guessed id still gives no access to the other
+  app's notification (`GET` and `DELETE` answer `404` for it, events from another app's devices get `NOT_FOUND`).
+
+## Admin keys
+
+The [ops dashboard](admin.md) and its API (`/v1/admin/**`, `/admin/**`) are protected by admin keys. They are configured
+under `reliable-push.admin.keys[]` as `{id, key-sha256, apps, permissions}`; with no key neither the page nor the API exists
+(both answer `404` like an unknown path).
+
+- Create a key and its hash (the hash is not a secret, the key is):
+
+  ```sh
+  KEY=$(openssl rand -base64 32)                    # give this to the person, keep it out of the repo and the logs
+  printf %s "$KEY" | shasum -a 256                  # configure the hash (first column) as key-sha256 (Linux: sha256sum)
+  ```
+
+- `id` (`[a-z0-9-]{1,40}`, not `false`, which would switch the admin beans off) names the key in audit logs instead of the key. `apps` is `["*"]` (every app) or a list of app ids;
+  a key cannot see an app outside its list (`404`). `permissions` can hold `payload`, which allows reading the stored
+  fallback payload (without it the payload route answers `404`), and `fallback-control`, which allows resuming the
+  fallbacks of an app (without it the resume route answers `403`; it is a POST with the `X-Admin-Key` header only, no cookie, so
+  there is no CSRF surface).
+- Lookup is by SHA-256 in constant time, as for sender keys. Startup fails on a duplicate id or hash, a malformed hash, an
+  unknown app or permission, and on a hash equal to a sender key hash.
+- **Rotation:** add the new key (new `id` and hash), deploy, hand the new key out, remove the old entry, deploy. Both keys work
+  during the overlap, so nobody is locked out. To revoke a key at once, remove its entry and deploy.
+- **Audit:** every search and view logs `admin.search`, `admin.notification_viewed`, `admin.payload_viewed` or
+  `admin.devices_viewed` (and `admin.fallback_resumed` for a resume) with the key `id`, the app, for a notification or payload view the tracking id, and for every view
+  `rp.user_hash`; never the key, a user id, a filter value or a payload.
+  Failed sign-ins log `auth.failed` (`missing_admin_key`, `unknown_admin_key`); a key over its rate limit logs
+  `rate_limit.exceeded` with scope `admin`.
+- **Page headers** on `/admin/**`: `Content-Security-Policy: default-src 'self'; frame-ancestors 'none'; base-uri 'none';
+  form-action 'none'`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `X-Content-Type-Options: nosniff`, and
+  `Cache-Control: no-cache` (files revalidated on every load). Server
+  values are inserted as text, never as HTML. API answers carry `Cache-Control: no-store`. The page keeps the key in
+  `sessionStorage` only and sends it in a header, never in a URL.
+- The `userId` is visible to every admin key; treat an admin key like access to personal data.
 
 ## Device authentication
 
@@ -47,6 +87,13 @@ Summary of how the backend protects data and authenticates callers. The binding 
   Revocation and re-registration take effect immediately on the instance that handles them and on other instances after the
   cache TTL. Refresh, revoke and event reporting are conditional on the presented token version, so a superseded token cannot
   refresh, revoke or report.
+- **Grace for expired tokens.** The SDKs do not renew the token while handling a push, so `POST /v1/events` and `DELETE
+  /v1/devices/me` (only these two) also accept a token that expired less than the app's `device-token-events-grace`
+  ago (default 90 days, `0` disables; `exp + 60 s skew + grace`). Signature, issuer, `ver` and revocation checks are
+  unchanged; `POST /v1/devices/token:refresh` still needs an unexpired token (past expiry the app registers again with an
+  ID token). Risk: a stolen token works for at most `validity + grace` after its last refresh, and can only send
+  `DELIVERED`/`READ` for its own user's notifications (which suppresses that user's fallbacks and nothing else) or revoke
+  its own device. Accepted events log `token_state=grace` and count in `rp_events_total{token="grace"}`.
 - Every failure returns the same `401`; only the logged reason code (`missing_token`, `malformed`, `unknown_kid`,
   `bad_signature`, `wrong_issuer`, `expired`, `unknown_app` for a token of an app no longer configured, `revoked`) differs.
 
@@ -74,7 +121,8 @@ match each other, otherwise startup fails. **Rotation procedure:**
 
 1. Generate a new pair (`k2`) and add it to `signing-keys` next to `k1`; deploy. All instances now verify both kids.
 2. Set `current-kid: k2`; deploy. New and refreshed tokens are signed with `k2`; tokens signed with `k1` still verify.
-3. Keep `k1` configured until the longest `device-token-validity` of any app has elapsed since step 2 (default 90 days),
+3. Keep `k1` configured until the longest `device-token-validity` (plus `device-token-events-grace` if you want expired
+   tokens of `k1` to keep working on events; default 90 + 90 days) of any app has elapsed since step 2,
    because tokens issued with `k1` are valid until their own expiry.
 4. Remove `k1` and its variables; deploy. Anything still signed with `k1` now gets `401` and the SDK re-registers.
 
@@ -144,9 +192,13 @@ environment variables.
 - **Rate limits are per instance:** with N replicas a caller can use up to N times the configured rate. Unauthenticated
   floods (for example `POST /v1/devices` with garbage credentials) are limited only by the ingress: configure per-IP limits
   there.
+- **Expired device tokens on events and logout:** a stolen device token keeps working on those two routes for at most
+  `device-token-validity + device-token-events-grace` after its last refresh ([Device tokens](#device-tokens)).
+- **Cross-app `409` on registration** reveals that a `trackingId` exists in another app ([Sender API keys](#sender-api-keys)).
 - **Revocation latency:** another instance may honour a revoked token for up to `revocation-cache-ttl` (default 60 s).
 - **User hash:** pseudonymisation, not anonymisation.
 - **`azp` is ignored** when verifying OIDC ID tokens; scope tokens by `aud`.
 - **No encryption of `fallback` content at rest** beyond what PostgreSQL storage encryption provides; it lives in
   `notification.fallback_payload` until retention deletes the row (default 30 days after it closed).
+- **Admin keys are shared secrets:** there are no per-person accounts or SSO; restrict who holds a key and where `/admin/` is reachable.
 - **TLS** is terminated at the ingress; the backend speaks plain HTTP inside the cluster.

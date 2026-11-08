@@ -1,0 +1,14 @@
+{
+  "name": "fcm-build-no-notification",
+  "description": "no title and no body: nothing visible to show",
+  "operation": "fcm.build",
+  "input": {
+    "token": "tok",
+    "trackingId": "6f1c2b9e-5d1a-4c55-9a38-0c1f3a7d9e11",
+    "title": null,
+    "body": null
+  },
+  "expect": {
+    "error": "FCM_NO_NOTIFICATION"
+  }
+}

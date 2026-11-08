@@ -3,6 +3,9 @@ package io.reliablepush.fallback;
 import io.reliablepush.apps.AppConfig;
 import io.reliablepush.apps.AppRegistry;
 import io.reliablepush.apps.ReliablePushProperties;
+import io.reliablepush.fallback.circuit.CircuitBreaker;
+import io.reliablepush.fallback.circuit.CircuitBreakerProperties;
+import io.reliablepush.fallback.circuit.Suppressor;
 import io.reliablepush.notifications.NotificationRepository;
 import io.reliablepush.shared.metrics.RpMetrics;
 import io.reliablepush.shared.time.TimeScale;
@@ -19,6 +22,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
 import org.springframework.scheduling.annotation.EnableScheduling;
+import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.databind.json.JsonMapper;
 
 /** The {@code worker} role: scheduling and the fallback worker (spec 1). */
@@ -45,15 +49,25 @@ class WorkerConfig {
             ReliablePushProperties properties,
             WebhookClient webhookClient,
             JsonMapper json,
-            RpMetrics metrics) {
+            RpMetrics metrics,
+            FallbackAttemptRepository attempts,
+            TransactionTemplate transactions,
+            CircuitBreaker breaker,
+            Suppressor suppressor,
+            CircuitBreakerProperties circuitProperties) {
         // the lease is a product duration (2 "minutes"): scaled by the fast clock like backoff and trigger window
         Duration lease = timeScale.scale(properties.worker().lease());
         boolean fastClock = !timeScale.minuteDuration().equals(Duration.ofMinutes(1));
         checkLease(lease, fastClock, apps.all()).ifPresent(LOG::warn);
 
         FallbackDispatcher dispatcher =
-                new FallbackDispatcher(notifications, apps, timeScale, clock, webhookClient, json, metrics, lease);
-        return new FallbackScheduler(notifications, dispatcher, clock, lease, properties.worker().batchSize(),
+                new FallbackDispatcher(notifications, apps, timeScale, clock, webhookClient, json, metrics, lease,
+                        attempts, transactions);
+        // the circuit of every configured app is evaluated, and suppressed apps are skipped, before each tick's claims
+        List<String> appIds = apps.all().stream().map(AppConfig::appId).toList();
+        return new FallbackScheduler(notifications, dispatcher, breaker, suppressor, metrics, appIds,
+                circuitProperties.suspended(), clock, lease, properties.worker().pollInterval(),
+                properties.worker().batchSize(),
                 properties.worker().maxConcurrency());
     }
 

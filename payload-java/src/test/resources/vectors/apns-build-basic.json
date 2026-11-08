@@ -1,0 +1,21 @@
+{
+  "name": "apns-build-basic",
+  "operation": "apns.build",
+  "input": {
+    "trackingId": "6f1c2b9e-5d1a-4c55-9a38-0c1f3a7d9e11",
+    "title": "Order shipped",
+    "body": "Your order 1001 is on its way."
+  },
+  "expect": {
+    "output": {
+      "aps": {
+        "alert": {
+          "title": "Order shipped",
+          "body": "Your order 1001 is on its way."
+        },
+        "mutable-content": 1
+      },
+      "rp_tid": "6f1c2b9e-5d1a-4c55-9a38-0c1f3a7d9e11"
+    }
+  }
+}

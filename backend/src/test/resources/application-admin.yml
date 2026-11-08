@@ -1,0 +1,19 @@
+# Test-only admin keys: activate with the Spring profile "admin" (together with "test"). Only the SHA-256 of the raw
+# test keys is stored; the ITs send the raw values in X-Admin-Key.
+reliable-push:
+  admin:
+    keys:
+      # raw "test-admin-key-all": every app, may see payloads
+      - id: admin-all
+        key-sha256: 3d4a991eac6e9c094562744f8b24614e6c246fc470cd3b1b5ecb59be5db45abf
+        apps: ["*"]
+        permissions: [payload]
+      # raw "test-admin-key-shop": app shop only, no payloads
+      - id: admin-shop
+        key-sha256: b265e96ffd721b086d68cfea299c4908ff65111b5e9cb3676d91403fc3031cf9
+        apps: [shop]
+      # raw "test-admin-key-ctl": app shop only, may see payloads and resume fallback circuits
+      - id: admin-ctl
+        key-sha256: d8019b3fcd7520a4c271bb195903aa4adfdc5809881055165dc6e980f5ca844d
+        apps: [shop]
+        permissions: [payload, fallback-control]

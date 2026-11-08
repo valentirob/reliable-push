@@ -8,6 +8,7 @@ final class SharedState: Sendable {
         static let deviceId = "io.reliablepush.deviceId"
         static let expiresAt = "io.reliablepush.expiresAt"
         static let retryNotBefore = "io.reliablepush.retryNotBefore"
+        static let renewalNeeded = "io.reliablepush.renewalNeeded"
     }
 
     private nonisolated(unsafe) let defaults: UserDefaults // UserDefaults is thread-safe
@@ -47,10 +48,17 @@ final class SharedState: Sendable {
         set { setDate(newValue, Key.retryNotBefore) }
     }
 
-    /// Removes the registration fields (not config, not retry-not-before).
+    /// Set when `/v1/events` answered 401 (in the app or the extension); `ensureRegistered` then renews the token.
+    var renewalNeeded: Bool {
+        get { defaults.bool(forKey: Key.renewalNeeded) }
+        set { if newValue { defaults.set(true, forKey: Key.renewalNeeded) } else { defaults.removeObject(forKey: Key.renewalNeeded) } }
+    }
+
+    /// Removes the registration fields, `renewalNeeded` included (not config, not retry-not-before).
     func clearRegistration() {
         defaults.removeObject(forKey: Key.deviceId)
         defaults.removeObject(forKey: Key.expiresAt)
+        defaults.removeObject(forKey: Key.renewalNeeded)
     }
 
     private func set(_ v: String?, forKey k: String) {

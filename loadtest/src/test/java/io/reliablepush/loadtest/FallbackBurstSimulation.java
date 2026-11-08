@@ -3,6 +3,7 @@ package io.reliablepush.loadtest;
 import static io.gatling.javaapi.core.CoreDsl.StringBody;
 import static io.gatling.javaapi.core.CoreDsl.constantUsersPerSec;
 import static io.gatling.javaapi.core.CoreDsl.details;
+import static io.gatling.javaapi.core.CoreDsl.jsonPath;
 import static io.gatling.javaapi.core.CoreDsl.rampUsersPerSec;
 import static io.gatling.javaapi.core.CoreDsl.scenario;
 import static io.gatling.javaapi.http.HttpDsl.http;
@@ -19,8 +20,12 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * Fallback burst: {@code burstSize} NOT_DELIVERED notifications (1 minute timeout, unique user each) at
- * {@code burstPerSecond}; the workers then drain them (measured by {@link BurstDrainProbe}).
+ * Fallback burst: {@code burstSize} NOT_DELIVERED notifications (1 minute timeout) at {@code burstPerSecond}; the
+ * workers then drain them (measured by {@link BurstDrainProbe}). Nothing ever reports an event, so every one falls
+ * back (the circuit breaker is disabled in the load stack). Each registration carries the sender's own
+ * {@code trackingId} (a random UUID, as {@code TrackingIds.newId()} makes it) and goes to a user with a device
+ * provisioned in {@link #before()}: a user without an active device would be stored {@code NO_DEVICE_REGISTERED} and
+ * never fall back.
  *
  * <p>Warm-up: a fresh API replica answers its first minute of peak load slowly (JIT still compiling), so the measured
  * burst is preceded by {@code burstWarmUp} of requests ramping up to the burst rate under their own request name
@@ -34,8 +39,10 @@ public class FallbackBurstSimulation extends Simulation {
     /** Request name of the warm-up before the burst (not asserted). */
     static final String WARM_UP = "notify-warm-up";
 
-    private static final String RUN = UUID.randomUUID().toString().substring(0, 8);
+    /** Users with a provisioned device (filled by {@link #before()}). */
+    private static volatile List<String> users = List.of();
 
+    /** Circular over the provisioned users, a new tracking id per notification. */
     private static final Iterator<Map<String, Object>> USERS = new Iterator<>() {
         private final java.util.concurrent.atomic.AtomicLong n = new java.util.concurrent.atomic.AtomicLong();
 
@@ -46,7 +53,9 @@ public class FallbackBurstSimulation extends Simulation {
 
         @Override
         public Map<String, Object> next() {
-            return Map.of("userId", "burst-" + RUN + "-" + n.getAndIncrement());
+            List<String> u = users;
+            return Map.of("userId", u.get((int) Math.floorMod(n.getAndIncrement(), (long) u.size())),
+                    "trackingId", UUID.randomUUID().toString());
         }
     };
 
@@ -65,9 +74,11 @@ public class FallbackBurstSimulation extends Simulation {
                 .feed(USERS)
                 .exec(http(request).post("/v1/notifications")
                         .header("X-Api-Key", c.senderApiKey())
-                        .body(StringBody("{\"userId\":\"#{userId}\",\"policy\":\"NOT_DELIVERED\",\"timeoutMinutes\":"
-                                + timeoutMinutes + ",\"fallback\":{\"sms\":\"load\"}}"))
-                        .check(status().is(201)));
+                        .body(StringBody("{\"trackingId\":\"#{trackingId}\",\"userId\":\"#{userId}\","
+                                + "\"policy\":\"NOT_DELIVERED\",\"timeoutMinutes\":" + timeoutMinutes
+                                + ",\"fallback\":{\"sms\":\"load\"}}"))
+                        .check(status().is(201))
+                        .check(jsonPath("$.state").is("PENDING")));
     }
 
     private final HttpProtocolBuilder protocol = http.baseUrl(c.apiUrl().toString())
@@ -82,5 +93,11 @@ public class FallbackBurstSimulation extends Simulation {
                                 .injectOpen(constantUsersPerSec(c.burstPerSecond()).during(Duration.ofSeconds(seconds)))))
                 .protocols(protocol)
                 .assertions(assertions());
+    }
+
+    @Override
+    public void before() {
+        users = new DeviceProvisioner().provision(c).stream().map(row -> (String) row.get("userId")).toList();
+        System.out.println("Provisioned " + users.size() + " devices against " + c.apiUrl());
     }
 }

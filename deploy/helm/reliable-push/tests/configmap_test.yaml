@@ -35,6 +35,41 @@ tests:
                     hmac-secret-ref: env:RP_SHOP_HOOK_SECRET
               retention-days: 30
 
+  - it: admin keys render
+    template: configmap.yaml
+    set:
+      config:
+        admin:
+          keys:
+            - id: ops
+              key-sha256: "0000000000000000000000000000000000000000000000000000000000000000"
+              apps: ["*"]
+              permissions: [payload]
+    asserts:
+      - matchRegex:
+          path: data["application.yml"]
+          pattern: "admin:\\n"
+      - matchRegex:
+          path: data["application.yml"]
+          pattern: "id: ops"
+      - matchRegex:
+          path: data["application.yml"]
+          pattern: "key-sha256: .?0{64}"
+
+  - it: fallback circuit breaker settings render
+    template: configmap.yaml
+    set:
+      config:
+        fallback:
+          suspended: true
+          circuit-breaker:
+            enabled: false
+            min-due: 200
+    asserts:
+      - matchRegex:
+          path: data["application.yml"]
+          pattern: "fallback:\\n    circuit-breaker:\\n      enabled: false\\n      min-due: 200\\n    suspended: true"
+
   - it: checksum annotation follows the rendered ConfigMap
     template: deployment.yaml
     set:

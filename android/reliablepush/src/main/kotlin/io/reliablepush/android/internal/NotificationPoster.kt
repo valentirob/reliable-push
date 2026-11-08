@@ -10,21 +10,34 @@ import android.os.Build
 import io.reliablepush.android.ReliablePushOptions
 
 /**
- * Posts the visible notification of a tracked push (mode v1: every tracked push is shown, never hidden).
+ * Posts the visible notification of a tracked push (mode v1: the FCM message is data-only and the SDK posts a local
+ * notification, as every confirmed-delivery service does on Android).
  *
- * It never requests permissions: it only checks that the app may show notifications
- * ([NotificationManager.areNotificationsEnabled], false also when `POST_NOTIFICATIONS` is denied on Android 13+) and
- * that notifications are not paused for the app (API 29+, e.g. a suspended app) and that the notification's channel
- * exists, is not set to [NotificationManager.IMPORTANCE_NONE] and does not belong to a blocked channel group
- * (API 28+). The SDK channel ([ReliablePushOptions.channelId]) is created on first post with [NotificationManager.IMPORTANCE_DEFAULT]; a host that
- * creates it first keeps its own settings. If the host's customizer moves the notification to another channel, that
- * channel is the one checked.
+ * `handle` calls it in these steps (spec §3.4):
+ * 1. [prepare]: builds the notification, with the host's customizer (whose errors are caught here), on the SDK
+ *    channel ([ReliablePushOptions.channelId], created when missing with [NotificationManager.IMPORTANCE_DEFAULT]; a
+ *    host that creates it first keeps its own settings). Nothing is posted yet.
+ * 2. [canShow] with the prepared notification's **final** channel (the customizer may have moved it), the gate,
+ *    before `DELIVERED` is persisted. It never requests permissions: it checks that the app may show notifications
+ *    ([NotificationManager.areNotificationsEnabled], false also when `POST_NOTIFICATIONS` is denied on Android 13+),
+ *    that notifications are not paused for the app (API 29+, e.g. a suspended app), and that the channel exists, is
+ *    not set to [NotificationManager.IMPORTANCE_NONE] and does not belong to a blocked channel group (API 28+). The
+ *    system would drop the notification silently in each of these cases.
+ * 3. [notify]: hands the prepared notification to the system.
+ * 4. [postMinimal], only when something threw before or in [notify]: the simplest notification that can be built.
+ *    Before it, `handle` calls [prepareMinimalChannel] and the gate on the SDK channel, so `DELIVERED` is written for
+ *    the minimal notification only when the system would show it.
+ *
+ * Errors of the platform (e.g. a `SecurityException`) propagate from every step, so `handle` can fall back to the
+ * minimal notification.
  *
  * Notification: tag [TAG], id `rp_tid.hashCode()`, auto-cancel, content intent = an immutable activity
  * [PendingIntent] on [ReliablePushOptions.launchActivity] (or the launcher activity) with extra [EXTRA_TRACKING_ID],
  * whose request code is also `rp_tid.hashCode()` so two notifications do not share (and overwrite) one intent.
+ *
+ * Open, with open steps, for the fault-injection tests of `handle`.
  */
-internal class NotificationPoster(
+internal open class NotificationPoster(
     context: Context,
     private val options: ReliablePushOptions,
     /** Seam over [NotificationManager.areNotificationsPaused] (API 29+), which Robolectric cannot shadow. */
@@ -32,27 +45,80 @@ internal class NotificationPoster(
 ) {
     private val context: Context = context.applicationContext
 
-    /** True only when the notification was handed to the system; any failure is logged (WARN) and returns false. */
-    fun post(trackingId: String, title: String, body: String): Boolean {
-        val nm = context.getSystemService(NotificationManager::class.java) ?: return notPosted(trackingId, "no_manager")
-        return try {
-            if (!nm.areNotificationsEnabled()) return notPosted(trackingId, "notifications_disabled")
-            if (paused(nm)) return notPosted(trackingId, "notifications_paused")
-            if (nm.getNotificationChannel(options.channelId) == null) {
-                nm.createNotificationChannel(
-                    NotificationChannel(options.channelId, options.channelName, NotificationManager.IMPORTANCE_DEFAULT),
-                )
-            }
-            val notification = build(trackingId, title, body)
-            val channel = nm.getNotificationChannel(notification.channelId)
-                ?: return notPosted(trackingId, "channel_missing") // the system would drop it silently
-            if (channel.importance == NotificationManager.IMPORTANCE_NONE) return notPosted(trackingId, "channel_blocked")
-            if (groupBlocked(nm, channel)) return notPosted(trackingId, "channel_group_blocked")
-            nm.notify(TAG, trackingId.hashCode(), notification)
-            true
-        } catch (e: RuntimeException) { // e.g. SecurityException if the permission is revoked meanwhile
-            notPosted(trackingId, "error")
+    /** Builds the notification (customizer included) on the SDK channel, which is created when missing. */
+    open fun prepare(trackingId: String, title: String, body: String): Notification {
+        manager()?.let { ensureChannel(it) }
+        return build(trackingId, title, body)
+    }
+
+    /**
+     * The gate: true when a notification on [channelId] (the prepared notification's final channel) would be shown;
+     * false with a WARN otherwise.
+     */
+    open fun canShow(channelId: String = options.channelId): Boolean {
+        val nm = manager() ?: return closed("no_manager")
+        if (!nm.areNotificationsEnabled()) return closed("notifications_disabled")
+        if (paused(nm)) return closed("notifications_paused")
+        val channel = nm.getNotificationChannel(channelId) ?: return closed("channel_missing")
+        if (channel.importance == NotificationManager.IMPORTANCE_NONE) return closed("channel_blocked")
+        if (groupBlocked(nm, channel)) return closed("channel_group_blocked")
+        return true
+    }
+
+    /** Hands [notification] to the system. False (WARN) only when there is no notification manager. */
+    open fun notify(trackingId: String, notification: Notification): Boolean {
+        val nm = manager() ?: return notPosted(trackingId, "no_manager")
+        nm.notify(TAG, trackingId.hashCode(), notification)
+        return true
+    }
+
+    /**
+     * The last resort of `handle`: [title] and [body] on the SDK channel (created if missing), the small icon and the
+     * tap intent with `rp_tid`; no style and no customizer. Throws when even this cannot be posted, including when the
+     * channel is still missing afterwards (the system would drop it silently).
+     */
+    open fun postMinimal(trackingId: String, title: String, body: String) {
+        val nm = checkNotNull(manager()) { "no NotificationManager" }
+        prepareMinimalChannel()
+        checkNotNull(nm.getNotificationChannel(options.channelId)) { "notification channel missing" }
+        val builder = Notification.Builder(context, options.channelId)
+            .setSmallIcon(smallIcon())
+            .setContentTitle(title)
+            .setContentText(body)
+            .setAutoCancel(true)
+        try {
+            contentIntent(trackingId)?.let { builder.setContentIntent(it) }
+        } catch (e: RuntimeException) { // shown without a tap action rather than not at all
+            SdkLog.warn("notification.no_launch_activity", "tid" to trackingId, "error" to e.javaClass.simpleName)
         }
+        nm.notify(TAG, trackingId.hashCode(), builder.build())
+    }
+
+    /**
+     * Creates the SDK channel for the minimal notification when it is missing. Never throws: a failure is a WARN
+     * `notification.channel_failed`, and the gate or [postMinimal] then finds the channel missing.
+     */
+    open fun prepareMinimalChannel() {
+        try {
+            manager()?.let { ensureChannel(it) }
+        } catch (e: RuntimeException) { // post anyway if the channel exists after all
+            SdkLog.warn("notification.channel_failed", "error" to e.javaClass.simpleName)
+        }
+    }
+
+    private fun manager(): NotificationManager? = context.getSystemService(NotificationManager::class.java)
+
+    private fun ensureChannel(nm: NotificationManager) {
+        if (nm.getNotificationChannel(options.channelId) == null) {
+            nm.createNotificationChannel(
+                NotificationChannel(options.channelId, options.channelName, NotificationManager.IMPORTANCE_DEFAULT),
+            )
+        }
+    }
+
+    private fun closed(reason: String): Boolean {
+        SdkLog.warn("notification.not_shown", "reason" to reason)
+        return false
     }
 
     private fun groupBlocked(nm: NotificationManager, channel: NotificationChannel): Boolean {

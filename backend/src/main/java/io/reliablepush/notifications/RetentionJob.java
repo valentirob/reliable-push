@@ -6,6 +6,8 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
+import java.util.Optional;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.annotation.Profile;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -28,11 +30,14 @@ public class RetentionJob {
     private final NotificationRepository notifications;
     private final Clock clock;
     private final Duration retention;
+    private final ObjectProvider<RetentionGuard> guard;
 
-    RetentionJob(NotificationRepository notifications, Clock clock, ReliablePushProperties properties) {
+    RetentionJob(NotificationRepository notifications, Clock clock, ReliablePushProperties properties,
+            ObjectProvider<RetentionGuard> guard) {
         this.notifications = notifications;
         this.clock = clock;
         this.retention = Duration.ofDays(properties.retentionDays());
+        this.guard = guard;
     }
 
     /**
@@ -48,9 +53,15 @@ public class RetentionJob {
      * Deletes every closed notification whose {@code closed_at} is older than the retention and logs
      * {@code retention.purged} with the total count (also when it is 0).
      *
-     * @return the number of notifications deleted
+     * @return the number of notifications deleted (0 when the {@link RetentionGuard} vetoed the run)
      */
     public int purge() {
+        RetentionGuard veto = guard.getIfAvailable();
+        Optional<String> reason = veto == null ? Optional.empty() : veto.veto();
+        if (reason.isPresent()) {
+            EventLog.warn("retention.skipped", Map.of("reason", reason.get()));
+            return 0;
+        }
         Instant cutoff = clock.instant().minus(retention);
         int total = 0;
         int deleted;

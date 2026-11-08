@@ -38,6 +38,28 @@ config:
   #       private-key-pem-ref: env:RP_DEVICE_KEY_K1
   #       public-key-pem-ref: env:RP_DEVICE_PUB_K1
   apps: {}
+  # Ops dashboard (/admin/): enabled iff at least one key is set. Store only the SHA-256 of each key
+  # (printf %s "$KEY" | shasum -a 256); apps: ["*"] = all apps; permissions: [payload] allows "Show payload",
+  # [fallback-control] allows "Resume fallbacks" (force an open fallback circuit closed, audit-logged).
+  # With keys set, the Ingress also routes /admin and OpenShift gets a second Route for /admin (route.host is then required).
+  # admin:
+  #   keys:
+  #     - id: ops
+  #       key-sha256: "<64 lowercase hex characters>"
+  #       apps: ["shop"]
+  #       permissions: [payload]
+  # Fallback circuit breaker (docs/operations.md, "Fallback circuit breaker"); defaults shown. Durations without a
+  # unit are minutes. suspended: true stops every fallback of every app until it is set back to false.
+  # fallback:
+  #   suspended: false
+  #   circuit-breaker:
+  #     enabled: true
+  #     window: 5m
+  #     min-due: 50
+  #     max-delivered-ratio: 0.10
+  #     close-min-delivered: 10
+  #     min-open: 1m
+  #     force-hold: 60m
   # apps:
   #   shop:
   #     sender-api-key-sha256: "<64 hex characters>"
@@ -117,7 +139,7 @@ ingress:               # Kubernetes Ingress (GKE: className gce)
   annotations: {}
   hosts:
     - host: push.example.com
-      paths: [/v1]     # each path must be /v1 or below it
+      paths: [/v1]     # each path must be /v1, /admin or below them
   tls: []              # [{ secretName: rp-tls, hosts: [push.example.com] }]
 route:                 # OpenShift Route (route.openshift.io/v1), path /v1
   enabled: false

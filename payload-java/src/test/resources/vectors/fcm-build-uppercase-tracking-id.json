@@ -1,0 +1,26 @@
+{
+  "name": "fcm-build-uppercase-tracking-id",
+  "description": "an upper-case tracking id is embedded lower-cased",
+  "operation": "fcm.build",
+  "input": {
+    "token": "tok",
+    "trackingId": "6F1C2B9E-5D1A-4C55-9A38-0C1F3A7D9E11",
+    "title": "T",
+    "body": "B"
+  },
+  "expect": {
+    "output": {
+      "message": {
+        "token": "tok",
+        "data": {
+          "rp_tid": "6f1c2b9e-5d1a-4c55-9a38-0c1f3a7d9e11",
+          "title": "T",
+          "body": "B"
+        },
+        "android": {
+          "priority": "HIGH"
+        }
+      }
+    }
+  }
+}

@@ -93,7 +93,7 @@ class ManagementPortIT extends PostgresTestBase {
 
     @Test
     void apiStillServedOnServerPort() {
-        String body = "{\"userId\":\"mgmt-user\",\"externalId\":\"mgmt-" + UUID.randomUUID()
+        String body = "{\"trackingId\":\"" + UUID.randomUUID() + "\",\"userId\":\"mgmt-user\",\"externalId\":\"mgmt-" + UUID.randomUUID()
                 + "\",\"policy\":\"NOT_DELIVERED\",\"timeoutMinutes\":5,\"fallback\":{\"sms\":\"hi\"}}";
 
         ResponseEntity<String> response = http.post()

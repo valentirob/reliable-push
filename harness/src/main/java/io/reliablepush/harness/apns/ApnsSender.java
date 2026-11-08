@@ -67,7 +67,7 @@ public final class ApnsSender {
                 .header("apns-priority", "10")
                 .header("apns-expiration", "0")
                 .header("content-type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(PayloadPreview.apns(trackingId, title, body)))
+                .POST(HttpRequest.BodyPublishers.ofString(PayloadPreview.apnsCompact(trackingId, title, body)))
                 .build();
         HttpResponse<String> res;
         try {

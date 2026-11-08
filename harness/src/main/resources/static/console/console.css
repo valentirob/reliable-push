@@ -30,7 +30,7 @@ pre { background:#f0f0f4; padding:8px; overflow:auto; max-height:260px; border-r
 .badge.FALLBACK_PENDING { background:#ffe9b8; color:#6b4a00; }
 .badge.FALLBACK_TRIGGERED { background:#cfe0ff; color:#14378a; }
 .badge.FALLBACK_FAILED, .badge.FALLBACK_EXPIRED { background:#fcd3d0; color:#7a1812; }
-.badge.CANCELLED, .badge.UNKNOWN { background:#ddd; color:#444; }
+.badge.CANCELLED, .badge.NO_DEVICE_REGISTERED, .badge.UNKNOWN { background:#ddd; color:#444; }
 .badge.inflight { background:#ffe9b8; color:#6b4a00; }
 .error { color:var(--warn); font-weight:600; }
 .muted { color:var(--muted); }

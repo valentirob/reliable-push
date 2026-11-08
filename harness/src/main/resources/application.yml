@@ -32,3 +32,5 @@ harness:
   # Simulator uses to reach the backend (HARNESS_DEVICEPROXYPORT, default 8091). Unset: no proxy, the switch only remembers.
   # HARNESS_DEVICEPROXYBIND (default 127.0.0.1): the proxy's listen address; compose sets 0.0.0.0 inside the container,
   # where Docker publishes it on 127.0.0.1:8091 only. Never 0.0.0.0 outside a container: it would expose the backend.
+  # Optional: HARNESS_ADMINKEY (harness.admin-key): the raw admin key of the backend's ops dashboard (X-Admin-Key) for the
+  # admin-dashboard scenario; generated per run by GenSecrets.java. Secret, never printed. Unset: that scenario fails.

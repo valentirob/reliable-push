@@ -11,7 +11,7 @@ import org.robolectric.annotation.Config
 class VersionTest {
     @Test
     fun versionMatchesGradleProperty() {
-        assertEquals("0.1.2", System.getProperty("rp.expectedVersion"))
+        assertEquals("0.2.0", System.getProperty("rp.expectedVersion"))
         assertEquals(System.getProperty("rp.expectedVersion"), ReliablePush.VERSION)
     }
 }

@@ -14,6 +14,11 @@ public record AppConfig(
         String senderApiKeySha256,
         Identity identity,
         Duration deviceTokenValidity,
+        /**
+         * How long after its expiry a device token still counts (sidecar revision spec 2.3, 2.4): a device whose newest
+         * token expired less than this ago is active. Zero means no grace; never negative.
+         */
+        Duration deviceTokenEventsGrace,
         String defaultPolicy,
         int defaultTimeoutMinutes,
         RateLimits rateLimits,

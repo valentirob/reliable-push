@@ -1,0 +1,20 @@
+{
+  "name": "fcm-decorate-no-notification",
+  "description": "a data-only (silent) message has no visible title or body: it must stay untracked, never become a blank notification",
+  "operation": "fcm.decorate",
+  "input": {
+    "trackingId": "6f1c2b9e-5d1a-4c55-9a38-0c1f3a7d9e11",
+    "fcm": {
+      "validate_only": false,
+      "message": {
+        "token": "tok",
+        "data": {
+          "k": "v"
+        }
+      }
+    }
+  },
+  "expect": {
+    "error": "FCM_NO_NOTIFICATION"
+  }
+}

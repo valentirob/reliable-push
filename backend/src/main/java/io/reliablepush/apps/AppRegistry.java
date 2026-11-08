@@ -32,6 +32,9 @@ import org.springframework.stereotype.Component;
 @Component
 public class AppRegistry {
 
+    /** Upper bound of {@code device-token-events-grace}: keeps exp + skew + grace far from overflow. */
+    static final Duration MAX_EVENTS_GRACE = Duration.ofDays(3650);
+
     private static final Pattern APP_ID = Pattern.compile("[A-Za-z0-9][A-Za-z0-9_-]{0,63}");
 
     private record Entry(byte[] senderKeyHash, AppConfig app) {}
@@ -84,6 +87,15 @@ public class AppRegistry {
         return Optional.ofNullable(found);
     }
 
+    /** Whether the SHA-256 is the sender key hash of any app (no early exit, like {@link #bySenderApiKey}). */
+    public boolean isSenderKeyHash(byte[] sha256) {
+        boolean found = false;
+        for (Entry entry : entries) {
+            found |= MessageDigest.isEqual(sha256, entry.senderKeyHash());
+        }
+        return found;
+    }
+
     public Collection<AppConfig> all() {
         return entries.stream().map(Entry::app).toList();
     }
@@ -125,6 +137,12 @@ public class AppRegistry {
         if (p.deviceTokenValidity().isZero() || p.deviceTokenValidity().isNegative()) {
             throw new IllegalStateException(base + "device-token-validity must be positive");
         }
+        if (p.deviceTokenEventsGrace().isNegative()) {
+            throw new IllegalStateException(base + "device-token-events-grace must not be negative");
+        }
+        if (p.deviceTokenEventsGrace().compareTo(MAX_EVENTS_GRACE) > 0) {
+            throw new IllegalStateException(base + "device-token-events-grace must not exceed 3650 days");
+        }
         if (f.httpTimeout().isZero() || f.httpTimeout().isNegative()) {
             throw new IllegalStateException(base + "fallback.http-timeout must be positive");
         }
@@ -134,6 +152,7 @@ public class AppRegistry {
                 p.senderApiKeySha256(),
                 new AppConfig.Identity(id.type(), id.issuer(), id.audience(), id.userClaim(), id.jwksUri(), grantSecret),
                 p.deviceTokenValidity(),
+                p.deviceTokenEventsGrace(),
                 p.defaultPolicy(),
                 p.defaultTimeoutMinutes(),
                 new AppConfig.RateLimits(p.rateLimits().devicePerMinute(), p.rateLimits().senderPerMinute()),

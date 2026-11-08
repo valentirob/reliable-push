@@ -40,10 +40,16 @@ class NotificationPosterTest {
 
     private fun contentIntentOf(n: Notification): Intent = shadowOf(n.contentIntent).savedIntent
 
+    /** What `handle` does with a poster: prepare, gate on the final channel, notify. */
+    private fun NotificationPoster.show(id: String, title: String, body: String): Boolean {
+        val n = prepare(id, title, body)
+        return canShow(n.channelId) && notify(id, n)
+    }
+
     @Test
     fun postsOnTheSdkChannelWithTagIdAndTapIntent() {
         val options = ReliablePushOptions(launchActivity = TestLaunchActivity::class.java, smallIcon = android.R.drawable.ic_dialog_email)
-        assertTrue(NotificationPoster(context, options).post(tid, "Hello", "World"))
+        assertTrue(NotificationPoster(context, options).show(tid, "Hello", "World"))
 
         val channel = nm.getNotificationChannel("reliablepush_default")
         assertNotNull(channel)
@@ -76,7 +82,7 @@ class NotificationPosterTest {
         }
         context.applicationInfo.icon = android.R.drawable.ic_dialog_alert
 
-        assertTrue(NotificationPoster(context, ReliablePushOptions()).post(tid, "t", "b"))
+        assertTrue(NotificationPoster(context, ReliablePushOptions()).show(tid, "t", "b"))
 
         val n = posted()!!
         assertEquals(android.R.drawable.ic_dialog_alert, n.smallIcon.resId)
@@ -86,8 +92,8 @@ class NotificationPosterTest {
     @Test
     fun differentTrackingIdsKeepTheirOwnNotificationAndExtras() {
         val poster = NotificationPoster(context, ReliablePushOptions(launchActivity = TestLaunchActivity::class.java))
-        assertTrue(poster.post(tid, "a", "1"))
-        assertTrue(poster.post(tid2, "b", "2"))
+        assertTrue(poster.show(tid, "a", "1"))
+        assertTrue(poster.show(tid2, "b", "2"))
 
         assertEquals(2, shadowOf(nm).allNotifications.size)
         val first = posted(tid)!!
@@ -104,7 +110,7 @@ class NotificationPosterTest {
             launchActivity = TestLaunchActivity::class.java,
             customizer = { builder, id -> seen = id; builder.setSubText("custom") },
         )
-        assertTrue(NotificationPoster(context, options).post(tid, "t", "b"))
+        assertTrue(NotificationPoster(context, options).show(tid, "t", "b"))
         assertEquals(tid, seen)
         assertEquals("custom", posted()!!.extras.getCharSequence(Notification.EXTRA_SUB_TEXT).toString())
     }
@@ -115,7 +121,7 @@ class NotificationPosterTest {
             launchActivity = TestLaunchActivity::class.java,
             customizer = { _, _ -> throw IllegalStateException("host bug") },
         )
-        assertTrue(NotificationPoster(context, options).post(tid, "t", "b"))
+        assertTrue(NotificationPoster(context, options).show(tid, "t", "b"))
         assertNotNull(posted())
     }
 
@@ -125,29 +131,29 @@ class NotificationPosterTest {
             launchActivity = TestLaunchActivity::class.java,
             customizer = { _, _ -> throw AssertionError("host bug") },
         )
-        assertTrue(NotificationPoster(context, options).post(tid, "t", "b"))
+        assertTrue(NotificationPoster(context, options).show(tid, "t", "b"))
         assertNotNull(posted())
     }
 
     @Test
-    fun customizerMovingToABlockedOrMissingChannelPostsNothing() {
+    fun customizerMovingToABlockedOrMissingChannelClosesTheGate() {
         nm.createNotificationChannel(NotificationChannel("muted", "Muted", NotificationManager.IMPORTANCE_NONE))
         val toMuted = ReliablePushOptions(customizer = { b, _ -> b.setChannelId("muted") })
-        assertFalse(NotificationPoster(context, toMuted).post(tid, "t", "b"))
+        assertFalse(NotificationPoster(context, toMuted).show(tid, "t", "b"))
         val toMissing = ReliablePushOptions(customizer = { b, _ -> b.setChannelId("does_not_exist") })
-        assertFalse(NotificationPoster(context, toMissing).post(tid, "t", "b"))
+        assertFalse(NotificationPoster(context, toMissing).show(tid, "t", "b"))
         assertNull(posted())
 
         nm.createNotificationChannel(NotificationChannel("loud", "Loud", NotificationManager.IMPORTANCE_HIGH))
         val toLoud = ReliablePushOptions(customizer = { b, _ -> b.setChannelId("loud") })
-        assertTrue(NotificationPoster(context, toLoud).post(tid, "t", "b"))
+        assertTrue(NotificationPoster(context, toLoud).show(tid, "t", "b"))
         assertEquals("loud", posted()!!.channelId)
     }
 
     @Test
     fun missingLaunchActivityIsLoggedButStillPosts() {
         ShadowLog.clear()
-        assertTrue(NotificationPoster(context, ReliablePushOptions()).post(tid, "t", "b"))
+        assertTrue(NotificationPoster(context, ReliablePushOptions()).show(tid, "t", "b"))
         assertNull(posted()!!.contentIntent)
         assertTrue(
             ShadowLog.getLogsForTag("ReliablePush")
@@ -155,45 +161,91 @@ class NotificationPosterTest {
         )
     }
 
+    // ---- the gate (canShow): checked before DELIVERED is persisted ----
+
     @Test
-    fun appNotificationsDisabledPostsNothing() {
+    fun canShowIsTrueByDefaultOnceThePrepareCreatedTheSdkChannel() {
+        val poster = NotificationPoster(context, ReliablePushOptions())
+        assertFalse(poster.canShow()) // no channel yet: the system would drop it
+        poster.prepare(tid, "t", "b")
+        assertTrue(poster.canShow())
+        assertEquals(NotificationManager.IMPORTANCE_DEFAULT, nm.getNotificationChannel("reliablepush_default").importance)
+        assertNull(posted()) // the gate posts nothing
+    }
+
+    @Test
+    fun appNotificationsDisabledClosesTheGate() {
         shadowOf(nm).setNotificationsEnabled(false)
-        assertFalse(NotificationPoster(context, ReliablePushOptions()).post(tid, "t", "b"))
-        assertNull(posted())
+        assertFalse(NotificationPoster(context, ReliablePushOptions()).canShow())
     }
 
     @Test
-    fun channelSetToNonePostsNothing() {
+    fun channelSetToNoneClosesTheGate() {
         nm.createNotificationChannel(NotificationChannel("reliablepush_default", "Off", NotificationManager.IMPORTANCE_NONE))
-        assertFalse(NotificationPoster(context, ReliablePushOptions()).post(tid, "t", "b"))
-        assertNull(posted())
+        assertFalse(NotificationPoster(context, ReliablePushOptions()).canShow())
     }
 
     @Test
-    fun blockedChannelGroupPostsNothing() {
+    fun blockedChannelGroupClosesTheGate() {
         val group = NotificationChannelGroup("g", "Group")
         NotificationChannelGroup::class.java.getMethod("setBlocked", Boolean::class.javaPrimitiveType).invoke(group, true)
         nm.createNotificationChannelGroup(group)
         val channel = NotificationChannel("reliablepush_default", "Notifications", NotificationManager.IMPORTANCE_DEFAULT)
         channel.group = "g"
         nm.createNotificationChannel(channel)
-        assertFalse(NotificationPoster(context, ReliablePushOptions()).post(tid, "t", "b"))
-        assertNull(posted())
+        assertFalse(NotificationPoster(context, ReliablePushOptions()).canShow())
     }
 
     @Test
-    fun unblockedChannelGroupStillPosts() {
+    fun unblockedChannelGroupKeepsTheGateOpen() {
         nm.createNotificationChannelGroup(NotificationChannelGroup("g", "Group"))
         val channel = NotificationChannel("reliablepush_default", "Notifications", NotificationManager.IMPORTANCE_DEFAULT)
         channel.group = "g"
         nm.createNotificationChannel(channel)
-        assertTrue(NotificationPoster(context, ReliablePushOptions()).post(tid, "t", "b"))
+        assertTrue(NotificationPoster(context, ReliablePushOptions()).canShow())
     }
 
     @Test
-    fun pausedNotificationsPostNothing() {
-        assertFalse(NotificationPoster(context, ReliablePushOptions(), paused = { true }).post(tid, "t", "b"))
+    fun pausedNotificationsCloseTheGate() {
+        assertFalse(NotificationPoster(context, ReliablePushOptions(), paused = { true }).canShow())
+        val open = NotificationPoster(context, ReliablePushOptions(), paused = { false })
+        open.prepare(tid, "t", "b")
+        assertTrue(open.canShow())
+    }
+
+    @Test
+    fun prepareBuildsWithoutPosting() {
+        val n = NotificationPoster(context, ReliablePushOptions(customizer = { b, _ -> b.setChannelId("other") })).prepare(tid, "t", "b")
+        assertEquals("other", n.channelId)
         assertNull(posted())
-        assertTrue(NotificationPoster(context, ReliablePushOptions(), paused = { false }).post(tid, "t", "b"))
+        assertNotNull(nm.getNotificationChannel("reliablepush_default")) // the SDK channel exists for the gate
+    }
+
+    @Test
+    fun gateErrorsPropagateSoHandleCanPostTheMinimalNotification() {
+        val poster = NotificationPoster(context, ReliablePushOptions(), paused = { throw SecurityException("x") })
+        org.junit.Assert.assertThrows(SecurityException::class.java) { poster.canShow() }
+    }
+
+    // ---- the minimal notification (handle's last resort) ----
+
+    @Test
+    fun minimalNotificationHasTitleBodyChannelAndTapExtra() {
+        var customized = false
+        val options = ReliablePushOptions(
+            channelId = "custom_channel",
+            launchActivity = TestLaunchActivity::class.java,
+            customizer = { _, _ -> customized = true },
+        )
+        NotificationPoster(context, options).postMinimal(tid, "Hello", "World")
+
+        val n = posted()!!
+        assertEquals("custom_channel", n.channelId)
+        assertNotNull(nm.getNotificationChannel("custom_channel")) // created when missing, or the system drops it
+        assertEquals("Hello", n.extras.getString(Notification.EXTRA_TITLE))
+        assertEquals("World", n.extras.getCharSequence(Notification.EXTRA_TEXT).toString())
+        assertTrue(n.flags and Notification.FLAG_AUTO_CANCEL != 0)
+        assertEquals(tid, contentIntentOf(n).getStringExtra("rp_tid"))
+        assertFalse("the minimal notification skips the host's customizer", customized)
     }
 }

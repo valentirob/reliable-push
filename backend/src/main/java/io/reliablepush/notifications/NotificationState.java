@@ -2,7 +2,9 @@ package io.reliablepush.notifications;
 
 /**
  * Lifecycle states (spec 2). {@code DISPATCHING} is internal (fallback claimed, webhook in progress or awaiting a
- * retry) and reported to senders as {@code FALLBACK_PENDING}.
+ * retry) and reported to senders as {@code FALLBACK_PENDING}. {@code NO_DEVICE_REGISTERED} is final from the start: the
+ * user had no active device when the notification was registered, so it is neither tracked nor ever falls back
+ * (sidecar revision spec 2.2).
  */
 public enum NotificationState {
     PENDING,
@@ -12,13 +14,14 @@ public enum NotificationState {
     FALLBACK_TRIGGERED,
     FALLBACK_FAILED,
     FALLBACK_EXPIRED,
-    CANCELLED;
+    CANCELLED,
+    NO_DEVICE_REGISTERED;
 
     /** Final states: nothing changes them any more (rows get {@code closed_at} and no {@code due_at}). */
     public boolean closed() {
         return switch (this) {
             case PENDING, DELIVERED, DISPATCHING -> false;
-            case READ, FALLBACK_TRIGGERED, FALLBACK_FAILED, FALLBACK_EXPIRED, CANCELLED -> true;
+            case READ, FALLBACK_TRIGGERED, FALLBACK_FAILED, FALLBACK_EXPIRED, CANCELLED, NO_DEVICE_REGISTERED -> true;
         };
     }
 

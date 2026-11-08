@@ -1,28 +1,46 @@
 package io.reliablepush.harness.sender;
 
+import io.reliablepush.payload.ApnsPayloads;
+import io.reliablepush.payload.FcmPayloads;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
+import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.json.JsonMapper;
 
 /**
- * The exact payloads a customer backend would hand to APNs / FCM for a tracked push (spec 6), pretty-printed with
- * two-space indentation. The recipient token is the literal placeholder {@code <device-token>}.
- * FCM v2 follows the brief's shape ({@code android_v2.remote_notification}); the integration guide only fixes
- * {@code mutable_content=true} and {@code rp_tid} in the data.
+ * The exact payloads a customer backend would hand to APNs / FCM for a tracked push, pretty-printed with two-space
+ * indentation. APNs and FCM v1 are built by the payload jar ({@code reliable-push-payload}: {@link ApnsPayloads},
+ * {@link FcmPayloads}) and only re-indented here: same keys, same order, same values. The recipient token is the
+ * literal placeholder {@code <device-token>}. The FCM v2 preview is not built by the jar: it only documents the future
+ * shape ({@code android_v2.remote_notification}, TODO 2.1); the integration guide fixes {@code mutable_content=true}
+ * and {@code rp_tid} in the data.
  */
 public final class PayloadPreview {
 
     static final String DEVICE_TOKEN = "<device-token>";
     private static final JsonMapper STRINGS = JsonMapper.builder().build();
+    private static final TypeReference<LinkedHashMap<String, Object>> OBJECT = new TypeReference<>() {};
 
     private PayloadPreview() {
     }
 
+    /**
+     * The compact APNs payload of the jar ({@code ApnsPayloads.build}); what the harness sends to APNs.
+     *
+     * @throws io.reliablepush.payload.PayloadException for example when title and body are both empty
+     */
+    public static String apnsCompact(UUID tid, String title, String body) {
+        return ApnsPayloads.build(tid.toString(), title, body, null);
+    }
+
+    /** The compact FCM HTTP v1 message of the jar ({@code FcmPayloads.build}); what the harness sends to FCM. */
+    public static String fcmV1Compact(UUID tid, String title, String body, String fcmToken) {
+        return FcmPayloads.build(fcmToken, tid.toString(), title, body, null);
+    }
+
     public static String apns(UUID tid, String title, String body) {
-        return render(map(
-                "aps", map("alert", map("title", title, "body", body), "mutable-content", 1),
-                "rp_tid", tid.toString()));
+        return pretty(apnsCompact(tid, title, body));
     }
 
     /** Android mode v1: data-only, high priority, no {@code notification} key. */
@@ -30,12 +48,9 @@ public final class PayloadPreview {
         return fcmV1(tid, title, body, DEVICE_TOKEN);
     }
 
-    /** The same message addressed to a real FCM registration token (what the harness sends to the FCM HTTP v1 API). */
+    /** The same message addressed to a real FCM registration token, pretty-printed. */
     public static String fcmV1(UUID tid, String title, String body, String fcmToken) {
-        return render(map("message", map(
-                "token", fcmToken,
-                "android", map("priority", "HIGH"),
-                "data", map("rp_tid", tid.toString(), "title", title, "body", body))));
+        return pretty(fcmV1Compact(tid, title, body, fcmToken));
     }
 
     /** Android mode v2: RemoteNotification with mutable_content and rp_tid in its data. */
@@ -86,6 +101,11 @@ public final class PayloadPreview {
             m.put((String) kv[i], kv[i + 1]);
         }
         return m;
+    }
+
+    /** Re-indents compact JSON from the jar, keeping key order (only objects, strings, numbers, booleans occur). */
+    static String pretty(String compactJson) {
+        return render(STRINGS.readValue(compactJson, OBJECT));
     }
 
     private static String render(Object value) {

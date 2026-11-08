@@ -72,7 +72,16 @@ devices and the fallback receiver. It needs only Docker.
    - **Logs** searches the backend's JSON log by `trace.id`, `rp.tracking_id` or `event.action`.
    - The device list has **Go offline**, to simulate late delivery.
 
-8. **Stop.** Run the `docker compose ... down -v` command that the script printed.
+8. **Open the ops dashboard.** The demo backend serves a read-only dashboard with its own admin key. The key is generated
+   for each run and written to `harness/build/demo/secrets.env` (git-ignored) as `HARNESS_ADMINKEY`. Read it yourself from
+   that file; it is not printed and not in the docs. Open <http://127.0.0.1:8080/admin/>, paste the key and sign in.
+
+   ✅ **Overview** shows the notifications you just sent (use the 24 h window) with delivery and read rates, and the
+   fallbacks triggered. **Search**: app `shop`, user `alice`, then open a result: the timeline lists the `DELIVERED` and
+   `READ` events and, for the `never` push, the webhook attempts (a `FAIL_500` receiver shows `500` attempts before the
+   success). "Show payload" works because this key has the `payload` permission. More: [admin.md](admin.md).
+
+9. **Stop.** Run the `docker compose ... down -v` command that the script printed.
 
 `./scripts/demo.sh --realtime` runs the same demo with real minutes.
 
@@ -104,29 +113,31 @@ Follow the [README quick start](../README.md#quick-start). It uses Docker only, 
 5. register a notification with `curl`.
 
 ✅ `curl -s http://localhost:8080/actuator/health/readiness` returns `{"status":"UP"}`, and `POST /v1/notifications`
-returns `201 {"trackingId": ...}`.
+returns `201 {"trackingId": ..., "state": "NO_DEVICE_REGISTERED"}` (no device is registered for that user).
 
 ### 2.3 Test it by hand
 
 With the stack from 2.2 running and `RP_SENDER_KEY` set:
 
-1. Register: the `POST /v1/notifications` call of the quick start. Keep the `trackingId`.
+1. Register: the `POST /v1/notifications` call of the quick start, with the `trackingId` you generated (`$TID`).
+   Repeat it: ✅ the same row comes back (idempotent).
 2. Read it back:
 
    ```bash
-   curl -s -H "X-Api-Key: $RP_SENDER_KEY" http://localhost:8080/v1/notifications/<trackingId>
+   curl -s -H "X-Api-Key: $RP_SENDER_KEY" http://localhost:8080/v1/notifications/$TID
    ```
 
-   ✅ `"state":"PENDING"`.
-3. Cancel it:
+   ✅ `"state":"NO_DEVICE_REGISTERED"`: the user has no registered device, so nothing is tracked and no fallback will
+   fire. A user with a device (the harness in section 4, or an app with the SDK) gets `PENDING`.
+3. Try to cancel it:
 
    ```bash
-   curl -s -X DELETE -H "X-Api-Key: $RP_SENDER_KEY" http://localhost:8080/v1/notifications/<trackingId>
+   curl -s -o /dev/null -w '%{http_code}\n' -X DELETE -H "X-Api-Key: $RP_SENDER_KEY" http://localhost:8080/v1/notifications/$TID
    ```
 
-   ✅ A new `GET` returns `"state":"CANCELLED"`.
-4. Watch the logs: `docker logs rp-app`. ✅ JSON lines with `event.action` `notification.registered` and
-   `notification.cancelled`, with no user ids or message content.
+   ✅ `409`: the state is final. A `PENDING` notification would answer `204` and become `CANCELLED`.
+4. Watch the logs: `docker logs rp-app`. ✅ JSON lines with `event.action` `notification.no_device_registered` and
+   `notification.duplicate`, with no user ids or message content.
 
 Every endpoint is in [api.md](api.md), and every setting in [operations.md](operations.md).
 
@@ -136,8 +147,8 @@ Every endpoint is in [api.md](api.md), and every setting in [operations.md](oper
 ./scripts/e2e.sh
 ```
 
-✅ Ends with `[e2e] summary: 17/17 passed`. It runs in about 5 minutes and covers the 16 scenarios plus the console
-smoke test. It includes worker crashes inside and outside the trigger window. Results are in
+✅ Ends with `[e2e] summary: 23/23 passed`. It runs in about 8 minutes and covers the 22 scenarios plus the single `console-smoke`
+entry, which runs both Playwright classes (the web console and the dashboard). It includes worker crashes inside and outside the trigger window. Results are in
 `harness/build/e2e/summary.json`. Run one scenario with `--scenario <name>`, and keep the stack for inspection with
 `--keep`.
 
@@ -156,7 +167,17 @@ To use it from your project, install it into `~/.m2`:
 ```
 
 Then call `SenderClient.builder().baseUrl(...).apiKey(...).build()`. Point it at the backend from 2.2 and call
-`register(...)`. ✅ It returns a `Notification` with a `trackingId`. Usage: [client-java/README.md](../client-java/README.md).
+`register(...)` with a `trackingId`. ✅ It returns a `Notification` with that `trackingId`. Usage:
+[client-java/README.md](../client-java/README.md).
+
+The payload jar (Java 8+, zero dependencies) builds and tests the same way:
+
+```bash
+./mvnw -B -pl payload-java verify    # tests, golden vectors included
+./mvnw -B -pl payload-java install   # into ~/.m2
+```
+
+✅ `BUILD SUCCESS`. Usage: [payload-java/README.md](../payload-java/README.md).
 
 ## 4. Harness
 

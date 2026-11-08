@@ -6,6 +6,9 @@ struct DeviceToken: Sendable, Equatable {
     let issuedAt: Date
     let expiresAt: Date
 
+    /// True at or after `exp`.
+    func isExpired(now: Date) -> Bool { now >= expiresAt }
+
     /// True when expired or the remaining lifetime is below 20 % of the total lifetime.
     func needsRefresh(now: Date) -> Bool {
         let remaining = expiresAt.timeIntervalSince(now)

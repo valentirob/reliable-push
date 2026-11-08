@@ -1,6 +1,6 @@
 import Foundation
 
-/// The payload contract's `rp_tid` (a UUID string at the top level of `userInfo`).
+/// The payload contract's `rp_tid` (a UUID string at the top level of `userInfo`), normalized to lower case.
 enum TrackingId {
     static let key = "rp_tid"
 
@@ -18,6 +18,6 @@ enum TrackingId {
             SDKLog.warn("tracking.event_dropped", ["reason": "malformed_rp_tid"])
             return .malformed
         }
-        return .valid(s)
+        return .valid(s.lowercased()) // the backend's form: queued, sent and matched ids agree
     }
 }

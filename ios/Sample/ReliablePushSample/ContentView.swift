@@ -37,6 +37,13 @@ final class SampleModel: ObservableObject {
         #endif
     }
 
+    /// The sample's own login state (a real app has its session): set by Register, cleared by Logout and `RP_RESET`.
+    nonisolated static let loggedInKey = "io.reliablepush.sample.loggedIn"
+    private var loggedIn: Bool {
+        get { UserDefaults.standard.bool(forKey: Self.loggedInKey) }
+        set { UserDefaults.standard.set(newValue, forKey: Self.loggedInKey) }
+    }
+
     func configured() {
         deviceId = ReliablePush.deviceId
         status = deviceId == nil ? "configured" : "registered"
@@ -64,34 +71,62 @@ final class SampleModel: ObservableObject {
     }
     #endif
 
-    /// Grant from the backend -> `ReliablePush.register` -> the device announced to the backend.
+    /// The sample's login: marks the user logged in, then `ensureRegistered` (grant from the backend -> register ->
+    /// the device announced to the backend).
     func register() {
-        guard let backend, !busy else { return }
+        guard backend != nil, !busy else { return }
         busy = true
         status = "registering"
-        let config = config
+        loggedIn = true
         Task {
             defer { busy = false }
-            do {
-                let idToken = try await backend.idToken(appId: config.appId, userId: config.userId)
-                switch await ReliablePush.register(idToken: idToken) {
-                case let .success(deviceId):
-                    try await backend.deviceRegistered(appId: config.appId, userId: config.userId, deviceId: deviceId)
-                    self.deviceId = deviceId
-                    status = "registered"
-                    #if DEBUG
-                    reportApnsToken()
-                    #endif
-                case let .failed(httpStatus):
-                    status = "register failed (\(httpStatus.map(String.init) ?? "no HTTP status"))"
-                }
-            } catch {
-                status = "register failed: \(error)"
-            }
+            var result = await ensureRegistered()
+            // a call that joined a run started before the login (provider nil then) is asked once more
+            if result == .notLoggedIn { result = await ensureRegistered() }
         }
     }
 
+    /// `ReliablePush.ensureRegistered` with the sample's ID-token provider: nil while logged out, else the backend's
+    /// grant. Called at launch, on foreground and after login; it renews the device token only when needed.
+    @discardableResult
+    func ensureRegistered() async -> RegisterResult {
+        let backend = backend
+        let config = config
+        let result = await ReliablePush.ensureRegistered(idTokenProvider: {
+            guard let backend, UserDefaults.standard.bool(forKey: SampleModel.loggedInKey) else { return nil }
+            do {
+                return try await backend.idToken(appId: config.appId, userId: config.userId)
+            } catch {
+                sampleLog.error("event=sample.id_token_failed")
+                return nil
+            }
+        })
+        switch result {
+        case let .success(deviceId):
+            do {
+                // the harness's REAL device entry (idempotent; again after a renewal)
+                try await backend?.deviceRegistered(appId: config.appId, userId: config.userId, deviceId: deviceId)
+                self.deviceId = deviceId
+                status = "registered"
+                #if DEBUG
+                reportApnsToken()
+                #endif
+            } catch {
+                status = "register failed: \(error)"
+            }
+        case .alreadyRegistered:
+            deviceId = ReliablePush.deviceId
+            status = "registered"
+        case .notLoggedIn:
+            break // the screen keeps its state (configured, logged out)
+        case let .failed(httpStatus):
+            status = "register failed (\(httpStatus.map(String.init) ?? "no HTTP status"))"
+        }
+        return result
+    }
+
     func logout() {
+        loggedIn = false
         status = "logging out"
         ReliablePush.logout { [weak self] confirmed in
             self?.deviceId = ReliablePush.deviceId

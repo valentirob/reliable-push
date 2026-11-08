@@ -9,8 +9,8 @@ Gatling (Java DSL) simulations for the local NFR-2 load test, plus JDK-only help
 | `LoadConfig` | Settings from the environment (`LOAD_*`, `HARNESS_APPS_SHOP_*`); `toString()` hides secrets |
 | `GrantSigner` | HS256 signed grant, same shape as the harness `GrantMinter` |
 | `DeviceProvisioner` | Registers `LOAD_DEVICES` devices (at most 50 in flight), returns feeder rows |
-| `EventIngestSimulation` (test sources) | 500 notifications/s + 1,000 events/s; NFR-2 assertions per group `register` and `events`; an arrival whose register failed sends no events |
-| `FallbackBurstSimulation` (test sources) | `LOAD_BURST_WARMUP` (default 30 s) of warm-up requests (`notify-warm-up`, not asserted), then `LOAD_BURST_SIZE` notifications (`notify`) at `LOAD_BURST_PER_SECOND`, drained by the workers |
+| `EventIngestSimulation` (test sources) | 500 notifications/s (each with its own `trackingId`, for a provisioned user: `PENDING`) + 1,000 events/s; NFR-2 assertions per group `register` and `events`; an arrival whose register failed sends no events |
+| `FallbackBurstSimulation` (test sources) | Provisions `LOAD_DEVICES` devices (a user without one gets `NO_DEVICE_REGISTERED` and never falls back), then `LOAD_BURST_WARMUP` (default 30 s) of warm-up requests (`notify-warm-up`, not asserted), then `LOAD_BURST_SIZE` notifications (`notify`) at `LOAD_BURST_PER_SECOND` for those users, never confirmed, drained by the workers |
 | `BurstDrainProbe` | Plain JDK main: samples worker `/actuator/prometheus` every second, writes drain JSON |
 
 Run one simulation explicitly (the Gatling plugin is bound to no phase):

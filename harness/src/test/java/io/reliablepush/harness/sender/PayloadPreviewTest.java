@@ -2,6 +2,9 @@ package io.reliablepush.harness.sender;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import io.reliablepush.payload.ApnsPayloads;
+import io.reliablepush.payload.FcmPayloads;
+import io.reliablepush.payload.PayloadException;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.JsonNode;
@@ -33,6 +36,41 @@ class PayloadPreviewTest {
         assertThat(m.at("/data/rp_tid").asString()).isEqualTo(TID.toString());
         assertThat(m.at("/data/title").asString()).isEqualTo("T");
         assertThat(m.at("/data/body").asString()).isEqualTo("B");
+    }
+
+    @Test
+    void apnsPreviewIsTheJarOutputReindented() {
+        String title = "He said \"hi\" \\ \u00e9\u4e2d\n";
+        String jar = ApnsPayloads.build(TID.toString(), title, "On its way.", null);
+
+        String preview = PayloadPreview.apns(TID, title, "On its way.");
+
+        assertThat(json.readTree(preview)).isEqualTo(json.readTree(jar));
+        assertThat(compact(preview)).isEqualTo(jar); // same keys, same order, same values
+        assertThat(PayloadPreview.apnsCompact(TID, title, "On its way.")).isEqualTo(jar);
+    }
+
+    @Test
+    void fcmV1PreviewIsTheJarOutputReindented() {
+        String jar = FcmPayloads.build("<device-token>", TID.toString(), "T \"x\"", "B\u00e9", null);
+
+        String preview = PayloadPreview.fcmV1(TID, "T \"x\"", "B\u00e9");
+
+        assertThat(json.readTree(preview)).isEqualTo(json.readTree(jar));
+        assertThat(compact(preview)).isEqualTo(jar);
+        assertThat(PayloadPreview.fcmV1Compact(TID, "T \"x\"", "B\u00e9", "real-token"))
+                .isEqualTo(FcmPayloads.build("real-token", TID.toString(), "T \"x\"", "B\u00e9", null));
+    }
+
+    @Test
+    void apnsWithoutTitleAndBodyIsRejectedByTheJar() {
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> PayloadPreview.apns(TID, "", ""))
+                .isInstanceOf(PayloadException.class);
+    }
+
+    /** Pretty output with the indentation removed (no value in these tests contains a raw newline or ": "). */
+    private static String compact(String pretty) {
+        return pretty.replaceAll("\n\\s*", "").replace("\": ", "\":");
     }
 
     @Test

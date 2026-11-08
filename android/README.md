@@ -7,9 +7,23 @@ Kotlin SDK (`io.reliablepush:reliable-push-android`, minSdk 26, compileSdk 37). 
 | Path | What |
 |---|---|
 | `reliablepush/` | The library (package `io.reliablepush.android`, `explicitApi()`) |
-| `sample/` | Sample app: Register/Logout against the local harness (debug build), FCM entry point, emulator E2E tests |
+| `sample/` | Sample app: login (`ensureRegistered` at start and after login) / Logout against the local harness (debug build), FCM entry point, emulator E2E tests |
 | `gradle/libs.versions.toml` | Every pinned version, with release dates |
 | `gradle.properties` | `VERSION_NAME`, the SDK version |
+
+## Public API (details: [docs/android.md](../docs/android.md))
+
+| Call | Where | What |
+|---|---|---|
+| `ReliablePush.configure(context, baseUrl, appId, options)` | `Application.onCreate`, every launch | stores the configuration; sends events left from earlier launches |
+| `ReliablePush.ensureRegistered(idTokenProvider) { result -> }` | app start or foreground, and right after login | the only place the device token is renewed: registers, refreshes, or answers `AlreadyRegistered` without network |
+| `ReliablePush.register(idToken) { result -> }` | optional | always registers |
+| `ReliablePushMessaging.onMessageReceived(this, message)` / `ReliablePush.handle(context, data)` | `FirebaseMessagingService` | data-only FCM message: gate, persist `DELIVERED`, post the notification, send; never throws, posts a minimal notification if anything fails |
+| `ReliablePush.trackOpen(intent)` | launch activity `onCreate` and `onNewIntent` | reports `READ` |
+| `ReliablePush.logout()` | sign-out, user switch | revokes and clears the registration and the queue |
+
+The receive path, the event flush and the retry job never renew the device token (spec
+[§3.1](../docs/specs/2026-11-08-sidecar-integration-revision-design.md)).
 
 ## Prerequisites
 
