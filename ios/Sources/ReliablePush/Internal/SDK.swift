@@ -275,17 +275,30 @@ final class SDK: Sendable {
         return await register(idToken: idToken, knownDeviceId: known, epoch: started)
     }
 
-    /// The provider's answer (`.some(nil)`: not logged in), or nil after `providerTimeout` or when this run is
-    /// cancelled. The provider runs in its own task, so one that ignores cancellation cannot hold the run; its late
-    /// answer is ignored. Polled every 20 ms (as `FileLock`): a continuation-based race is much larger in binary size,
-    /// and the SDK has a size budget (spec 9.2).
+    /// The provider's answer (`.some(nil)`: not logged in), or nil after `providerTimeout`, whichever comes first (no
+    /// polling). The provider runs in its own task, so one that ignores cancellation cannot hold the run; its late
+    /// answer is ignored.
     private func idToken(from provider: @escaping @Sendable () async -> String?) async -> String?? {
-        let answer = Locked<String??>(nil)
-        let ask = Task { let t = await provider(); answer.withLock { $0 = .some(t) } }
-        let end = Date().addingTimeInterval(env.providerTimeout)
-        while answer.withLock({ $0 }) == nil && !Task.isCancelled && Date() < end { try? await sleep(0.02) }
-        ask.cancel()
-        return answer.withLock { $0 } // read once: a later answer lands in a box nobody reads
+        let timeout = env.providerTimeout
+        let waiting = Locked<CheckedContinuation<String??, Never>?>(nil)
+        @Sendable func finish(_ answer: String??) {
+            waiting.withLock { w -> CheckedContinuation<String??, Never>? in
+                defer { w = nil }
+                return w
+            }?.resume(returning: answer)
+        }
+        return await withCheckedContinuation { c in
+            waiting.withLock { $0 = c }
+            let timer = Task {
+                try? await sleep(timeout)
+                finish(nil)
+            }
+            Task {
+                let answer = await provider()
+                timer.cancel()
+                finish(.some(answer))
+            }
+        }
     }
 
     /// `POST /v1/devices/token:refresh`; nil when the backend answered 401 (the caller takes the ID-token path).
