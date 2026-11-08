@@ -35,6 +35,9 @@ All notable changes to this project are documented here. Versions follow [Semant
   outcomes), the iOS flow (the Notification Service Extension confirms an alert that iOS draws) and the Android flow
   (the SDK turns a data-only message into a local notification after the gate), and an iOS vs Android comparison. The
   SDK slides now cover only what goes into the app.
+- `docs/market-comparison.md` and two slides compare reliable-push with Catapush, OneSignal, Airship and Braze
+  (confirmed delivery, read tracking, fallback, who sends the push, hosting, cost, scope), from each vendor's public
+  documentation with sources, and say when each one fits and where reliable-push stops.
 
 ## 0.2.0 — 2026-11-08
 

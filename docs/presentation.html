@@ -166,6 +166,12 @@
   .lanes { display: grid; grid-template-columns: 1fr 150px 1fr; gap: 14px; align-items: stretch; }
   .lanes .db { display: grid; place-items: center; }
   .lanes .db .card { text-align: center; padding: 14px 10px; font-size: .78em; }
+  .cmp { font-size: .7em; }
+  .cmp th, .cmp td { padding: 5px 8px; }
+  .cmp th:nth-child(2), .cmp td:nth-child(2) { background: var(--side-soft); }
+  .cmp .y { color: var(--ok); font-weight: 700; }
+  .cmp .p { color: var(--fall); font-weight: 700; }
+  .cmp .n { color: var(--muted); }
   /* chrome */
   .bar { position: fixed; left: 0; right: 0; bottom: 0; height: 56px; display: flex; align-items: center; gap: 10px; padding: 0 16px; color: var(--muted); font-size: .8em; }
   .bar button { background: var(--slide); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; height: 34px; min-width: 38px; padding: 0 10px; font: inherit; cursor: pointer; }
@@ -928,6 +934,49 @@ answer 2xx</code></pre>
       <div class="card"><h3>1 stateful dependency</h3><p class="small">PostgreSQL. No queue, cache or broker to run.</p></div>
     </div>
     <p class="small muted" style="margin-top:12px">Load figures come from a local run on one Mac (2026-11-05). Use them as orders of magnitude.</p>
+  </div>
+</section>
+
+<!-- 13b -->
+<section class="slide" data-title="Market comparison">
+  <p class="kicker">Alternatives · from each vendor's public docs, November 2026</p>
+  <h2>Confirmed delivery and fallback: who does what</h2>
+  <div class="grow">
+    <table class="cmp">
+      <tr><th></th><th>reliable-push</th><th>Catapush</th><th>OneSignal</th><th>Airship</th><th>Braze</th></tr>
+      <tr><td><b>Delivery confirmed by the device</b></td><td><span class="y">✓</span> SDK, iOS and Android</td><td><span class="y">✓</span> sent, delivered, read</td><td><span class="y">✓</span> paid plans; iOS extension</td><td><span class="n">not documented</span></td><td><span class="n">not documented</span></td></tr>
+      <tr><td><b>Read / open tracking</b></td><td><span class="y">✓</span> <code>READ</code> on tap</td><td><span class="y">✓</span></td><td><span class="y">✓</span> clicks</td><td><span class="y">✓</span> opens</td><td><span class="y">✓</span> opens</td></tr>
+      <tr><td><b>Fallback if not confirmed in time</b></td><td><span class="y">✓</span> per push: policy + timeout</td><td><span class="y">✓</span> SMS after the expiry</td><td><span class="y">✓</span> Journeys: wait for delivery or click</td><td><span class="p">~</span> when unreachable (uninstall)</td><td><span class="p">~</span> branch on "not opened"</td></tr>
+      <tr><td><b>Fallback channel</b></td><td>yours, via a signed webhook</td><td>Catapush SMS, prepaid</td><td>OneSignal SMS, email</td><td>Airship channels</td><td>Braze channels</td></tr>
+      <tr><td><b>Who sends the push</b></td><td><b>you, unchanged</b> (sidecar)</td><td>Catapush, own channel</td><td>OneSignal</td><td>Airship</td><td>Braze</td></tr>
+      <tr><td><b>Guard against an SMS storm</b></td><td><span class="y">✓</span> per-app circuit breaker</td><td colspan="4"><span class="n">not documented</span></td></tr>
+      <tr><td><b>Hosting, data</b></td><td>self-hosted, your PostgreSQL</td><td colspan="4">SaaS: data with the vendor</td></tr>
+      <tr><td><b>Licence, cost</b></td><td>MIT, free</td><td>free tier, then quote</td><td>free plan; confirmation on paid plans</td><td colspan="2">on request</td></tr>
+      <tr><td><b>Campaigns, segments, in-app</b></td><td><span class="n">no, by design</span></td><td><span class="p">~</span> messaging focus</td><td colspan="3"><span class="y">✓</span> engagement platforms</td></tr>
+    </table>
+    <p class="small muted" style="margin-top:10px"><span class="y">✓</span> documented · <span class="p">~</span> partly · "not documented": we found no public description; ask the vendor. Sources and details: <a href="market-comparison.md">market-comparison.md</a>.</p>
+  </div>
+</section>
+
+<!-- 13c -->
+<section class="slide" data-title="Where it fits">
+  <p class="kicker">Alternatives</p>
+  <h2>When reliable-push is the right tool, and when it is not</h2>
+  <div class="grow">
+    <div class="cols c2">
+      <div class="card side"><h3>Choose reliable-push when</h3><ul class="clean small">
+        <li>your backend already sends pushes and should keep doing it, with its own FCM / APNs keys;</li>
+        <li>you need to know the push reached the phone (or was read) and to reach the user another way if not, within minutes;</li>
+        <li>the data must stay on your infrastructure, and you want to pick the SMS / email provider yourself;</li>
+        <li>you want to add it, and later remove it, without touching the push path.</li>
+      </ul></div>
+      <div class="card"><h3>Choose a platform when</h3><ul class="clean small">
+        <li><b>Catapush</b>: you want a managed channel with delivery receipts and SMS fallback included, and can move sending to it;</li>
+        <li><b>OneSignal</b>: you want confirmed delivery plus campaigns and journeys in one SaaS, on a paid plan;</li>
+        <li><b>Airship</b>, <b>Braze</b>: you need a full engagement platform (segments, journeys, in-app); the fallback there is based on reachability or opens, not on confirmed delivery.</li>
+      </ul></div>
+    </div>
+    <div class="card fall" style="margin-top:16px"><p class="small"><b>Honest limits.</b> reliable-push only tracks and falls back: no campaigns, no segmentation, no in-app messages, no hosted service. It needs its SDK in the app and a payload change in your sender (the payload jar). Delivery through real APNs and FCM is not verified yet: see "Status and next".</p></div>
   </div>
 </section>
 
