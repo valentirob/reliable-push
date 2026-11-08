@@ -108,7 +108,8 @@ obtained within 2 s fails the check (section 5, fail closed). The prune of old e
 instance. With `circuit-breaker.enabled: false` it does nothing and every app is `CLOSED` (only the prune runs, under
 a non-blocking `pg_try_advisory_xact_lock`).
 
-For each configured app, with `now` the application clock (the one the claim uses):
+For each configured app, with `now` the instant of the tick's check (application clock, taken once by the tick
+before the lock wait; it is also the due cut-off of the suppression and the claims that follow, section 5):
 
 - **due set**: the app's fallbacks of the window, that is rows with `state in ('PENDING', 'DELIVERED', 'DISPATCHING')`
   and `due_at in (now - window, now]` (the backlog about to fire plus calls in progress; partial index
@@ -132,9 +133,19 @@ For each configured app, with `now` the application clock (the one the claim use
 | OPEN or CLOSED | operator resume (section 6) | FORCED, `forced_until = now + force-hold` | `FORCED`/`forced` with `admin_key_id`; WARN `fallback.circuit_forced` |
 | FORCED | `now >= forced_until`, or resumed (counted from the forced `since`) | CLOSED | `FORCE_ENDED`/`force_expired` or `delivered_resumed`; INFO `fallback.circuit_closed` |
 
+Every committed transition (an event row) also increments `rp_fallback_circuit_transitions_total{app,transition}`
+(D5), after the commit like its log line; the series exist at 0 for every configured app from startup, in both roles
+(the resume runs in the API role).
+
 Because the due set counts the backlog before it is claimed, a storm is stopped at the first tick: the rows that would
-fire are still unclaimed when the circuit opens. A storm that builds slowly (a few rows per tick) is caught once the
-window holds `min-due` of them. While `FORCED`, detection is off for that app. `NOT_READ` notifications whose device
+fire are still unclaimed when the circuit opens. The claims after a check take only rows due at or before its `now`
+(`due_at <= now`, `next_attempt_at <= now`; the lease runs from the real time), so every row a tick claims was counted
+by the check that let it through, also when the check waited for the lock; a row that comes due after the check waits
+for the next one (at most one poll interval, also during a long drain). A burst of untracked notifications that comes
+due within one window therefore fires at most `min-due - 1` calls before its circuit opens: the rows fired earlier stay
+in the due set (`DISPATCHING` by `due_at`, closed ones by `closed_at`). Rows due before the window (a backlog older
+than `window`, for instance after a long worker outage) are not counted. A storm that builds slowly (a few rows per
+tick) is caught once the window holds `min-due` of them. While `FORCED`, detection is off for that app. `NOT_READ` notifications whose device
 confirmed delivery count as delivered in the cohort, so users who do not open a notification never trip the circuit.
 
 ## 5. Suppression
@@ -144,10 +155,13 @@ After `evaluate()`, in the same tick and before any claim:
 - When `fallback.suspended` is `true`: every app is suppressed, whatever its circuit state (also `FORCED`).
 - Otherwise each app whose circuit is `OPEN` is suppressed.
 
-Suppressing an app closes its claimable rows (the claim query's own condition, restricted to the app:
-`state in ('PENDING','DELIVERED') and due_at <= now` or `state = 'DISPATCHING' and next_attempt_at <= now`) as
-`FALLBACK_EXPIRED` (`closed_at = now`, `due_at`, `next_attempt_at`, `lease_until` cleared) in chunks of 1,000 rows,
-each its own transaction, without calling the webhook. Rows a worker holds under a live lease are left to that worker.
+Suppressing an app closes its claimable rows (the claim query's own condition, restricted to the app, with `now` the
+check's instant: `state in ('PENDING','DELIVERED') and due_at <= now` or `state = 'DISPATCHING' and
+next_attempt_at <= now`) as `FALLBACK_EXPIRED` (`closed_at = now`, `due_at`, `next_attempt_at`, `lease_until`
+cleared) in chunks of 1,000 rows, each its own transaction, without calling the webhook. For reason `circuit_open`
+each chunk first locks the app's `fallback_circuit` row and closes nothing once the circuit is no longer `OPEN` (an
+operator resume or a close committed during a long suppression pass stops it at the next chunk). Rows a worker holds
+under a live lease are left to that worker.
 Per tick and app with at least one row closed: one WARN `fallback.suppressed` (`rp.app_id`, `count`, `reason` =
 `circuit_open` or `fallback_suspended`), never one line per notification, and none for an app with nothing to close; `fallback_circuit.suppressed` grows by the count; the metric
 `rp_fallback_total{outcome="expired"}` and the new `rp_fallback_suppressed_total{app,reason}` grow. The claim that
@@ -158,7 +172,8 @@ interval. Suppressed notifications are never re-opened: events that arrive later
 
 Fail closed: when `evaluate()` or the suppression throws (database error, or the detector lock not obtained within
 2 s), the tick logs one WARN `fallback.circuit_check_failed` (`reason` = exception class name; the stack trace follows
-at ERROR from the scheduler's logger) and claims nothing more (rows already claimed finish); the next tick tries again.
+at ERROR from the scheduler's logger), increments `rp_fallback_circuit_check_failed_total` (worker role) and claims
+nothing more (rows already claimed finish); the next tick tries again.
 A missed fallback is preferred to an unwanted one.
 
 ## 6. Admin console and API
@@ -183,15 +198,17 @@ A missed fallback is preferred to an unwanted one.
   offline users does not trip; a cohort with no delivery trips even though new sends are delivered); detection opens the
   circuit before any claim of a storm backlog (no webhook call, rows `FALLBACK_EXPIRED`, one `fallback.suppressed`
   line); close on resumed `DELIVERED`; `suspended: true` suppresses also a `FORCED` app; `enabled: false` never opens;
-  the advisory lock (two workers, one transition); a row under a live lease is not suppressed; admin routes (`403`
-  without the permission, `404` outside the scope, `409`, audit line, OpenAPI contract).
+  the advisory lock (two workers, one transition, one count in `rp_fallback_circuit_transitions_total`); a failed check
+  counted in `rp_fallback_circuit_check_failed_total`; a row that comes due after the check (lock wait) is not claimed
+  by that tick; a resume between two suppression chunks stops the pass; a row under a live lease is not suppressed;
+  admin routes (`403` without the permission, `404` outside the scope, `409`, audit line, OpenAPI contract).
 - **E2E (local):** new scenario `fallback-circuit`: registers a burst of notifications whose devices never confirm,
   checks that the circuit opens and the receiver gets no call, then lets devices confirm new notifications and checks
   that the circuit closes and later fallbacks fire again. `./scripts/e2e.sh` expects `E2E: 19/19 passed`.
   As built: a dedicated app `circuit`; the stack sets window 30 s, `min-due` 10, `close-min-delivered` 3, `min-open`
-  5 s. The burst's due times are a few milliseconds apart, so a tick could see fewer than `min-due` of them due and fire
-  those (section 4); the burst step therefore allows at most `min-due - 1` calls, and a second batch sent while the
-  circuit is open must get no call at all.
+  5 s. The burst's due times are a few milliseconds apart, so a check can see fewer than `min-due` of them due; the tick
+  then fires only those, never a row that came due after the check (section 4), so the burst step asserts fewer than
+  `min-due` calls, and a second batch sent while the circuit is open must get no call at all.
 - **Coverage:** the backend's 80 % line gate stays.
 
 ## 8. Documentation (docs-sync rule)

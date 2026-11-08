@@ -36,10 +36,13 @@ All notable changes to this project are documented here. Versions follow [Semant
   after `min-open` (1 min) once `close-min-delivered` (10) newer notifications are delivered. On by default;
   `fallback.circuit-breaker.enabled: false` turns it off, `fallback.suspended: true` stops every fallback of every app.
   Fail closed: a failed check (database error, the detector's advisory lock not obtained in 2 s) claims nothing that
-  tick (`fallback.circuit_check_failed`).
+  tick (`fallback.circuit_check_failed`). A tick claims only rows due at the instant its check evaluated (the claim's
+  due cut-off), so a burst due within one window fires fewer than `min-due` calls before its circuit opens; a
+  suppression pass stops at the next chunk once the circuit is no longer `OPEN`.
 - Log events `fallback.circuit_opened`, `fallback.circuit_closed`, `fallback.circuit_forced`, `fallback.suppressed`
-  (one per tick and app), `fallback.circuit_check_failed`, `admin.fallback_resumed`; metric
-  `rp_fallback_suppressed_total{app,reason}` (worker role).
+  (one per tick and app), `fallback.circuit_check_failed`, `admin.fallback_resumed`; metrics
+  `rp_fallback_suppressed_total{app,reason}` (worker role), `rp_fallback_circuit_transitions_total{app,transition}`
+  (once per committed transition, both roles) and `rp_fallback_circuit_check_failed_total` (worker role).
 - Database migration `V6__fallback_circuit.sql`: `fallback_circuit` (state per app) and `fallback_circuit_event`
   (history with the detector's counters, kept `admin.rollup-retention-days`).
 - Admin API and page: `GET /v1/admin/fallback-circuits`, `GET /v1/admin/fallback-circuits/{appId}/events`,
@@ -49,7 +52,8 @@ All notable changes to this project are documented here. Versions follow [Semant
   read-only except this resume (FR-16, FR-17 changed).
 - Helm: commented `config.fallback` example in `values.yaml`. The load test runs with the breaker disabled.
 - Harness: E2E scenario `fallback-circuit` on a dedicated app `circuit` (the full run is now 19 entries); the E2E stack
-  tunes the breaker (window 30 s, `min-due` 10, `close-min-delivered` 3, `min-open` 5 s).
+  tunes the breaker (window 30 s, `min-due` 10, `close-min-delivered` 3, `min-open` 5 s); the demo stack sets the
+  production defaults back. The admin page retries a network error only for reads, so a resume is never sent twice.
 - Docs: circuit breaker section and runbook "circuit open" in `operations.md`; `admin.md`, `api.md`, `security.md`,
   `architecture.md`, `deployment.md`, `integration-guide.md` (senders see `FALLBACK_EXPIRED` during an open circuit),
   `testing.md`, `overview.md`, `requirements.md`, the at-a-glance picture and the presentation.

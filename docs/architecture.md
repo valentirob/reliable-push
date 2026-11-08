@@ -135,8 +135,13 @@ at most 2 s, so the workers evaluate one after the other, each from the state th
 every app's circuit from the due set and the delivered share of its cohort (spec
 [2026-11-07](specs/2026-11-07-fallback-circuit-breaker-design.md), section 4). `Suppressor` then closes the claimable
 rows of every `OPEN` app (all apps with `fallback.suspended`) as `FALLBACK_EXPIRED` without a call, and the claim above
-skips those apps (`not (app_id = any(:excluded))`). A drain that outlasts one poll interval repeats both before its next
-claim. If the check throws, the tick claims nothing (fail closed). The admin resume (`force`) takes the same lock.
+skips those apps (`not (app_id = any(:excluded))`). The tick takes its check instant once, before the lock wait, and
+passes it to `evaluate(appIds, at)`, the suppressor and every claim as the due cut-off (`due_at <= :dueCutoff`, the lease
+from the real now), so no claimed row came due after the check. A drain that outlasts one poll interval repeats both
+before its next claim and advances the cut-off. For `circuit_open` each suppression chunk locks the app's
+`fallback_circuit` row and stops once it is no longer `OPEN`. If the check throws, the tick claims nothing (fail closed,
+`rp_fallback_circuit_check_failed_total`). The admin resume (`force`) takes the same lock. Each committed transition is
+counted in `rp_fallback_circuit_transitions_total{app,transition}`.
 
 ### Lease
 

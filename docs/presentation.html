@@ -438,7 +438,7 @@ X-RP-Signature: v1=…   Idempotency-Key: 6f1c…
       <div class="cols">
         <div class="card fall"><h3>Why</h3><p class="small">If tracking breaks (API or ingress down, SDK bug, bad app release), every push of that period would come due unmet. A missed fallback is cheaper than thousands of needless SMS.</p></div>
         <div class="card side"><h3>Per app, by itself</h3><p class="small">One app's outage never stops another app's fallbacks. A campaign with offline users does not trip it: most of its cohort was delivered.</p></div>
-        <div class="card"><h3>Operator control</h3><p class="small">Dashboard badge and history per app. "Resume fallbacks" (permission <code>fallback-control</code>, audited) forces it closed for 60 min. Config: <code>fallback.suspended</code> stops all fallbacks, <code>circuit-breaker.enabled</code> turns it off.</p></div>
+        <div class="card"><h3>Operator control</h3><p class="small">Dashboard badge and history per app. "Resume fallbacks" (permission <code>fallback-control</code>, audited) forces it closed for 60 min. Every open and close is stored, logged and counted (<code>rp_fallback_circuit_transitions_total</code>). Config: <code>fallback.suspended</code> stops all fallbacks, <code>circuit-breaker.enabled</code> turns it off.</p></div>
       </div>
     </div>
   </div>

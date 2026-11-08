@@ -155,15 +155,21 @@ The ops dashboard ([admin.md](admin.md)) is served by every instance that serves
 | `rp_events_total{type,late}` | counter | Event rows stored; `type` = `DELIVERED`/`READ`, `late` = `true` when the transition no longer applied |
 | `rp_fallback_total{outcome}` | counter | Fallback outcomes persisted by the worker: `triggered`, `failed`, `expired` (`expired` includes the fallbacks suppressed by the circuit breaker) |
 | `rp_fallback_suppressed_total{app,reason}` | counter | Fallbacks closed as `FALLBACK_EXPIRED` without a call by the circuit breaker; `reason` = `circuit_open` or `fallback_suspended`. **Worker role only** |
+| `rp_fallback_circuit_transitions_total{app,transition}` | counter | Committed circuit transitions, one per stored `fallback_circuit_event`; `transition` = `OPENED`, `CLOSED`, `FORCED` or `FORCE_ENDED`. Both roles (a resume is counted by the API replica that served it): sum over the replicas |
+| `rp_fallback_circuit_check_failed_total` | counter | Worker circuit checks that failed (database error, detector lock not obtained in 2 s): that tick claimed nothing (fail closed). **Worker role only** |
 | `rp_webhook_latency_seconds` | timer | Duration of every webhook call (`_count`, `_sum`, `_max`) |
 | `rp_due_backlog` | gauge | Rows the worker could claim now, refreshed every 30 s. **Worker role only**: an `api`-only replica does not expose it |
 
-Tags are fixed enumerations (never user or tracking ids; an app id only as `app` of `rp_fallback_suppressed_total`, one
-series per configured app and reason); all series exist at 0 from startup. Useful alerts:
+Tags are fixed enumerations (never user or tracking ids; an app id only as `app` of `rp_fallback_suppressed_total` and
+`rp_fallback_circuit_transitions_total`, one series per configured app and reason or transition); all series exist at 0
+from startup. Useful alerts:
 `rp_due_backlog` staying above a few `batch-size` values (the worker cannot keep up), `rate(rp_fallback_total{outcome="failed"})`
-or `expired` rising (receiver down, window too tight), `rp_fallback_suppressed_total` rising (a circuit is open: tracking
-is missing for that app), any sustained `fallback.circuit_check_failed` in the logs (no fallback fires while the circuit
-check fails), and `up` of the worker role.
+or `expired` rising (receiver down, window too tight), a circuit open:
+`increase(rp_fallback_circuit_transitions_total{transition="OPENED"}[5m]) > 0` or `rp_fallback_suppressed_total{reason="circuit_open"}`
+rising (tracking is missing for that app: [runbook](#runbook-circuit-open)), `transition="FORCED"` (an operator resumed
+fallbacks, for the audit trail), sustained check failures: `rate(rp_fallback_circuit_check_failed_total[5m]) > 0` for
+several minutes (no fallback fires while the check fails; also WARN `fallback.circuit_check_failed`), and `up` of the
+worker role.
 
 ## Logs
 
@@ -247,27 +253,33 @@ needless ones. Design: [spec](specs/2026-11-07-fallback-circuit-breaker-design.m
 above (Helm: `config.fallback`); changes take effect on restart.
 
 - **Detection** (worker role, every tick before any claim, and again during a drain longer than one poll interval): one
-  worker at a time (advisory lock `4242002`, waited for at most 2 s) reads, per app, the fallbacks of the last `window`
+  worker at a time (advisory lock `4242002`, waited for at most 2 s) reads, per app and at the instant the tick took
+  before waiting for the lock, the fallbacks of the last `window`
   (rows due and not yet fired, calls in progress, and rows closed `FALLBACK_TRIGGERED`/`FALLBACK_FAILED` in the window).
   With at least `min-due` of them, it reads their cohort (the app's notifications created in the same time range, at most
   1,000) and opens the circuit when less than `max-delivered-ratio` of the cohort has `delivered_at` set. A campaign
-  whose users are partly offline does not trip it (most of the cohort was delivered); `READ` plays no part.
+  whose users are partly offline does not trip it (most of the cohort was delivered); `READ` plays no part. The claims
+  that follow take only rows due at or before that instant, so every fallback fired was counted by a check: a burst of
+  untracked notifications due within one window fires fewer than `min-due` calls before its circuit opens.
 - **While `OPEN`:** the app's claimable fallbacks are closed as `FALLBACK_EXPIRED` in chunks of 1,000, without a webhook
   call, and are **never resumed** (no queue to restore); events that arrive later are stored as `late`. One WARN
   `fallback.suppressed` per tick and app; `rp_fallback_suppressed_total{app,reason}` and
-  `rp_fallback_total{outcome="expired"}` grow. Other apps are not affected.
+  `rp_fallback_total{outcome="expired"}` grow. Each chunk first checks that the circuit is still `OPEN`, so a resume
+  stops a long pass at the next chunk. Other apps are not affected.
 - **Closing:** by itself, once `min-open` has passed and at least `close-min-delivered` notifications created after the
   open were delivered (`fallback.circuit_closed`, `reason=delivered_resumed`). An operator with the admin permission
   `fallback-control` can force it (`FORCED`, detection off for `force-hold`) from the circuit view of the ops dashboard
   ([admin.md](admin.md)); `FORCED` ends after `force-hold` or as soon as deliveries resume.
 - **Fail closed:** if the check fails (database error, lock not obtained in 2 s) the tick claims nothing
-  (`fallback.circuit_check_failed`); the next tick tries again.
+  (`fallback.circuit_check_failed`, `rp_fallback_circuit_check_failed_total`); the next tick tries again.
 - **History:** every transition is stored in `fallback_circuit_event` (kept `admin.rollup-retention-days`) with what the
-  detector saw (`due`, `ratio`) and, on a close, how many fallbacks the open period suppressed.
+  detector saw (`due`, `ratio`) and, on a close, how many fallbacks the open period suppressed; it is also counted in
+  `rp_fallback_circuit_transitions_total{app,transition}`.
 
 ### Runbook: circuit open
 
-Signals: WARN `fallback.circuit_opened` (`rp.app_id`), `rp_fallback_suppressed_total{reason="circuit_open"}` rising, the
+Signals: WARN `fallback.circuit_opened` (`rp.app_id`), `rp_fallback_circuit_transitions_total{transition="OPENED"}`
+growing, `rp_fallback_suppressed_total{reason="circuit_open"}` rising, the
 `OPEN` badge on the dashboard overview.
 
 1. **Check tracking ingestion for that app.** Does `POST /v1/events` still answer 2xx (ingress, API pods, `api.request`

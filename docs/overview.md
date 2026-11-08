@@ -186,7 +186,7 @@ sequenceDiagram
   alt circuit OPEN (tracking missing) or fallbacks suspended
     W->>DB: close the app's due rows FALLBACK_EXPIRED, webhook not called
   end
-  W->>DB: claim due rows of the other apps FOR NO KEY UPDATE SKIP LOCKED, set lease_until
+  W->>DB: claim the other apps' rows due by the check's instant, FOR NO KEY UPDATE SKIP LOCKED, set lease_until
   Note over W,DB: other replicas skip locked rows, so no row is claimed twice
   W->>W: inside due_at + trigger window?
   alt inside the window
@@ -199,8 +199,10 @@ sequenceDiagram
   Note over W,DB: if the worker dies, the lease ends and another replica re-claims the row
 ```
 
+The claim takes only rows that were due when the circuits were checked, so every fallback fired was counted by a check.
 The circuit closes by itself once deliveries are reported again; an operator with `fallback-control` can force it from
-the dashboard. Fallbacks suppressed while it was open are never re-sent.
+the dashboard. Fallbacks suppressed while it was open are never re-sent. Opens, closes and failed checks are logged and
+counted (`rp_fallback_circuit_transitions_total`, `rp_fallback_circuit_check_failed_total`).
 
 Reference: [architecture.md](architecture.md), [api.md](api.md), [security.md](security.md),
 [operations.md](operations.md) (circuit breaker and its runbook).
