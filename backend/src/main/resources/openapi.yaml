@@ -604,6 +604,124 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
+  /v1/admin/fallback-circuits:
+    get:
+      tags: [admin]
+      operationId: adminFallbackCircuits
+      summary: The fallback circuit of every app in the key's scope
+      description: |
+        Apps without a stored circuit read as `CLOSED` (`since` is then `null`). `suspended` is the configuration entry
+        `fallback.suspended` (no fallback for any app, always), `enabled` is `fallback.circuit-breaker.enabled`; with
+        `enabled: false` every circuit reads as `CLOSED`. `suppressed` counts the fallbacks closed without a call since
+        `since`. See the fallback circuit breaker design, section 6.
+      security:
+        - AdminKey: []
+      responses:
+        '200':
+          description: One item per app in the key's scope, sorted by app id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminFallbackCircuits'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /v1/admin/fallback-circuits/{appId}/events:
+    get:
+      tags: [admin]
+      operationId: adminFallbackCircuitEvents
+      summary: The open/close history of one app's circuit, newest first
+      description: An app outside the key's scope is a `404`, like an unknown one.
+      security:
+        - AdminKey: []
+      parameters:
+        - $ref: '#/components/parameters/AdminAppId'
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+        - name: cursor
+          in: query
+          required: false
+          description: The `nextCursor` of the previous page (opaque).
+          schema:
+            type: string
+            minLength: 1
+      responses:
+        '200':
+          description: One page of events; `nextCursor` is `null` on the last page.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminFallbackCircuitEvents'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /v1/admin/fallback-circuits/{appId}:resume:
+    post:
+      tags: [admin]
+      operationId: adminFallbackCircuitResume
+      summary: Resume the fallbacks of an app (force its circuit)
+      description: |
+        Needs the `fallback-control` permission. The circuit becomes `FORCED` until now plus
+        `circuit-breaker.force-hold` (60 minutes by default), whatever its state: a `CLOSED` circuit is forced too, and
+        resuming a `FORCED` circuit restarts the hold. Detection is off while forced. Audited
+        (`admin.fallback_resumed`, key id and app id). Waits at most 5 seconds for a detector evaluation in progress
+        (`503` with `Retry-After: 5` beyond that; nothing was changed, retry).
+      security:
+        - AdminKey: []
+      parameters:
+        - $ref: '#/components/parameters/AdminAppId'
+      responses:
+        '200':
+          description: The new circuit.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminFallbackCircuit'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '409':
+          description: |
+            Nothing to resume: `fallback.suspended` is `true` (no fallback is ever sent), or the circuit breaker is
+            disabled.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
 
 components:
   securitySchemes:
@@ -624,6 +742,13 @@ components:
       description: Device token (ES256 JWT) issued by `POST /v1/devices`.
 
   parameters:
+    AdminAppId:
+      name: appId
+      in: path
+      required: true
+      description: An app id in the admin key's scope.
+      schema:
+        type: string
     TrackingId:
       name: trackingId
       in: path
@@ -946,7 +1071,91 @@ components:
           type: array
           items:
             type: string
-            enum: [payload]
+            enum: [payload, fallback-control]
+    AdminFallbackCircuit:
+      type: object
+      required: [appId, state, since, forcedUntil, forcedBy, suppressed]
+      properties:
+        appId:
+          type: string
+        state:
+          type: string
+          enum: [CLOSED, OPEN, FORCED]
+        since:
+          type: string
+          nullable: true
+          format: date-time
+          description: When the circuit entered `state`; `null` for an app without a stored circuit.
+        forcedUntil:
+          type: string
+          nullable: true
+          format: date-time
+          description: End of the forced hold; only while `FORCED`.
+        forcedBy:
+          type: string
+          nullable: true
+          description: Admin key id (never the key) that forced the circuit; only while `FORCED`.
+        suppressed:
+          type: integer
+          format: int64
+          description: Fallbacks closed without a call since `since`.
+    AdminFallbackCircuits:
+      type: object
+      required: [suspended, enabled, items]
+      properties:
+        suspended:
+          type: boolean
+        enabled:
+          type: boolean
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminFallbackCircuit'
+    AdminFallbackCircuitEvent:
+      type: object
+      required: [id, at, transition, reason, due, ratio, suppressed, adminKeyId]
+      properties:
+        id:
+          type: integer
+          format: int64
+        at:
+          type: string
+          format: date-time
+        transition:
+          type: string
+          enum: [OPENED, CLOSED, FORCED, FORCE_ENDED]
+        reason:
+          type: string
+          description: '`tracking_missing`, `delivered_resumed`, `forced` or `force_expired`.'
+        due:
+          type: integer
+          nullable: true
+          format: int64
+          description: Fallbacks that came due in the window, as the detector saw them (`OPENED` only).
+        ratio:
+          type: number
+          nullable: true
+          description: Delivered share of the cohort, as the detector saw it (`OPENED` only).
+        suppressed:
+          type: integer
+          nullable: true
+          format: int64
+          description: On `CLOSED` and `FORCED`, how many fallbacks the finished period suppressed.
+        adminKeyId:
+          type: string
+          nullable: true
+          description: The operator of a `FORCED` event (admin key id, never the key).
+    AdminFallbackCircuitEvents:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminFallbackCircuitEvent'
+        nextCursor:
+          type: string
+          nullable: true
     FallbackPolicy:
       type: string
       description: |
@@ -1193,6 +1402,12 @@ components:
         application/problem+json:
           schema:
             $ref: '#/components/schemas/Problem'
+    Forbidden:
+      description: The admin key lacks the permission the operation needs.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
     Conflict:
       description: The notification is not in a state that allows the operation.
       content:
@@ -1231,7 +1446,7 @@ components:
     ServiceUnavailable:
       description: |
         A dependency is temporarily unavailable: the database connection pool is exhausted (any operation,
-        `Retry-After: 5`) or the identity provider's key set cannot be fetched (device registration, `Retry-After: 30`).
+        `Retry-After: 5`), a circuit evaluation holds the lock the operator resume needs (`Retry-After: 5`) or the identity provider's key set cannot be fetched (device registration, `Retry-After: 30`).
       headers:
         Retry-After:
           description: Seconds to wait before retrying.

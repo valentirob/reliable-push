@@ -48,13 +48,15 @@ under `reliable-push.admin.keys[]` as `{id, key-sha256, apps, permissions}`; wit
 
 - `id` (`[a-z0-9-]{1,40}`, not `false`, which would switch the admin beans off) names the key in audit logs instead of the key. `apps` is `["*"]` (every app) or a list of app ids;
   a key cannot see an app outside its list (`404`). `permissions` can hold `payload`, which allows reading the stored
-  fallback payload; without it the payload route answers `404`.
+  fallback payload (without it the payload route answers `404`), and `fallback-control`, which allows resuming the
+  fallbacks of an app (without it the resume route answers `403`; it is a POST with the `X-Admin-Key` header only, no cookie, so
+  there is no CSRF surface).
 - Lookup is by SHA-256 in constant time, as for sender keys. Startup fails on a duplicate id or hash, a malformed hash, an
   unknown app or permission, and on a hash equal to a sender key hash.
 - **Rotation:** add the new key (new `id` and hash), deploy, hand the new key out, remove the old entry, deploy. Both keys work
   during the overlap, so nobody is locked out. To revoke a key at once, remove its entry and deploy.
 - **Audit:** every search and view logs `admin.search`, `admin.notification_viewed`, `admin.payload_viewed` or
-  `admin.devices_viewed` with the key `id`, the app, for a notification or payload view the tracking id, and for every view
+  `admin.devices_viewed` (and `admin.fallback_resumed` for a resume) with the key `id`, the app, for a notification or payload view the tracking id, and for every view
   `rp.user_hash`; never the key, a user id, a filter value or a payload.
   Failed sign-ins log `auth.failed` (`missing_admin_key`, `unknown_admin_key`); a key over its rate limit logs
   `rate_limit.exceeded` with scope `admin`.

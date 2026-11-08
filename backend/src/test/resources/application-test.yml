@@ -15,6 +15,11 @@ reliable-push:
     revocation-cache-ttl: 0s
   worker:
     poll-interval: 200ms
+  fallback:
+    circuit-breaker:
+      # off in tests: the background workers of every cached context (poll 200 ms) would otherwise all evaluate the
+      # test apps under advisory lock 4242002 and suppress each other's rows; the circuit ITs turn it on explicitly
+      enabled: false
   admin:
     rollup:
       # never fire the nightly rollup inside a test JVM (DailyRollupIT calls run() directly)

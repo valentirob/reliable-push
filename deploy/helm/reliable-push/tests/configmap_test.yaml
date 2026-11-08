@@ -56,6 +56,20 @@ tests:
           path: data["application.yml"]
           pattern: "key-sha256: .?0{64}"
 
+  - it: fallback circuit breaker settings render
+    template: configmap.yaml
+    set:
+      config:
+        fallback:
+          suspended: true
+          circuit-breaker:
+            enabled: false
+            min-due: 200
+    asserts:
+      - matchRegex:
+          path: data["application.yml"]
+          pattern: "fallback:\\n    circuit-breaker:\\n      enabled: false\\n      min-due: 200\\n    suspended: true"
+
   - it: checksum annotation follows the rendered ConfigMap
     template: deployment.yaml
     set:

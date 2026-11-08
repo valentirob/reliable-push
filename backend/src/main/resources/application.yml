@@ -60,3 +60,17 @@ management:
         enabled: true
 
 # Logging profile (json | local) is selected in log4j2-spring.xml: ECS JSON unless the "local" profile is active.
+
+# Fallback circuit breaker (spec 2026-11-07-fallback-circuit-breaker-design, section 2). Defaults shown; durations
+# without a unit are minutes. Changes take effect on restart (Helm: config.fallback).
+# reliable-push:
+#   fallback:
+#     suspended: false                  # true: no fallback for any app, always; wins over everything
+#     circuit-breaker:
+#       enabled: true                   # false: no detection, every circuit reads as CLOSED
+#       window: 5m                      # detection window
+#       min-due: 50                     # trip only when at least this many fallbacks came due in the window
+#       max-delivered-ratio: 0.10       # trip when less than this share of the cohort was delivered
+#       close-min-delivered: 10         # close when this many notifications created after the open were delivered
+#       min-open: 1m                    # an open circuit stays open at least this long
+#       force-hold: 60m                 # how long a forced resume keeps detection off

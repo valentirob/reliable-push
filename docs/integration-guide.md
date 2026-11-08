@@ -180,6 +180,13 @@ How reliable-push reads your response:
 Redirects are never followed. A fallback is only sent while `now <= dueAt + trigger window` (default 20 min), so a very late
 call means the original moment has passed and the notification is closed as `FALLBACK_EXPIRED` without calling you.
 
+**During an open fallback circuit** (FR-18) you get no call either: when your app's notifications come due while almost
+none of them are reported `DELIVERED` (tracking is missing, for example the reliable-push API was unreachable for the
+devices), the backend closes their fallbacks as `FALLBACK_EXPIRED` without calling the receiver, and never re-sends them.
+Calls resume by themselves once deliveries are reported again, or when an operator resumes them. A sender that must
+reach those users anyway can list its `FALLBACK_EXPIRED` notifications of that period and re-notify them. Operators:
+[operations.md](operations.md#fallback-circuit-breaker).
+
 ### Java verification example (JDK only)
 
 ```java

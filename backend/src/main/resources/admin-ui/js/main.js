@@ -1,4 +1,4 @@
-// Hash router: #/overview, #/trends, #/search, #/n/<trackingId>, #/devices/<app>/<userId>.
+// Hash router: #/overview, #/trends, #/search, #/n/<trackingId>, #/devices/<app>/<userId>, #/circuit/<app>.
 import { clearKey, hasKey, me, setUnauthorizedHandler, banner } from './api.js';
 import { clear, el, message } from './dom.js';
 import * as signin from './views/signin.js';
@@ -7,12 +7,13 @@ import * as trends from './views/trends.js';
 import * as search from './views/search.js';
 import * as notification from './views/notification.js';
 import * as devices from './views/devices.js';
+import * as circuit from './views/circuit.js';
 
 const root = document.getElementById('view');
 const nav = document.getElementById('nav');
 const signout = document.getElementById('signout');
 const whoami = document.getElementById('whoami');
-const VIEWS = { 'overview': overview, 'trends': trends, 'search': search, 'n': notification, 'devices': devices };
+const VIEWS = { 'overview': overview, 'trends': trends, 'search': search, 'n': notification, 'devices': devices, 'circuit': circuit };
 let session = null;
 let cleanup = null;
 let pendingHash = '';

@@ -18,7 +18,7 @@ import tools.jackson.databind.json.JsonMapper;
 
 /**
  * Read-only client of the backend's admin API ({@code /v1/admin/*}, header {@code X-Admin-Key}); used by the
- * {@code admin-dashboard} scenario. The key comes from {@code HARNESS_ADMINKEY} and is never put in a message.
+ * {@code admin-dashboard} and {@code fallback-circuit} scenarios. The key comes from {@code HARNESS_ADMINKEY} and is never put in a message.
  */
 @Component
 public class AdminApiClient {
@@ -58,6 +58,24 @@ public class AdminApiClient {
             return Optional.empty();
         }
         return Optional.of(r.requireOk());
+    }
+
+    /**
+     * The app's entry of {@code GET /v1/admin/fallback-circuits} ({@code {appId, state, since, forcedUntil, forcedBy,
+     * suppressed}}); empty when the key's scope does not list the app.
+     */
+    public Optional<JsonNode> circuit(String app) {
+        for (JsonNode item : get("/v1/admin/fallback-circuits").requireOk().path("items")) {
+            if (app.equals(item.path("appId").asText())) {
+                return Optional.of(item);
+            }
+        }
+        return Optional.empty();
+    }
+
+    /** {@code GET /v1/admin/fallback-circuits/{appId}/events?limit=50}: {@code {items, nextCursor}}, newest first. */
+    public JsonNode circuitEvents(String app) {
+        return get("/v1/admin/fallback-circuits/" + enc(app) + "/events?limit=50").requireOk();
     }
 
     private record Response(int status, String path, String body) {

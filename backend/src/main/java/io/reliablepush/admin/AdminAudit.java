@@ -39,6 +39,13 @@ final class AdminAudit {
                 "rp.user_hash", UserHash.of(userId)));
     }
 
+    /** An operator resumed the fallbacks of an app (spec 6): key id and app only, never the key. */
+    static void fallbackResumed(AdminPrincipal principal, String appId) {
+        EventLog.info("admin.fallback_resumed", Map.of(
+                "rp.admin_key", principal.keyId(),
+                "rp.app_id", appId));
+    }
+
     private static Map<String, Object> fields(AdminPrincipal principal, String appId, UUID id, String userId) {
         return Map.of(
                 "rp.admin_key", principal.keyId(),

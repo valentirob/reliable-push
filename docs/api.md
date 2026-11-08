@@ -64,7 +64,8 @@ curl -sS http://localhost:8080/v1/notifications/6f1c2b9e-5d1a-4c55-9a38-0c1f3a7d
 
 `state` is one of `PENDING`, `DELIVERED`, `READ`, `FALLBACK_PENDING` (fallback claimed, webhook in progress or awaiting a
 retry), `FALLBACK_TRIGGERED`, `FALLBACK_FAILED`, `FALLBACK_EXPIRED`, `CANCELLED`. `dueAt` is `null` once the policy is
-satisfied or the notification is closed.
+satisfied or the notification is closed. `FALLBACK_EXPIRED` means the fallback was not sent: its trigger window had
+passed, or the app's fallback circuit was open ([integration-guide.md](integration-guide.md#3-receive-fallbacks)).
 
 ### `GET /v1/notifications` — list
 
@@ -154,14 +155,14 @@ curl -sS -X POST http://localhost:8080/v1/events -H "Authorization: Bearer $DEVI
 `occurredAt` is clamped by the server to `[received - 7 days, received]`. Retrying a whole batch is safe: processed items come
 back as `DUPLICATE`.
 
-## Admin API (read-only)
+## Admin API
 
-The API of the [ops dashboard](admin.md). Only `GET`. It exists only when at least one admin key is configured; without
+The API of the [ops dashboard](admin.md). Read-only (`GET`), except the fallback resume (`POST ...:resume`, FR-19). It exists only when at least one admin key is configured; without
 one, `/v1/admin/**` answers `404` like any unknown path.
 
 - Credential: `X-Admin-Key: <key>` (the backend stores only its SHA-256). A missing and a wrong key get the same `401`.
 - Every response carries `Cache-Control: no-store`. Timestamps are ISO-8601 UTC; time ranges are half-open `[from, to)`.
-- `app` must be an app the key may see, otherwise `404` (never `403`).
+- `app` must be an app the key may see, otherwise `404` (never `403`; `403` only means a missing permission on the resume).
 - Invalid parameters answer `400` (a malformed value, a span or `limit` out of range, `from` not before `to`). The sender
   and device APIs keep their `422` for invalid requests; the admin API does not use `422`.
 - Rate limit per admin key and instance (`admin.rate-limit-per-minute`, 600): `429` with `Retry-After`.
@@ -175,9 +176,12 @@ one, `/v1/admin/**` answers `404` like any unknown path.
 | `GET /v1/admin/notifications/{trackingId}` | none | The notification, its `events`, its webhook `attempts` and `payloadBytes`. Unknown, malformed or not visible id: `404` |
 | `GET /v1/admin/notifications/{trackingId}/payload` | none | The stored fallback payload. Needs the `payload` permission; without it the answer is the same `404` as for an unknown id |
 | `GET /v1/admin/devices` | `app`, `userId` (both required) | `{items}`, at most 50, newest first, revoked devices included |
+| `GET /v1/admin/fallback-circuits` | none | `{suspended, enabled, items: [{appId, state, since, forcedUntil, forcedBy, suppressed}]}` for the apps in the key's scope; an app without a stored circuit is `CLOSED` (`since: null`) |
+| `GET /v1/admin/fallback-circuits/{appId}/events` | `limit` (1-200, default 50), `cursor` | `{items, nextCursor}`, the open/close history of the app, newest first. App outside the scope: `404` |
+| `POST /v1/admin/fallback-circuits/{appId}:resume` | none | The new circuit (`FORCED` until now + `force-hold`). Needs `fallback-control` (else `403`); app outside the scope `404`; `409` when `fallback.suspended` is true or the breaker is disabled; `503` with `Retry-After: 5` when a circuit evaluation holds the lock for more than 5 s. Audited (`admin.fallback_resumed`) |
 
 Searches and views are audit-logged without personal data (`admin.search`, `admin.notification_viewed`,
-`admin.payload_viewed`, `admin.devices_viewed`; see [operations.md](operations.md#event-catalogue)). Field-level schemas: `openapi.yaml`, tag `admin`.
+`admin.payload_viewed`, `admin.devices_viewed`, `admin.fallback_resumed`; see [operations.md](operations.md#event-catalogue)). Field-level schemas: `openapi.yaml`, tag `admin`.
 
 ## Errors
 

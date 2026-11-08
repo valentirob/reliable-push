@@ -1,5 +1,5 @@
-import { overview } from '../api.js';
-import { clear, el, fmtAge, fmtRate, labelled, message, option } from '../dom.js';
+import { fallbackCircuits, overview } from '../api.js';
+import { clear, el, fmtAge, fmtRate, fmtTime, labelled, link, message, option } from '../dom.js';
 
 const REFRESH_MS = 30000;
 
@@ -10,11 +10,24 @@ function tile(label, value, sub, bad) {
     sub ? el('div', { class: 'sub', text: sub }) : null);
 }
 
-function appBlock(o, showName, first) {
+function badgeText(c) {
+  if (c.state === 'OPEN') return 'OPEN since ' + fmtTime(c.since) + ' — ' + c.suppressed + ' suppressed';
+  if (c.state === 'FORCED') return 'FORCED until ' + fmtTime(c.forcedUntil);
+  return 'CLOSED';
+}
+
+function circuitBadge(c) {
+  if (!c) return null;
+  return el('div', { class: 'circuit-badge state-' + String(c.state).replace(/[^A-Z_]/g, '') },
+    'Fallback circuit: ', link('#/circuit/' + encodeURIComponent(c.appId), badgeText(c)));
+}
+
+function appBlock(o, showName, first, circuit) {
   const n = o.now;
   const amber = n.oldestDueAgeSeconds !== null && n.oldestDueAgeSeconds > 60;
   return el('section', { class: 'card', 'data-app': o.appId },
     showName ? el('h2', { text: o.appId }) : null,
+    circuitBadge(circuit),
     el('div', { class: 'tiles' },
       tile('Registered', String(o.registered), o.cancelled + ' cancelled'),
       tile('Delivery rate', fmtRate(o.deliveryRate), o.delivered + ' delivered'),
@@ -50,11 +63,21 @@ export function render(root, ctx) {
   async function load() {
     const mine = ++seq;
     try {
-      const body = await overview(appSel.value, winSel.value);
+      const [body, circuits] = await Promise.all([
+        overview(appSel.value, winSel.value),
+        // the badges are extra: the overview still works if the circuit route fails, and a 503 is not retried (the
+        // backoff would hold back the tiles); the next refresh tries again
+        fallbackCircuits({ noRetry503: true }).catch((e) => (e.status === 401 ? Promise.reject(e) : null))]);
       if (dead || mine !== seq) return;
       clear(tiles);
+      if (circuits && circuits.suspended) {
+        tiles.append(el('p', { class: 'circuit-suspended', role: 'status', text: 'Fallbacks suspended by configuration' }));
+      } else if (circuits && !circuits.enabled) {
+        tiles.append(el('p', { class: 'muted circuit-disabled', text: 'Circuit breaker disabled' }));
+      }
+      const byApp = new Map(circuits ? circuits.items.map((c) => [c.appId, c]) : []);
       if (!body.items.length) tiles.append(message('muted', 'No apps visible to this key.'));
-      body.items.forEach((o, i) => tiles.append(appBlock(o, body.items.length > 1 || !appSel.value, i === 0)));
+      body.items.forEach((o, i) => tiles.append(appBlock(o, body.items.length > 1 || !appSel.value, i === 0, circuits && circuits.enabled ? byApp.get(o.appId) : null)));
       stamp.textContent = 'Updated ' + new Date().toLocaleTimeString([], { hour12: false });
     } catch (e) {
       if (dead || mine !== seq || e.status === 401) return;

@@ -150,7 +150,13 @@ class MetricsIT extends PostgresTestBase {
                 .contains("rp_fallback_total{outcome=\"failed\"}")
                 .contains("rp_fallback_total{outcome=\"expired\"}")
                 .contains("rp_webhook_latency_seconds_count")
-                .contains("rp_due_backlog");
+                .contains("rp_due_backlog")
+                // the circuit breaker: transitions per configured app (bounded tag set), failed checks (worker)
+                .contains("rp_fallback_circuit_transitions_total{app=\"shop\",transition=\"OPENED\"}")
+                .contains("rp_fallback_circuit_transitions_total{app=\"shop\",transition=\"CLOSED\"}")
+                .contains("rp_fallback_circuit_transitions_total{app=\"shop\",transition=\"FORCED\"}")
+                .contains("rp_fallback_circuit_transitions_total{app=\"shop\",transition=\"FORCE_ENDED\"}")
+                .contains("rp_fallback_circuit_check_failed_total");
         double registered = value(before, "rp_notifications_registered_total");
         double deliveredOnTime = value(before, "rp_events_total{late=\"false\",type=\"DELIVERED\"}");
         double deliveredLate = value(before, "rp_events_total{late=\"true\",type=\"DELIVERED\"}");
