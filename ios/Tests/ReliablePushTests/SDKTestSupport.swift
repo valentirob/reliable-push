@@ -147,7 +147,8 @@ final class SDKFixture {
         }
     }
 
-    /// Stub reply acknowledging every event of the request as ACCEPTED.
+    /// Stub reply acknowledging every event of the request as ACCEPTED, echoing the ids in lower case as the backend
+    /// does (it stores the canonical UUID form).
     static func acceptAll(_ req: URLRequest) -> StubURLProtocol.Reply {
         var body = req.httpBody ?? Data()
         if let s = req.httpBodyStream {
@@ -157,7 +158,7 @@ final class SDKFixture {
         }
         let obj = try? JSONSerialization.jsonObject(with: body) as? [String: Any]
         let ids = ((obj?["events"] as? [[String: Any]]) ?? []).compactMap { $0["trackingId"] as? String }
-        let list = ids.map { #"{"trackingId":"\#($0)","outcome":"ACCEPTED"}"# }.joined(separator: ",")
+        let list = ids.map { #"{"trackingId":"\#($0.lowercased())","outcome":"ACCEPTED"}"# }.joined(separator: ",")
         return .response(status: 200, body: Data(#"{"items":[\#(list)]}"#.utf8))
     }
 

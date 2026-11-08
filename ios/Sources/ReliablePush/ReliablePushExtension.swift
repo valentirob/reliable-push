@@ -92,13 +92,14 @@ public final class ReliablePushExtension: @unchecked Sendable {
     ///
     /// Call it once per instance, from the extension's synchronous `didReceive(_:withContentHandler:)` override, never
     /// from async code: the settings check and the queue write block the calling thread briefly (the settings read is
-    /// capped at 2 s, or at `extensionSendTimeout` when that is shorter, and counts against it; a source that does not
-    /// answer counts as not shown). The send runs in the background.
+    /// capped at 2 s, or at `extensionSendTimeout` when that is shorter, and counts against it; a read that does not
+    /// answer in time counts as shown, as iOS shows the content, and only an actual "not shown" answer records
+    /// nothing). The send runs in the background.
     ///
     /// - Parameters:
     ///   - request: The request given to `UNNotificationServiceExtension.didReceive(_:withContentHandler:)`.
     ///   - handler: The extension's content handler; called exactly once when this returns `true`.
-    ///   - customize: Optional synchronous changes to the content (title, attachments…), with the tracking id.
+    ///   - customize: Optional synchronous changes to the content (title, attachments…), with the tracking id (lower case).
     @discardableResult
     public func didReceive(_ request: UNNotificationRequest,
                            withContentHandler handler: @escaping (UNNotificationContent) -> Void,
@@ -162,7 +163,8 @@ public final class ReliablePushExtension: @unchecked Sendable {
         }
         // An unregistered device needs no settings read; the read is capped by what is left of the budget.
         let gateTimeout = min(Self.gateTimeout, max(timeout, Self.safetyMargin))
-        guard NotificationGate.settings(from: environment.settings, timeout: gateTimeout)?.isShown == true else { return nil }
+        // Only a "no" means not shown: a read with no answer leaves the content to iOS, which shows it.
+        guard NotificationGate.settings(from: environment.settings, timeout: gateTimeout)?.isShown != false else { return nil }
         guard let event = sdk.enqueue(trackingId, .delivered) else { return nil } // the queue write failed (WARN)
         return sendable ? event : nil
     }

@@ -80,7 +80,7 @@ final class SDKLogTests: XCTestCase {
         let content = UNMutableNotificationContent()
         content.title = "SECRET-TITLE"
         content.body = "SECRET-BODY"
-        let tid = UUID().uuidString
+        let tid = UUID().uuidString.lowercased()
         content.userInfo = ["rp_tid": tid]
         let request = UNNotificationRequest(identifier: "n1", content: content, trigger: nil)
         let handled = expectation(description: "handled")

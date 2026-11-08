@@ -116,10 +116,10 @@ final class EventSender: Sendable {
 
     private func handle(batch: [QueuedEvent], items: [EventOutcome]) {
         var byId: [String: String] = [:]
-        for item in items { byId[item.trackingId] = item.outcome }
+        for item in items { byId[item.trackingId.lowercased()] = item.outcome } // case-insensitive match
         var done = Set<String>()
         for e in batch {
-            switch byId[e.trackingId] {
+            switch byId[e.trackingId.lowercased()] {
             case "ACCEPTED", "DUPLICATE", "LATE":
                 done.insert(e.key)
                 SDKLog.info("tracking.event_sent", ["trackingId": e.trackingId])

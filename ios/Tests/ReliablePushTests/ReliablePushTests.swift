@@ -611,7 +611,7 @@ final class ReliablePushTests: XCTestCase {
         await awaitFlush()
         fx.register()
         StubURLProtocol.reset { SDKFixture.acceptAll($0) }
-        let tap = UUID().uuidString, custom = UUID().uuidString, dismiss = UUID().uuidString
+        let tap = UUID().uuidString.lowercased(), custom = UUID().uuidString.lowercased(), dismiss = UUID().uuidString
 
         XCTAssertTrue(ReliablePush.trackOpen(userInfo: ["rp_tid": tap], actionIdentifier: UNNotificationDefaultActionIdentifier))
         await awaitFlush()

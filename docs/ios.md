@@ -144,6 +144,7 @@ never calls `ensureRegistered` stops after the grace period.
 
 `register(idToken:)` stays for an explicit registration (it registers whatever is stored). Call `logout()` on a user
 switch: it clears the token, so the next `ensureRegistered` registers the new user.
+
 **Upgrading from 0.1.x:** the SDK no longer renews the token on its own while receiving or sending, so an app that
 never calls `ensureRegistered` (or `register`) loses tracking once the token is past expiry plus the backend's grace
 period (default 90 days). `extensionSendTimeout` defaults to 2 s instead of 5 s. `RegisterResult` gained
@@ -191,7 +192,10 @@ final class NotificationService: UNNotificationServiceExtension {
 - `DELIVERED` is recorded only when the device is registered and the notification will actually be shown (alerts
   authorized); it is persisted in the queue before `didReceive` returns, then sent in the time left. The settings read is
   capped at 2 s (or at `extensionSendTimeout` when that is shorter) and counts against the same budget, so the handler
-  runs within about `extensionSendTimeout + 0.5 s` in every case.
+  runs within about `extensionSendTimeout + 0.5 s` in every case. A read that does not answer in time counts as shown
+  (iOS shows the content it gets back); only an actual "not shown" answer records nothing.
+- The tracking id is normalized to lower case (the form the backend stores and echoes): `customize` receives it, and
+  the queued, sent and acknowledged ids all use it, whatever the case of `rp_tid` in the payload.
 - The NSE sends with the stored token as it is and **never renews it**. A `401` leaves the event queued and sets
   `renewalNeeded`; the app's next `ensureRegistered` renews the token and sends it.
 - Any SDK step that fails (Keychain, queue file, App Group) hands the notification back at once with the best content
@@ -233,7 +237,7 @@ changes:
 | Keychain unreadable | the notification at once | `DELIVERED` queued if the device was registered, sent later by the app |
 | Queue file corrupt | the notification as usual | the corrupt file is reset (older events lost, WARN); this event is sent |
 | Queue file cannot be written | the notification at once | nothing recorded (WARN); the fallback may fire although the user saw it |
-| Notification settings read hangs | the notification after about 2 s (at most `extensionSendTimeout` + 0.5 s) | nothing recorded (counted as not shown); the fallback decides |
+| Notification settings read hangs | the notification after about 2 s (at most `extensionSendTimeout` + 0.5 s) | `DELIVERED` queued (counted as shown: iOS shows the content), sent later |
 | Notifications disabled | nothing (iOS decides) | nothing recorded; the fallback decides |
 | iOS ends the extension (`serviceExtensionTimeWillExpire`) | the best content so far | `DELIVERED` already queued, sent later |
 | Your `customize` closure crashes | the original content (iOS) | nothing recorded (`customize` runs before `DELIVERED` is persisted); the fallback may fire |

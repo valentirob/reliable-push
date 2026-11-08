@@ -121,6 +121,15 @@ final class EventSenderTests: XCTestCase {
         }
     }
 
+    func testOutcomesMatchQueuedIdsWhateverTheCase() async {
+        add(1, prefix: "UP") // queued by an older SDK in upper case; the backend echoes lower case
+        StubURLProtocol.reset { _ in Self.items([("up0", "ACCEPTED")]) }
+        let r = await makeSender().flush(deadline: nil)
+        XCTAssertEqual(r, .done)
+        XCTAssertEqual(queue.count, 0)
+        XCTAssertFalse(log.messages.contains { $0.contains("unacknowledged") })
+    }
+
     func testAcknowledgedEventResetsNothingButIsRemoved() async {
         add(1)
         StubURLProtocol.reset { _ in Self.items([]) }
