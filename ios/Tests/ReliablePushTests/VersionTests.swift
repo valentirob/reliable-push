@@ -3,6 +3,6 @@ import XCTest
 
 final class VersionTests: XCTestCase {
     func testVersionIsSnapshot() {
-        XCTAssertEqual(ReliablePush.version, "0.2.0")
+        XCTAssertEqual(ReliablePush.version, "0.3.0-SNAPSHOT")
     }
 }
