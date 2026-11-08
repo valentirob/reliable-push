@@ -8,7 +8,7 @@ import org.springframework.stereotype.Component;
 
 /**
  * The reads of the detector (spec 4), each bounded by a {@code limit} so a quiet app costs two tiny index reads and a
- * busy one at most 1,000 cohort rows. {@code now} is the database clock of the evaluation.
+ * busy one at most 1,000 cohort rows. {@code now} is the application clock of the evaluation.
  *
  * <p>Due set: the app's rows with {@code state in (PENDING, DELIVERED, DISPATCHING)} and {@code due_at in (now - window,
  * now]} (partial index {@code notification_due}), plus the rows closed {@code FALLBACK_TRIGGERED} or

@@ -66,7 +66,7 @@ says so (minutes for `worker.lease` and `fallback.backoff`, days for `device-tok
 | `retention.cron` | `0 17 3 * * *` | Spring cron expression (six fields, always UTC) of the daily retention run (worker role); `-` disables the schedule |
 | `admin.keys[]` | none (admin disabled) | Admin API keys of the ops dashboard: `{id, key-sha256, apps, permissions}`; `id` matches `[a-z0-9-]{1,40}` and must not be `false` (rejected at startup: the admin beans are switched on by the property `admin.keys[0].id`, which `false` would turn off); see `security.md`. With no key, `/v1/admin/**` and `/admin/**` answer 404 |
 | `admin.rate-limit-per-minute` | `600` | At least 1. Admin requests per minute per admin key and instance |
-| `admin.rollup-retention-days` | `400` | At least 1. `daily_stats` rows older than this are deleted by the rollup; fallback circuit events (`fallback_circuit_event`) older than this are deleted by the circuit detector once a day per worker, also while admin is disabled |
+| `admin.rollup-retention-days` | `400` | At least 1. `daily_stats` rows older than this are deleted by the rollup; fallback circuit events (`fallback_circuit_event`) older than this are deleted by the circuit detector once a day per worker, also while admin or the circuit breaker is disabled |
 | `admin.rollup.cron` | `0 7 3 * * *` | Spring cron expression (UTC) of `DailyRollupJob` (worker role, runs only when admin is enabled); `-` disables the schedule and the retention guard |
 | `testing.minute-duration` | unset (1 minute = 60 s) | Fast clock, e.g. `1s`. Accepted only with the `e2e` or `demo` profile, must be positive |
 

@@ -3,10 +3,12 @@ package io.reliablepush.fallback.circuit;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import io.reliablepush.shared.logging.EventCapture;
+import io.reliablepush.support.MutableClock;
 import io.reliablepush.support.PostgresTestBase;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -20,22 +22,44 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
+import org.springframework.context.annotation.Primary;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * Detection and transitions of the fallback circuit (spec 4) against a real PostgreSQL. The detector reads the
- * database clock, so rows are written relative to {@code select now()}. Each test uses its own app id (not a
- * configured app): the database is shared with every other IT, whose workers may claim these due rows; a claim keeps
- * them in the due set (DISPATCHING, {@code due_at} unchanged), and every row is deleted after the test.
+ * application clock, here a {@link MutableClock} in the year 2101 (as {@code FallbackSchedulerIT} does): the rows
+ * written here are never due for the workers of other cached contexts (real clock), and tests move time forward
+ * without sleeping. Each test uses its own app id and every row is deleted after the test.
  */
 @ActiveProfiles({"api", "worker", "test"})
 @TestPropertySource(properties = "reliable-push.worker.poll-interval=1d")
+@Import(CircuitBreakerIT.Fakes.class)
+// the context's clock sits in 2101: close it after the class so no worker with that clock outlives these tests
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 class CircuitBreakerIT extends PostgresTestBase {
 
     private static final String PREFIX = "cbit-";
+    private static final Instant T0 = Instant.parse("2101-01-01T00:00:00Z");
+
+    @TestConfiguration(proxyBeanMethods = false)
+    static class Fakes {
+
+        @Bean
+        @Primary
+        MutableClock testClock() {
+            return new MutableClock(T0);
+        }
+    }
+
+    @Autowired
+    MutableClock clock;
 
     @Autowired
     CircuitBreaker breaker;
@@ -61,8 +85,10 @@ class CircuitBreakerIT extends PostgresTestBase {
 
     @BeforeEach
     void setUp() {
+        // every test starts one hour later: the windows of earlier tests are long past
+        clock.advance(Duration.ofHours(1));
         app = PREFIX + UUID.randomUUID().toString().substring(0, 8);
-        now = dbNow();
+        now = clock.instant().truncatedTo(ChronoUnit.MICROS);
         capture = new EventCapture();
     }
 
@@ -75,10 +101,6 @@ class CircuitBreakerIT extends PostgresTestBase {
     }
 
     // ---- helpers -----------------------------------------------------------------------------------------------
-
-    private Instant dbNow() {
-        return jdbc.sql("select now()").query(Timestamp.class).single().toInstant();
-    }
 
     /**
      * Inserts {@code n} rows created {@code createdAgo} before now (one millisecond apart, newest first). A row is
@@ -144,7 +166,7 @@ class CircuitBreakerIT extends PostgresTestBase {
     }
 
     private CircuitBreaker breaker(CircuitBreakerProperties p) {
-        return new CircuitBreaker(circuits, queries, p, transactions, jdbc, 400);
+        return new CircuitBreaker(circuits, queries, p, transactions, jdbc, clock, 400);
     }
 
     private static CircuitBreakerProperties disabled() {
@@ -192,7 +214,7 @@ class CircuitBreakerIT extends PostgresTestBase {
         campaign("NOT_DELIVERED", 200);
 
         assertThat(queries.due(app, now, properties.window(), 50)).isEqualTo(50);
-        assertThat(queries.cohortRatio(app, dbNow(), properties.window(), 50)).isGreaterThan(0.5);
+        assertThat(queries.cohortRatio(app, now, properties.window(), 50)).isGreaterThan(0.5);
         assertThat(breaker.evaluate(List.of(app)).get(app).state()).isEqualTo(CircuitState.CLOSED);
         assertThat(events(app)).isEmpty();
     }
@@ -375,8 +397,8 @@ class CircuitBreakerIT extends PostgresTestBase {
 
         assertThat(forced.state()).isEqualTo(CircuitState.FORCED);
         assertThat(forced.forcedBy()).isEqualTo("ops-1");
-        assertThat(Duration.between(forced.since(), forced.forcedUntil())).isEqualTo(Duration.ofMinutes(60));
-        assertThat(forced.since()).isAfterOrEqualTo(now);
+        assertThat(forced.since()).isEqualTo(now);
+        assertThat(forced.forcedUntil()).isEqualTo(now.plus(Duration.ofMinutes(60)));
         assertThat(events(app).get(0)).satisfies(e -> {
             assertThat(e.transition()).isEqualTo("FORCED");
             assertThat(e.reason()).isEqualTo("forced");
@@ -390,9 +412,10 @@ class CircuitBreakerIT extends PostgresTestBase {
         // detection is off while forced: the storm does not reopen it
         assertThat(breaker.evaluate(List.of(app)).get(app).state()).isEqualTo(CircuitState.FORCED);
 
-        jdbc.sql("update fallback_circuit set forced_until = now() - interval '1 second' where app_id = :app")
-                .param("app", app)
-                .update();
+        clock.advance(Duration.ofMinutes(59));
+        assertThat(breaker.evaluate(List.of(app)).get(app).state()).isEqualTo(CircuitState.FORCED);
+
+        clock.advance(Duration.ofMinutes(1)); // forced_until reached
         Map<String, Circuit> result = breaker.evaluate(List.of(app));
 
         assertThat(result.get(app).state()).isEqualTo(CircuitState.CLOSED);
@@ -418,9 +441,29 @@ class CircuitBreakerIT extends PostgresTestBase {
         assertThat(events(old)).hasSize(1);
 
         insertEvent(old, now.minus(Duration.ofDays(500)));
+        clock.advance(Duration.ofHours(23));
         fresh.evaluate(List.of(app));
 
         assertThat(events(old)).hasSize(2); // the next prune runs a day later
+
+        clock.advance(Duration.ofHours(1));
+        fresh.evaluate(List.of(app));
+
+        assertThat(events(old)).hasSize(1);
+    }
+
+    @Test
+    void disabledStillPrunesOldEvents() {
+        String old = app + "-r";
+        insertEvent(old, now.minus(Duration.ofDays(401)));
+        insertEvent(old, now.minus(Duration.ofDays(1)));
+        unmetDue(app, 60, Duration.ofMinutes(10));
+
+        breaker(disabled()).evaluate(List.of(app));
+
+        assertThat(events(old)).hasSize(1);
+        assertThat(circuits.find(app)).isEmpty(); // detection stays off
+        assertThat(events(app)).isEmpty();
     }
 
     private void insertEvent(String appId, Instant at) {
