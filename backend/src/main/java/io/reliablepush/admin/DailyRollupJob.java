@@ -1,6 +1,7 @@
 package io.reliablepush.admin;
 
 import io.reliablepush.apps.ReliablePushProperties;
+import io.reliablepush.fallback.circuit.CircuitRepository;
 import io.reliablepush.shared.logging.EventLog;
 import java.time.Clock;
 import java.time.LocalDate;
@@ -18,7 +19,8 @@ import org.springframework.transaction.support.TransactionTemplate;
 /**
  * The nightly rollup of per-app daily statistics (spec 3.2). Recomputes the last {@code W} complete UTC days in one
  * transaction guarded by a PostgreSQL advisory lock (another worker holding it means this run does nothing), then
- * deletes rows older than {@code rollup-retention-days}. Does nothing while admin is disabled. Worker role only.
+ * deletes rows (daily stats and fallback circuit events) older than {@code rollup-retention-days}. Does nothing while
+ * admin is disabled. Worker role only.
  */
 @Component
 @Profile("worker")
@@ -33,6 +35,7 @@ public class DailyRollupJob {
     private final AdminProperties properties;
     private final ReliablePushProperties retention;
     private final DailyStatsRepository stats;
+    private final CircuitRepository circuits;
     private final TransactionTemplate transactions;
     private final JdbcClient jdbc;
     private final Clock clock;
@@ -42,6 +45,7 @@ public class DailyRollupJob {
             AdminProperties properties,
             ReliablePushProperties retention,
             DailyStatsRepository stats,
+            CircuitRepository circuits,
             TransactionTemplate transactions,
             JdbcClient jdbc,
             Clock clock) {
@@ -49,6 +53,7 @@ public class DailyRollupJob {
         this.properties = properties;
         this.retention = retention;
         this.stats = stats;
+        this.circuits = circuits;
         this.transactions = transactions;
         this.jdbc = jdbc;
         this.clock = clock;
@@ -81,7 +86,9 @@ public class DailyRollupJob {
                 LocalDate today = LocalDate.now(clock.withZone(ZoneOffset.UTC));
                 List<LocalDate> days = RollupWindow.days(today, retention.retentionDays());
                 days.forEach(stats::upsert);
-                stats.deleteBefore(today.minusDays(properties.rollupRetentionDays()));
+                LocalDate cutoff = today.minusDays(properties.rollupRetentionDays());
+                stats.deleteBefore(cutoff);
+                circuits.deleteEventsBefore(cutoff.atStartOfDay(ZoneOffset.UTC).toInstant());
                 return days.size();
             });
             int count = written == null ? 0 : written;

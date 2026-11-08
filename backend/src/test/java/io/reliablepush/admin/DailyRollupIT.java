@@ -246,6 +246,9 @@ class DailyRollupIT extends PostgresTestBase {
     AdminKeys adminKeys;
 
     @Autowired
+    io.reliablepush.fallback.circuit.CircuitRepository circuits;
+
+    @Autowired
     io.reliablepush.apps.ReliablePushProperties reliablePushProperties;
 
     @Autowired
@@ -265,7 +268,7 @@ class DailyRollupIT extends PostgresTestBase {
             }
         };
         DailyRollupJob broken = new DailyRollupJob(
-                adminKeys, adminProperties, reliablePushProperties, failing, transactions, jdbc, clock);
+                adminKeys, adminProperties, reliablePushProperties, failing, circuits, transactions, jdbc, clock);
 
         try (EventCapture errors = new EventCapture(DailyRollupJob.class.getName())) {
             assertThat(broken.run()).isZero();
@@ -282,6 +285,23 @@ class DailyRollupIT extends PostgresTestBase {
         // the first day written before the failure is rolled back with it
         assertThat(jdbc.sql("select count(*) from daily_stats").query(Long.class).single()).isZero();
         assertThat(events("rollup.completed")).isEmpty();
+    }
+
+    @Test
+    void oldCircuitEventsDeletedWithTheRollups() {
+        jdbc.sql("delete from fallback_circuit_event").update();
+        jdbc.sql("""
+                        insert into fallback_circuit_event (app_id, at, transition, reason) values
+                            ('shop', '2025-10-01T23:59:59Z', 'OPENED', 'tracking_missing'),
+                            ('shop', '2025-10-02T00:00:00Z', 'OPENED', 'tracking_missing')
+                        """)
+                .update();
+
+        job.run();
+
+        // same cutoff as daily_stats: the start of 2025-10-02 (2026-11-06 minus 400 days); strictly older is deleted
+        assertThat(jdbc.sql("select count(*) from fallback_circuit_event").query(Long.class).single()).isEqualTo(1);
+        jdbc.sql("delete from fallback_circuit_event").update();
     }
 
     @Test
