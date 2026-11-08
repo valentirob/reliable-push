@@ -76,9 +76,15 @@ export function render(root, ctx) {
     } catch (e) {
       if (dead || e.status === 401) return;
       if (btn) btn.disabled = false;
+      // 404 (no longer in scope): the reload says "App not found." (once) and removes the button
+      if (e.status === 404) {
+        status.replaceChildren();
+        loadCircuit();
+        return;
+      }
       status.append(message('error', 'Could not resume: ' + e.message));
-      // 409 (suspended or disabled meanwhile) or 404 (no longer in scope): the state shown is stale
-      if (e.status === 409 || e.status === 404) loadCircuit();
+      // 409 (suspended or disabled meanwhile): the state shown is stale
+      if (e.status === 409) loadCircuit();
     }
   }
 
@@ -105,7 +111,8 @@ export function render(root, ctx) {
       if (!c) { clear(actions); status.append(message('error', 'App not found.')); return; }
       showCircuit(body.enabled ? c : null);
       if (!body.enabled) state.textContent = 'Circuit breaker disabled';
-      else if (body.suspended) status.append(message('error', 'Fallbacks suspended by configuration'));
+      // suspended wins over everything, also over a disabled breaker
+      if (body.suspended) status.append(message('error', 'Fallbacks suspended by configuration'));
     } catch (e) {
       if (dead || e.status === 401) return;
       status.append(message('error', 'Could not load the circuit: ' + e.message));

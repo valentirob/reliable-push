@@ -54,12 +54,14 @@ async function problem(res) {
 
 export async function request(path, params, opts = {}) {
   const url = '/v1/admin' + path + queryString(params);
+  const method = opts.method || 'GET';
   for (let attempt = 0; ; attempt++) {
     let res;
     try {
-      res = await fetch(url, { method: opts.method || 'GET', headers: { 'X-Admin-Key': getKey() || '', Accept: 'application/json' }, cache: 'no-store' });
+      res = await fetch(url, { method, headers: { 'X-Admin-Key': getKey() || '', Accept: 'application/json' }, cache: 'no-store' });
     } catch (e) {
-      if (attempt >= MAX_RETRIES) throw new ApiError(0, 'Cannot reach the server');
+      // only a GET is retried: a POST (the resume) may have reached the server, so it is never sent twice
+      if (method !== 'GET' || attempt >= MAX_RETRIES) throw new ApiError(0, 'Cannot reach the server');
       banner('Cannot reach the server, retrying…');
       await sleep(1000 * 2 ** attempt);
       continue;

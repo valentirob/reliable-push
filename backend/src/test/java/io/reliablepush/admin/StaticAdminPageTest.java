@@ -112,8 +112,27 @@ class StaticAdminPageTest {
         // a 503 of the circuit route must not hold back the tiles through the retry backoff
         assertThat(read("js/views/overview.js")).contains("fallbackCircuits({ noRetry503: true })");
         assertThat(read("js/api.js")).contains("export const fallbackCircuits = (opts) => request('/fallback-circuits', null, opts)");
-        // 409 (suspended or disabled meanwhile) or 404: the state shown is stale, so it is read again
-        assertThat(read("js/views/circuit.js")).contains("if (e.status === 409 || e.status === 404) loadCircuit();");
+        // 409 (suspended or disabled meanwhile) or 404: the state shown is stale, so it is read again; on a 404 the
+        // reload's "App not found." is the only error line
+        String circuit = read("js/views/circuit.js");
+        assertThat(circuit).contains("if (e.status === 409) loadCircuit();");
+        assertThat(circuit).containsPattern("if \\(e\\.status === 404\\) \\{\\s*status\\.replaceChildren\\(\\);\\s*loadCircuit\\(\\);");
+    }
+
+    @Test
+    void suspendedBannerOfTheCircuitViewDoesNotDependOnEnabled() {
+        // suspended wins over everything (spec 2), also when the breaker is disabled
+        String circuit = read("js/views/circuit.js");
+        assertThat(circuit).contains("if (body.suspended) status.append(message('error', 'Fallbacks suspended by configuration'));")
+                .doesNotContain("else if (body.suspended)");
+    }
+
+    @Test
+    void onlyGetRequestsAreRetriedAfterANetworkError() {
+        // a resume POST that may have reached the server must never be sent twice
+        String api = read("js/api.js");
+        assertThat(api).contains("const method = opts.method || 'GET';")
+                .contains("if (method !== 'GET' || attempt >= MAX_RETRIES) throw new ApiError(0, 'Cannot reach the server');");
     }
 
     @Test
