@@ -77,20 +77,23 @@ public final class ReliablePushExtension: @unchecked Sendable {
     /// Handles a notification request in the extension.
     ///
     /// Returns `false`, without calling `handler` and without reading the stored configuration, when the request has
-    /// no valid `rp_tid` (a malformed one is logged as WARN), so the host extension can handle its own pushes. Otherwise it returns `true` and owns `handler`:
-    /// - it applies `customize` to a mutable copy of the content (with the tracking id);
-    /// - if the device is registered, it checks the notification settings; only if the notification will be shown is
-    ///   `DELIVERED` persisted in the queue, before this method returns;
-    /// - it flushes the queue for what is left of `extensionSendTimeout`, then calls `handler` once with the
-    ///   (customised) content.
+    /// no valid `rp_tid` (a malformed one is logged as WARN), so the host extension can handle its own pushes. Otherwise it
+    /// returns `true` and owns `handler`, in this order (spec 3.3):
+    /// - the stored configuration is read; without one the content is passed through untouched;
+    /// - `customize` is applied to a mutable copy of the content (with the tracking id);
+    /// - if the device is registered and the notification settings say it will be shown, `DELIVERED` is persisted in
+    ///   the queue, before this method returns;
+    /// - one `POST /v1/events` (this event first) runs for what is left of `extensionSendTimeout`, with the stored
+    ///   token as it is: the extension never renews the token (a 401 leaves the event queued for the app);
+    /// - `handler` is called once with the (customised) content.
     ///
-    /// When the device is not registered, `handler` is called at once and no event is recorded (WARN
-    /// `tracking.not_registered`). Without a stored configuration the content is passed through untouched.
+    /// Whenever there is nothing to send (not registered, not shown, the Keychain or the queue cannot be used), the
+    /// handler is called at once, before this returns. Tracking never decides whether the notification is shown.
     ///
     /// Call it once per instance, from the extension's synchronous `didReceive(_:withContentHandler:)` override, never
     /// from async code: the settings check and the queue write block the calling thread briefly (the settings read is
-    /// capped at 2 s whatever `extensionSendTimeout` is; a source that does not answer counts as not shown). The send
-    /// runs in the background.
+    /// capped at 2 s, or at `extensionSendTimeout` when that is shorter, and counts against it; a source that does not
+    /// answer counts as not shown). The send runs in the background.
     ///
     /// - Parameters:
     ///   - request: The request given to `UNNotificationServiceExtension.didReceive(_:withContentHandler:)`.
@@ -114,17 +117,10 @@ public final class ReliablePushExtension: @unchecked Sendable {
         if let customize, let mutable { customize(mutable, trackingId) }
         let content: UNNotificationContent = mutable ?? request.content
 
-        // DELIVERED goes to disk before the handler can be called by any path (flush end, safety timer, expiry).
-        // Registration first: an unregistered device needs no settings read.
-        let registered = sdk.isRegistered
-        if !registered {
-            SDKLog.warn("tracking.not_registered", ["trackingId": trackingId, "type": EventType.delivered.rawValue])
-        } else if NotificationGate.settings(from: environment.settings, timeout: Self.gateTimeout)?.isShown == true {
-            sdk.enqueue(trackingId, .delivered)
-        }
-
+        // DELIVERED goes to disk before the handler can be called by any path (send end, safety timer, expiry).
+        let event = record(trackingId, sdk: sdk, environment: environment)
         let expiredEarly = install(handler: handler, content: content)
-        if expiredEarly || !registered {
+        guard !expiredEarly, let event else {
             finish(expired: expiredEarly)
             return true
         }
@@ -133,7 +129,7 @@ public final class ReliablePushExtension: @unchecked Sendable {
         let remaining = max(timeout - Date().timeIntervalSince(start), 0)
         let task = Task { [self] in
             // Returns once the sender has unwound and released flush.lock; only then is the notification handed back.
-            _ = await sdk.boundedFlush(timeout: remaining)
+            _ = await sdk.boundedFlush(timeout: remaining, maxBatches: 1, priority: event)
             finish(expired: false)
         }
         // An expiry that came in between found no task to cancel: cancel it here.
@@ -149,6 +145,26 @@ public final class ReliablePushExtension: @unchecked Sendable {
             finish(expired: false)
         }
         return true
+    }
+
+    /// Registered check → settings gate → persist. Returns the persisted event when there is something to send with a
+    /// readable token; nil when the handler should be called at once (nothing recorded, or nothing to send it with).
+    private func record(_ trackingId: String, sdk: SDK, environment: SDKEnvironment) -> QueuedEvent? {
+        let sendable: Bool
+        switch sdk.tokens.load() {
+        case .registered:
+            sendable = true
+        case .unavailable where environment.state.deviceId != nil:
+            sendable = false // registered per the cache, but the Keychain cannot give the token now: the app sends it
+        case .unavailable, .notRegistered:
+            SDKLog.warn("tracking.not_registered", ["trackingId": trackingId, "type": EventType.delivered.rawValue])
+            return nil
+        }
+        // An unregistered device needs no settings read; the read is capped by what is left of the budget.
+        let gateTimeout = min(Self.gateTimeout, max(timeout, Self.safetyMargin))
+        guard NotificationGate.settings(from: environment.settings, timeout: gateTimeout)?.isShown == true else { return nil }
+        guard let event = sdk.enqueue(trackingId, .delivered) else { return nil } // the queue write failed (WARN)
+        return sendable ? event : nil
     }
 
     /// Forward `UNNotificationServiceExtension.serviceExtensionTimeWillExpire()` here. If the content handler has not

@@ -42,12 +42,15 @@ enum NotificationGate {
     static func settings(from source: any NotificationSettingsSource, timeout: TimeInterval) -> GateSettings? {
         let result = Locked<GateSettings?>(nil)
         let done = DispatchSemaphore(value: 0)
-        Task {
+        let read = Task {
             let s = await source.current()
             result.withLock { $0 = s }
             done.signal()
         }
-        guard done.wait(timeout: .now() + max(timeout, 0)) == .success else { return nil }
+        guard done.wait(timeout: .now() + max(timeout, 0)) == .success else {
+            read.cancel() // a source that honours cancellation stops; the answer is ignored either way
+            return nil
+        }
         return result.withLock { $0 }
     }
 }

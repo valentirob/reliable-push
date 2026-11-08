@@ -47,12 +47,18 @@ final class EventQueue: Sendable {
         }
     }
 
-    func add(_ e: QueuedEvent) {
+    /// True when the event is on disk afterwards (added now, or already queued); false on an I/O error.
+    @discardableResult
+    func add(_ e: QueuedEvent) -> Bool {
         var dropped = 0
         var queued = false
+        var present = false
         locked {
             guard var items = read() else { return }
-            if items.contains(where: { $0.event.key == e.key }) { return }
+            if items.contains(where: { $0.event.key == e.key }) {
+                present = true
+                return
+            }
             items.append(Entry(e))
             while items.count > Self.cap {
                 items.removeFirst()
@@ -62,6 +68,7 @@ final class EventQueue: Sendable {
         }
         if queued { SDKLog.info("tracking.event_queued", ["trackingId": e.trackingId, "type": e.type.rawValue]) }
         if dropped > 0 { SDKLog.warn("tracking.event_dropped", ["count": "\(dropped)", "reason": "queue_full"]) }
+        return queued || present
     }
 
     /// The oldest `max` events whose key is not in `excluding`.

@@ -9,6 +9,21 @@ final class FakeSettings: NotificationSettingsSource, @unchecked Sendable {
     func current() async -> GateSettings { value.withLock { $0 } }
 }
 
+/// Notification settings that never answer (a hanging `notificationSettings()` read).
+struct HangingSettings: NotificationSettingsSource {
+    func current() async -> GateSettings {
+        while !Task.isCancelled { try? await Task.sleep(nanoseconds: 1_000_000_000) }
+        return .shown
+    }
+}
+
+/// Secret store whose every call fails as an unexpected Keychain error would (e.g. -34018, missing entitlement).
+final class FailingSecretStore: SecretStore {
+    func read(account: String) -> SecretRead { .failed(-34018) }
+    func write(_ data: Data, account: String) -> Bool { false }
+    func delete(account: String) {}
+}
+
 extension GateSettings {
     static let shown = GateSettings(authorized: true, alert: true, notificationCenter: true, lockScreen: true)
 }
@@ -56,6 +71,8 @@ final class SDKFixture {
     /// Expiring token: under 20 % left at `now`, so the next flush refreshes first.
     static let staleToken = DeviceTokenTests.token(iat: 1_700_000_000 - 3500, exp: 1_700_000_000 + 100)
     static let freshToken = DeviceTokenTests.token(iat: 1_700_000_000, exp: 1_700_000_000 + 3600)
+    /// Expired 100 s before `now` (inside the backend's events grace period).
+    static let expiredToken = DeviceTokenTests.token(iat: 1_700_000_000 - 3700, exp: 1_700_000_000 - 100)
 
     let root: URL
     let dir: URL
@@ -75,8 +92,11 @@ final class SDKFixture {
         SDKLog.sink = { level, message in box.add("\(level) \(message)") }
     }
 
-    var environment: SDKEnvironment {
-        SDKEnvironment(state: state, queueDirectory: dir, secrets: secrets, settings: settings,
+    var environment: SDKEnvironment { environment() }
+
+    /// The fixture's environment, with the secret store or the settings source replaced (fault injection).
+    func environment(secrets: (any SecretStore)? = nil, settings: (any NotificationSettingsSource)? = nil) -> SDKEnvironment {
+        SDKEnvironment(state: state, queueDirectory: dir, secrets: secrets ?? self.secrets, settings: settings ?? self.settings,
                        sessionConfiguration: { StubURLProtocol.configuration() },
                        now: { SDKFixture.now }, activity: activity)
     }

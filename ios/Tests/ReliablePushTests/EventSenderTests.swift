@@ -19,7 +19,6 @@ final class EventSenderTests: XCTestCase {
     private var freshToken: String { DeviceTokenTests.token(iat: 1_700_000_000, exp: 1_700_000_000 + 3600) }
 
     override func setUp() {
-        RefreshGate.resetForTesting()
         StubURLProtocol.reset()
         dir = FileManager.default.temporaryDirectory.appendingPathComponent("rp-sender-\(UUID().uuidString)/ReliablePush")
         state = SharedState(defaults: UserDefaults(suiteName: "rp.test.\(UUID().uuidString)")!)
@@ -132,52 +131,11 @@ final class EventSenderTests: XCTestCase {
         XCTAssertFalse(log.messages.contains { $0.contains("unacknowledged") })
     }
 
-    func testRefreshAnswered429StoresRetryNotBeforeAndSendsNothing() async {
-        register(staleToken)
-        add(1)
-        StubURLProtocol.reset { _ in .response(status: 429, headers: ["Retry-After": "90"]) }
-        let r = await makeSender().flush(deadline: nil)
-        XCTAssertEqual(r, .retryLater)
-        XCTAssertEqual(state.retryNotBefore, now.addingTimeInterval(90))
-        XCTAssertEqual(StubURLProtocol.requests.map(\.url.path), ["/v1/devices/token:refresh"])
-        XCTAssertEqual(queue.count, 1)
-    }
-
-    func testSaveFailureAfterRefreshKeepsEventsRetryLater() async {
-        add(1)
-        StubURLProtocol.reset { req in
-            req.url?.path == "/v1/devices/token:refresh"
-                ? .response(status: 200, body: Data(#"{"deviceToken":"not-a-jwt","expiresAt":"2023-11-14T23:13:20Z"}"#.utf8))
-                : .response(status: 401)
-        }
-        let r = await makeSender().flush(deadline: nil)
-        XCTAssertEqual(r, .retryLater)
-        XCTAssertEqual(queue.count, 1)
-        XCTAssertEqual(StubURLProtocol.requests.map(\.url.path), ["/v1/events", "/v1/devices/token:refresh"])
-        guard case .registered = tokens.load() else { return XCTFail() }
-    }
-
     func testDeadlineAlreadyPassedSendsNothing() async {
         add(2)
         let r = await makeSender().flush(deadline: now.addingTimeInterval(-1))
         XCTAssertEqual(r, .retryLater)
         XCTAssertTrue(StubURLProtocol.requests.isEmpty)
-    }
-
-    func testEarlyRefreshConsumedGateThen401IsExhausted() async {
-        register(staleToken)
-        add(1)
-        let fresh = freshToken
-        StubURLProtocol.reset { req in
-            req.url?.path == "/v1/devices/token:refresh"
-                ? .response(status: 200, body: Data(#"{"deviceToken":"\#(fresh)","expiresAt":"2023-11-14T23:13:20Z"}"#.utf8))
-                : .response(status: 401)
-        }
-        let r = await makeSender().flush(deadline: nil)
-        XCTAssertEqual(r, .retryLater)
-        XCTAssertEqual(StubURLProtocol.requests.map(\.url.path), ["/v1/devices/token:refresh", "/v1/events"])
-        XCTAssertTrue(log.messages.contains { $0.hasPrefix("warn") && $0.contains("auth.failed") && $0.contains("exhausted") })
-        XCTAssertEqual(queue.count, 1)
     }
 
     func testFlushKeepsEventsOn429And5xxAndNetworkError() async {
@@ -286,83 +244,75 @@ final class EventSenderTests: XCTestCase {
         XCTAssertEqual(queue.count, 0)
     }
 
-    func testOn401RefreshesOnceAndRetries() async {
-        add(1)
-        let fresh = freshToken
-        StubURLProtocol.reset { req in
-            if req.url?.path == "/v1/devices/token:refresh" {
-                return .response(status: 200, body: Data(#"{"deviceToken":"\#(fresh)","expiresAt":"2023-11-14T23:13:20Z"}"#.utf8))
-            }
-            if req.value(forHTTPHeaderField: "Authorization") == "Bearer \(fresh)" { return Self.items([("t0", "ACCEPTED")]) }
-            return .response(status: 401)
-        }
-        let r = await makeSender().flush(deadline: nil)
-        XCTAssertEqual(r, .done)
-        XCTAssertEqual(StubURLProtocol.requests.map(\.url.path), ["/v1/events", "/v1/devices/token:refresh", "/v1/events"])
-        guard case let .registered(deviceId, token) = tokens.load() else { return XCTFail() }
-        XCTAssertEqual(deviceId, "dev1")
-        XCTAssertEqual(token.raw, fresh)
-        XCTAssertTrue(log.messages.contains { $0.hasPrefix("info") && $0.contains("token.refreshed") })
-    }
+    // MARK: no token renewal on the event path (spec 3.1)
 
-    func testRetryStillUnauthorizedKeepsEvents() async {
-        add(1)
-        let fresh = freshToken
-        StubURLProtocol.reset { req in
-            req.url?.path == "/v1/devices/token:refresh"
-                ? .response(status: 200, body: Data(#"{"deviceToken":"\#(fresh)","expiresAt":"2023-11-14T23:13:20Z"}"#.utf8))
-                : .response(status: 401)
-        }
-        let r = await makeSender().flush(deadline: nil)
-        XCTAssertEqual(r, .retryLater)
-        XCTAssertEqual(queue.count, 1)
-        XCTAssertTrue(log.messages.contains { $0.hasPrefix("warn") && $0.contains("auth.failed") })
-    }
-
-    func testRefreshAnswered401ClearsRegistration() async {
+    func testOn401KeepsEventsSetsRenewalNeededAndNeverRefreshes() async {
         add(2)
         StubURLProtocol.reset { _ in .response(status: 401) }
-        let r = await makeSender().flush(deadline: nil)
-        XCTAssertEqual(r, .notRegistered)
-        guard case .notRegistered = tokens.load() else { return XCTFail() }
-        XCTAssertEqual(queue.count, 2)
-    }
-
-    func testRefreshFailingWith5xxKeepsRegistrationAndEvents() async {
-        add(2)
-        StubURLProtocol.reset { req in req.url?.path == "/v1/devices/token:refresh" ? .response(status: 503) : .response(status: 401) }
+        XCTAssertFalse(tokens.renewalNeeded)
         let r = await makeSender().flush(deadline: nil)
         XCTAssertEqual(r, .retryLater)
-        guard case .registered = tokens.load() else { return XCTFail() }
-        XCTAssertEqual(queue.count, 2)
+        XCTAssertEqual(StubURLProtocol.requests.map(\.url.path), ["/v1/events"], "one send, no refresh")
+        XCTAssertEqual(queue.count, 2, "the events stay queued")
+        XCTAssertTrue(tokens.renewalNeeded)
+        XCTAssertTrue(state.renewalNeeded, "stored in the App Group state the extension shares")
+        guard case let .registered(_, token) = tokens.load() else { return XCTFail("registration kept") }
+        XCTAssertEqual(token.raw, goodToken)
+        XCTAssertTrue(log.messages.contains { $0.hasPrefix("warn") && $0.contains("auth.failed") && $0.contains("status=401") })
     }
 
-    func testSecondRefreshInSameProcessIsNotAttempted() async {
-        add(1)
-        XCTAssertTrue(RefreshGate.tryAcquire())
-        StubURLProtocol.reset { _ in .response(status: 401) }
-        let r = await makeSender().flush(deadline: nil)
-        XCTAssertEqual(r, .retryLater)
-        XCTAssertEqual(StubURLProtocol.requests.map(\.url.path), ["/v1/events"])
-        XCTAssertEqual(queue.count, 1)
-        XCTAssertTrue(log.messages.contains { $0.hasPrefix("warn") && $0.contains("auth.failed") })
-        guard case .registered = tokens.load() else { return XCTFail() }
-    }
-
-    func testRefreshesFirstWhenTokenIsStale() async {
-        register(staleToken)
-        add(1)
-        let fresh = freshToken
-        StubURLProtocol.reset { req in
-            if req.url?.path == "/v1/devices/token:refresh" {
-                return .response(status: 200, body: Data(#"{"deviceToken":"\#(fresh)","expiresAt":"2023-11-14T23:13:20Z"}"#.utf8))
-            }
-            return Self.items([("t0", "ACCEPTED")])
+    func testStaleAndExpiredTokensAreSentAsTheyAre() async {
+        // under 20 % left, and expired (the backend accepts it on /v1/events within its grace period)
+        for token in [staleToken, DeviceTokenTests.token(iat: 1_700_000_000 - 3700, exp: 1_700_000_000 - 100)] {
+            register(token)
+            add(1, prefix: UUID().uuidString)
+            StubURLProtocol.reset { SDKFixture.acceptAll($0) }
+            let r = await makeSender().flush(deadline: nil)
+            XCTAssertEqual(r, .done)
+            XCTAssertEqual(StubURLProtocol.requests.map(\.url.path), ["/v1/events"])
+            XCTAssertEqual(eventRequests()[0].headers["Authorization"], "Bearer \(token)")
+            XCTAssertFalse(tokens.renewalNeeded)
         }
-        let r = await makeSender().flush(deadline: nil)
-        XCTAssertEqual(r, .done)
-        XCTAssertEqual(StubURLProtocol.requests.map(\.url.path), ["/v1/devices/token:refresh", "/v1/events"])
-        XCTAssertEqual(eventRequests()[0].headers["Authorization"], "Bearer \(fresh)")
+    }
+
+    func testNoRefreshRequestOnAnyStatus() async {
+        for reply: StubURLProtocol.Reply in [.response(status: 200, body: Data("{}".utf8)), .response(status: 400),
+                                             .response(status: 401), .response(status: 403), .response(status: 429),
+                                             .response(status: 500), .fail] {
+            register(staleToken)
+            add(1, prefix: UUID().uuidString)
+            StubURLProtocol.reset { _ in reply }
+            state.retryNotBefore = nil
+            _ = await makeSender().flush(deadline: nil)
+            XCTAssertFalse(StubURLProtocol.requests.contains { $0.url.path != "/v1/events" }, "\(reply)")
+        }
+    }
+
+    func testRenewalNeededIsClearedByTheNextStoredToken() async {
+        add(1)
+        StubURLProtocol.reset { _ in .response(status: 401) }
+        _ = await makeSender().flush(deadline: nil)
+        XCTAssertTrue(tokens.renewalNeeded)
+        register(freshToken)
+        XCTAssertFalse(tokens.renewalNeeded)
+        tokens.markRenewalNeeded()
+        tokens.clear()
+        XCTAssertFalse(tokens.renewalNeeded, "a cleared registration needs no renewal")
+    }
+
+    func testOneBatchSendsThePriorityEventFirst() async {
+        add(60) // older events, more than one batch
+        let fresh = QueuedEvent(trackingId: "fresh", type: .delivered, occurredAt: now)
+        queue.add(fresh)
+        StubURLProtocol.reset { SDKFixture.acceptAll($0) }
+        let r = await makeSender().flush(deadline: nil, maxBatches: 1, priority: fresh)
+        XCTAssertEqual(r, .retryLater)
+        XCTAssertEqual(eventRequests().count, 1, "one send")
+        let ids = Self.ids(eventRequests()[0])
+        XCTAssertEqual(ids.count, 50)
+        XCTAssertEqual(ids.first, "fresh")
+        XCTAssertEqual(queue.count, 11)
+        XCTAssertFalse(queue.peek(max: 100).contains { $0.trackingId == "fresh" })
     }
 
     func testFlushLockSkipsWhenHeld() async {

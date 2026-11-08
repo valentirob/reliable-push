@@ -13,7 +13,10 @@ Your backend registers each notification with reliable-push and puts the returne
 - `ReliablePushExtension.didReceive` returns `false` for a notification without `rp_tid` and leaves it to your code;
   for such a notification it reads nothing, not even the stored configuration.
 - For a tracked notification it always calls the content handler, exactly once, at most `extensionSendTimeout` after
-  the push (5 s by default).
+  the push (2 s by default), and at once when there is nothing to send or an SDK step fails. Display never depends on
+  tracking.
+- The receive path never renews the device token: not in the NSE, not in any queue flush. Renewal happens only in
+  `ensureRegistered`, which your app calls (section 4).
 
 If the reliable-push backend cannot be reached, your notifications are shown as usual and the events wait in the App
 Group queue. The flow diagram is in [overview.md §8](overview.md#8-ios-sdk).
@@ -41,7 +44,8 @@ The app and the NSE are two processes. They share state through an **App Group**
 `group.com.example.app`): add the App Groups capability to the app target and to the NSE target with the same id.
 
 - `UserDefaults(suiteName:)` of the group holds the configuration and the non-secret state (device id, token expiry,
-  retry-not-before).
+  retry-not-before, and `renewalNeeded`, set when the backend rejected the token on an event send, so a `401` seen by
+  the NSE is acted on by the app).
 - The event queue is a file in the group container (`Library/Application Support/ReliablePush/events.json`), guarded by a
   `flock` so the app and the NSE never corrupt it.
 - The SDK sets the Data Protection class `completeUntilFirstUserAuthentication` explicitly on that directory, the queue
@@ -96,21 +100,48 @@ func application(_ application: UIApplication,
 | `invalidAppId` | the app id is empty or whitespace |
 | `appGroupUnavailable` | the App Group cannot be opened: check that the id is spelled the same in `configure`, `ReliablePushExtension` and the entitlements of the app and the NSE |
 
-## 4. Register the device after login
+## 4. Keep the device registered: `ensureRegistered`
 
 ```swift
-switch await ReliablePush.register(idToken: idToken) {      // also: register(idToken:completion:), main-actor callback
-case .success(let deviceId): break
-case .failed(let httpStatus): break                         // nil = network error, token not stored, or not configured
+// at app start or foreground, and right after login; returns at once, the work runs in the background
+ReliablePush.ensureRegistered(idTokenProvider: { await session.currentIdToken() }) { result in   // main actor
+    switch result {
+    case .success(let deviceId): break        // registered now, or the device token was renewed
+    case .alreadyRegistered: break            // valid token, nothing sent
+    case .notLoggedIn: break                  // a registration was needed and the provider returned nil
+    case .failed(let httpStatus): break       // nil = network error, Keychain unreadable, not configured...
+    }
 }
+// or: let result = await ReliablePush.ensureRegistered(idTokenProvider: { ... })
+
 ReliablePush.logout { confirmed in }   // revokes at the backend (best effort), clears token, registration and queue
 ```
 
-`idToken` is your OIDC ID token (or a signed grant, as the harness uses); it is never logged. The SDK refreshes the
-device token before it expires (when less than 20 % of its lifetime is left) and once on a `401`, at most one refresh per
-process (the app and the NSE count separately). A refresh answered `401` clears the registration: call `register` again.
+The SDK renews the device token **only here**: the NSE and the event sends never do (no network call is added before a
+notification is shown). Call `ensureRegistered` where it suits your app, at least at app start or foreground and right
+after login. It decides locally, with no network call unless needed, in this order:
+
+1. no device token, or the stored one has expired: it calls `idTokenProvider`. `nil` (nobody logged in) gives
+   `.notLoggedIn` and nothing else; an ID token gives `POST /v1/devices`;
+2. the token is still valid, and either an event send was answered `401` (`renewalNeeded`, also when the NSE saw it) or
+   less than 20 % of its validity is left: `POST /v1/devices/token:refresh`. A `401` there takes path 1;
+3. otherwise `.alreadyRegistered`, no call.
+
+On success the token is stored, `renewalNeeded` is cleared and the queued events are sent. Only one run at a time: a
+call while one is in progress joins it (its provider is not called). It never throws and never blocks the caller.
+`idTokenProvider` returns your OIDC ID token (or a signed grant, as the harness uses), or `nil` when nobody is logged in;
+it is called only on path 1, and the token is never logged.
+
+Until the app calls `ensureRegistered`, the SDK keeps sending events with the token it has, even an expired one: the
+backend accepts it on `POST /v1/events` (and on the logout revoke) for a grace period after expiry (90 days by default,
+per app). Past that, or after a revoke, the backend answers `401`: the events stay queued and the next `ensureRegistered`
+registers again and sends them. So an app that is not opened for a long time keeps reporting `DELIVERED`; an app that
+never calls `ensureRegistered` stops after the grace period.
+
+`register(idToken:)` stays for an explicit registration (it registers whatever is stored). Call `logout()` on a user
+switch: it clears the token, so the next `ensureRegistered` registers the new user.
 `ReliablePush.deviceId` is `nil` while not registered. It is read from the Keychain record, so it is also `nil` after a
-backup restore or a move to a new phone (the record is `ThisDeviceOnly`): gating `register` on `deviceId == nil` works.
+backup restore or a move to a new phone (the record is `ThisDeviceOnly`); `ensureRegistered` then takes path 1.
 While the Keychain is locked it returns the last known id.
 
 ## 5. The Notification Service Extension
@@ -144,10 +175,18 @@ final class NotificationService: UNNotificationServiceExtension {
   as WARN), so your extension can handle its own pushes. The stored configuration (App Group, Keychain) is read only
   after that check, so your own pushes cost nothing and a misconfigured App Group logs `sdk.app_group_unavailable` only
   for tracked ones. Otherwise it returns `true` and calls the handler **exactly
-  once**: after the send, after `ReliablePushOptions.extensionSendTimeout` (default 5 s, clamped to 0...25), or at
-  `serviceExtensionTimeWillExpire`, whichever comes first.
+  once**: after the send, after `ReliablePushOptions.extensionSendTimeout` (default 2 s, clamped to 0...25), or at
+  `serviceExtensionTimeWillExpire`, whichever comes first; at once when there is nothing to send.
+- The order is: `rp_tid` check → stored configuration → `customize` → registered check → notification settings →
+  `DELIVERED` persisted → **one** `POST /v1/events` (this notification's event first) → content handler.
 - `DELIVERED` is recorded only when the device is registered and the notification will actually be shown (alerts
-  authorized); it is persisted in the queue before `didReceive` returns, then sent in the time left.
+  authorized); it is persisted in the queue before `didReceive` returns, then sent in the time left. The settings read is
+  capped at 2 s (or at `extensionSendTimeout` when that is shorter) and counts against the same budget, so the handler
+  runs within about `extensionSendTimeout + 0.5 s` in every case.
+- The NSE sends with the stored token as it is and **never renews it**. A `401` leaves the event queued and sets
+  `renewalNeeded`; the app's next `ensureRegistered` renews the token and sends it.
+- Any SDK step that fails (Keychain, queue file, App Group) hands the notification back at once with the best content
+  so far. A crash in your own `customize` closure cannot be caught: iOS then shows the original content.
 - An optional `customize:` closure receives a mutable copy of the content and the tracking id (title, attachments...).
   It is synchronous.
 - `ReliablePushExtension(appGroup:options:)` takes the same `keychainAccessGroup` as the app, if you overrode it.
@@ -171,6 +210,24 @@ override func didReceive(_ request: UNNotificationRequest,
 The SDK calls your closure once on every path, including at `serviceExtensionTimeWillExpire`, when iOS ends the
 extension right after: keep your work bounded and call the system's handler promptly (start the download early, or skip
 it when time is up).
+
+**What the user sees when something fails.** The notification is always shown when iOS would show it; only tracking
+changes:
+
+| Case | The user sees | Tracking |
+|---|---|---|
+| Backend slow or not answering | the notification after at most `extensionSendTimeout` (2 s) | `DELIVERED` queued, sent at the next app launch or NSE run |
+| Network error | the notification at once | `DELIVERED` queued, sent later |
+| Token rejected (`401`: past the grace period, or revoked) | the notification as usual | `DELIVERED` queued, `renewalNeeded` set; sent after the app's next `ensureRegistered` |
+| Not registered (never registered, logged out) | the notification at once | nothing recorded (WARN `tracking.not_registered`); the fallback decides |
+| No stored configuration, or the App Group cannot be opened | the original content at once (no `customize`) | nothing recorded |
+| Keychain unreadable | the notification at once | `DELIVERED` queued if the device was registered, sent later by the app |
+| Queue file corrupt | the notification as usual | the corrupt file is reset (older events lost, WARN); this event is sent |
+| Queue file cannot be written | the notification at once | nothing recorded (WARN); the fallback may fire although the user saw it |
+| Notification settings read hangs | the notification after at most 2 s | nothing recorded (counted as not shown); the fallback decides |
+| Notifications disabled | nothing (iOS decides) | nothing recorded; the fallback decides |
+| iOS ends the extension (`serviceExtensionTimeWillExpire`) | the best content so far | `DELIVERED` already queued, sent later |
+| Your `customize` closure crashes | the original content (iOS) | nothing recorded (`customize` runs before `DELIVERED` is persisted); the fallback may fire |
 
 ## 6. Track opens
 
@@ -238,8 +295,9 @@ Your backend sends a normal alert push with the tracking id at the top level (sp
 - Events are persisted in the queue before `didReceive` / `trackOpen` return, so they survive a process kill. The queue
   holds up to 500 events (oldest dropped with a WARN) and is sent in batches of at most 50. An event is never queued
   twice for the same `trackingId` and type.
-- Pending events are flushed at `configure` (once per launch), after `register`, after each new event and at every NSE
-  run. There is no polling, no `BGTaskScheduler`, no periodic work: **retry timing is the next app launch or the next
+- Pending events are flushed at `configure` (once per launch), after a successful `register` or `ensureRegistered`,
+  after each new event and at every NSE run (one send there). No flush renews the device token: a `401` keeps the
+  events and sets `renewalNeeded` (section 4). There is no polling, no `BGTaskScheduler`, no periodic work: **retry timing is the next app launch or the next
   NSE run**. `429` is honoured through `Retry-After` (up to 1 hour; a stored back-off further away than that, for example
   after the device clock was corrected, counts as expired); `5xx` and network errors keep the events. An event
   the server never acknowledges (two truncated answers) is dropped with a WARN, as on Android.
@@ -248,7 +306,7 @@ Your backend sends a normal alert push with the tracking id at the top level (sp
 - One flush runs at a time across the app and the NSE (`flush.lock`). A flush that finds another one running waits for
   it, within its own time limit (the NSE send timeout, 25 s in the app), and then sends what is left. So a burst of
   pushes does not leave a `DELIVERED` queued until the next launch. In the NSE that wait is part of the send timeout
-  (`extensionSendTimeout`, default 5 s): the notification is never handed back later than before, but when the app is
+  (`extensionSendTimeout`, default 2 s): the notification is never handed back later than that, but when the app is
   flushing at the same moment it can take up to that timeout instead of appearing at once.
 
 Known limits:
@@ -270,9 +328,10 @@ Known limits:
 Subsystem `io.reliablepush`, category `ReliablePush` (`os_log`), message `event=<name> key=value ...`. A WARN is written
 at `os_log` error level, the rest at info level.
 
-- Info level: `device.registered`, `token.refreshed`, `device.revoked`, `tracking.event_queued`, `tracking.event_sent`,
-  `sdk.reconfigured`.
-- Error level (WARN): `tracking.event_dropped`, `tracking.not_registered`, `auth.failed`, `rate_limit.exceeded`,
+- Info level: `device.registered`, `token.refreshed` (by `ensureRegistered` only), `device.register_skipped`
+  (`reason=not_logged_in`), `device.revoked`, `tracking.event_queued`, `tracking.event_sent`, `sdk.reconfigured`.
+- Error level (WARN): `tracking.event_dropped`, `tracking.not_registered`, `auth.failed` (`call=events`: the token was
+  rejected on a send, `renewalNeeded` is set; `call=refresh` or `call=register`), `rate_limit.exceeded`,
   `token.unreadable`, `token.unavailable`, `device.register_failed`, `device.revoked` (when the revoke was not
   confirmed), `extension.time_expired`, `sdk.app_group_unavailable`, `lock.unavailable`, `file.protection_failed`.
 

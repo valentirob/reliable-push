@@ -14,6 +14,8 @@ final class StubURLProtocol: URLProtocol, @unchecked Sendable {
         case response(status: Int, headers: [String: String] = [:], body: Data = Data())
         case redirect(status: Int, to: String)
         case hang
+        /// A transport error (`URLError.notConnectedToInternet`), at once.
+        case fail
     }
 
     private static let lock = NSLock()
@@ -65,6 +67,8 @@ final class StubURLProtocol: URLProtocol, @unchecked Sendable {
         switch reply {
         case .hang:
             return
+        case .fail:
+            client?.urlProtocol(self, didFailWithError: URLError(.notConnectedToInternet))
         case let .response(status, headers, data):
             let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: "HTTP/1.1", headerFields: headers)!
             client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)

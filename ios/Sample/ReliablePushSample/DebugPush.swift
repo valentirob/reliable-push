@@ -59,7 +59,7 @@ enum DebugPush {
 
 /// Debug build only: `RP_RESET=1` (the UI tests) starts the SDK from nothing, as a fresh install would: before
 /// `configure`, it deletes the SDK's Keychain item(s) in the App Group access group, its App Group defaults
-/// (`io.reliablepush.*`), its queue directory, and the sample's notifications.
+/// (`io.reliablepush.*`), its queue directory, the sample's login flag and its notifications.
 enum DebugReset {
     static func run(appGroup: String) {
         let query: [String: Any] = [
@@ -79,6 +79,7 @@ enum DebugReset {
         if let container = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroup) {
             try? FileManager.default.removeItem(at: container.appendingPathComponent("Library/Application Support/ReliablePush"))
         }
+        UserDefaults.standard.removeObject(forKey: SampleModel.loggedInKey)
         let center = UNUserNotificationCenter.current()
         center.removeAllDeliveredNotifications()
         center.removeAllPendingNotificationRequests()
