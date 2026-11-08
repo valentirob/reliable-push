@@ -225,6 +225,22 @@ class SuppressorIT extends PostgresTestBase {
         return id;
     }
 
+    /** {@code n} unmet rows of {@code app} due 30 s ago, in one statement. */
+    private void backlog(String app, int n) {
+        jdbc.sql("""
+                        insert into notification (id, app_id, user_id, policy, timeout_minutes, fallback_payload, state,
+                                                  created_at, due_at)
+                        select gen_random_uuid(), :app, 'u-' || g, 'NOT_DELIVERED', 10, '{}'::jsonb, 'PENDING',
+                               :created, :due
+                          from generate_series(1, :n) g
+                        """)
+                .param("app", app)
+                .param("n", n)
+                .param("created", Timestamp.from(now.minus(Duration.ofMinutes(10))))
+                .param("due", Timestamp.from(now.minusSeconds(30)))
+                .update();
+    }
+
     private void open(String app) {
         circuits.transition(new Circuit(app, CircuitState.OPEN, now, null, null, 0),
                 new CircuitEvent(0, app, now, "OPENED", "tracking_missing", 50L, null, null, null));
@@ -445,16 +461,7 @@ class SuppressorIT extends PostgresTestBase {
     @Test
     void chunksOf1000() {
         open(A);
-        jdbc.sql("""
-                        insert into notification (id, app_id, user_id, policy, timeout_minutes, fallback_payload, state,
-                                                  created_at, due_at)
-                        select gen_random_uuid(), 'supa', 'u-' || g, 'NOT_DELIVERED', 10, '{}'::jsonb, 'PENDING',
-                               :created, :due
-                          from generate_series(1, 2500) g
-                        """)
-                .param("created", Timestamp.from(now.minus(Duration.ofMinutes(10))))
-                .param("due", Timestamp.from(now.minusSeconds(30)))
-                .update();
+        backlog(A, 2500);
         CountingNotifications counting = new CountingNotifications(jdbc);
         Suppressor chunked = new Suppressor(counting, circuits, metrics, transactions, apps);
 
@@ -465,6 +472,50 @@ class SuppressorIT extends PostgresTestBase {
         assertThat(circuits.find(A).orElseThrow().suppressed()).isEqualTo(2500);
         assertThat(suppressedLogs(A)).singleElement()
                 .satisfies(e -> assertThat(EventCapture.data(e)).containsEntry("count", 2500L));
+    }
+
+    @Test
+    void resumeBetweenChunksStopsTheSuppression() {
+        open(A);
+        backlog(A, 2500);
+        CountingNotifications counting = new CountingNotifications(jdbc);
+        // an operator resumes the circuit right after the first chunk committed
+        RpMetrics resumeAfterFirstChunk = new RpMetrics(meters) {
+            private boolean resumed;
+
+            @Override
+            public void fallbackSuppressed(String appId, String reason, long count) {
+                super.fallbackSuppressed(appId, reason, count);
+                if (!resumed) {
+                    resumed = true;
+                    breaker.force(A, "ops-1");
+                }
+            }
+        };
+        Suppressor chunked = new Suppressor(counting, circuits, resumeAfterFirstChunk, transactions, apps);
+
+        chunked.suppress(Map.of(A, circuits.find(A).orElseThrow()), false, now);
+
+        // the pass stops at the next chunk: the circuit is no longer OPEN
+        assertThat(counting.chunks).containsExactly(1000);
+        assertThat(count(A, "FALLBACK_EXPIRED")).isEqualTo(1000);
+        assertThat(count(A, "PENDING")).isEqualTo(1500);
+        assertThat(circuits.find(A).orElseThrow().state()).isEqualTo(CircuitState.FORCED);
+        assertThat(suppressedLogs(A)).singleElement()
+                .satisfies(e -> assertThat(EventCapture.data(e)).containsEntry("count", 1000L));
+    }
+
+    @Test
+    void suspendedSuppressionDoesNotDependOnTheCircuit() {
+        breaker.force(A, "ops-1");
+        backlog(A, 1500);
+        CountingNotifications counting = new CountingNotifications(jdbc);
+        Suppressor chunked = new Suppressor(counting, circuits, metrics, transactions, apps);
+
+        chunked.suppress(Map.of(A, circuits.find(A).orElseThrow()), true, now);
+
+        assertThat(counting.chunks).containsExactly(1000, 500);
+        assertThat(count(A, "FALLBACK_EXPIRED")).isEqualTo(1500);
     }
 
     @Test

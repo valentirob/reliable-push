@@ -47,6 +47,20 @@ public class CircuitRepository {
     }
 
     /**
+     * Locks the app's circuit row ({@code FOR UPDATE}, until the caller's transaction ends) and returns its state; an
+     * app without a row is {@code CLOSED}. A transition of the same circuit ({@link #transition}, which locks the row
+     * too) waits for the caller, so the state cannot change before the caller commits. Must run inside a transaction.
+     */
+    public CircuitState lockState(String appId) {
+        return jdbc.sql("select state from fallback_circuit where app_id = :app for update")
+                .param("app", appId)
+                .query(String.class)
+                .optional()
+                .map(CircuitState::valueOf)
+                .orElse(CircuitState.CLOSED);
+    }
+
+    /**
      * Writes the circuit row and appends the event, in one transaction (joins the caller's, if any). The event's
      * {@code suppressed} (when not {@code null}: every transition but {@code OPENED}) is the count stored for the
      * finished period, read under the row lock inside this write, not the caller's snapshot: a suppressor that added to

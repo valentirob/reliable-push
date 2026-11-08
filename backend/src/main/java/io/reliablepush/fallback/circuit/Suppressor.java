@@ -19,7 +19,9 @@ import org.springframework.transaction.support.TransactionTemplate;
  * {@code suspended} every app is suppressed, whatever its circuit (also {@code FORCED}); otherwise each app whose
  * circuit is {@code OPEN}. Suppressing an app closes its claimable rows as {@code FALLBACK_EXPIRED} without a webhook
  * call, in chunks of {@value #CHUNK} rows, each chunk and its {@code fallback_circuit.suppressed} increment one
- * transaction; rows under a live lease are left to their worker. Per app with at least one row closed: one WARN
+ * transaction; rows under a live lease are left to their worker. For reason {@code circuit_open} each chunk first locks
+ * the app's circuit row and closes nothing once it is no longer {@code OPEN} (an operator resume or a close committed
+ * during a long pass stops it). Per app with at least one row closed: one WARN
  * {@code fallback.suppressed} ({@code rp.app_id}, {@code count}, {@code reason}), never one line per notification, and
  * the metrics {@code rp_fallback_suppressed_total} and {@code rp_fallback_total{outcome="expired"}}.
  */
@@ -75,6 +77,11 @@ public class Suppressor {
             int closed;
             do {
                 closed = transactions.execute(status -> {
+                    // an operator resume or a close committed since the evaluation ends the pass: the circuit row
+                    // stays locked until this chunk commits, so the state cannot change under it
+                    if (CIRCUIT_OPEN.equals(reason) && circuits.lockState(app) != CircuitState.OPEN) {
+                        return 0;
+                    }
                     int n = notifications.expireClaimable(app, now, CHUNK);
                     if (n > 0) {
                         circuits.addSuppressed(app, n, now);
