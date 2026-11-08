@@ -108,6 +108,15 @@ class StaticAdminPageTest {
     }
 
     @Test
+    void circuitBadgesNeverDelayTheOverviewAndAFailedResumeReloadsTheState() {
+        // a 503 of the circuit route must not hold back the tiles through the retry backoff
+        assertThat(read("js/views/overview.js")).contains("fallbackCircuits({ noRetry503: true })");
+        assertThat(read("js/api.js")).contains("export const fallbackCircuits = (opts) => request('/fallback-circuits', null, opts)");
+        // 409 (suspended or disabled meanwhile) or 404: the state shown is stale, so it is read again
+        assertThat(read("js/views/circuit.js")).contains("if (e.status === 409 || e.status === 404) loadCircuit();");
+    }
+
+    @Test
     void domHelperUsesTextContentOnly() {
         String dom = read("js/dom.js");
         assertThat(dom).contains("textContent");

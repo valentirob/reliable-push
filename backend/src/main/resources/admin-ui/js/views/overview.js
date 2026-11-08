@@ -65,8 +65,9 @@ export function render(root, ctx) {
     try {
       const [body, circuits] = await Promise.all([
         overview(appSel.value, winSel.value),
-        // the badges are extra: the overview still works if the circuit route fails
-        fallbackCircuits().catch((e) => (e.status === 401 ? Promise.reject(e) : null))]);
+        // the badges are extra: the overview still works if the circuit route fails, and a 503 is not retried (the
+        // backoff would hold back the tiles); the next refresh tries again
+        fallbackCircuits({ noRetry503: true }).catch((e) => (e.status === 401 ? Promise.reject(e) : null))]);
       if (dead || mine !== seq) return;
       clear(tiles);
       if (circuits && circuits.suspended) {

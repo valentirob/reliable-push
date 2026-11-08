@@ -77,6 +77,8 @@ export function render(root, ctx) {
       if (dead || e.status === 401) return;
       if (btn) btn.disabled = false;
       status.append(message('error', 'Could not resume: ' + e.message));
+      // 409 (suspended or disabled meanwhile) or 404 (no longer in scope): the state shown is stale
+      if (e.status === 409 || e.status === 404) loadCircuit();
     }
   }
 
@@ -95,13 +97,12 @@ export function render(root, ctx) {
     }
   }
 
-  more.addEventListener('click', () => loadEvents(false));
-  (async () => {
+  async function loadCircuit() {
     try {
       const body = await fallbackCircuits();
       if (dead) return;
       const c = body.items.find((i) => i.appId === app);
-      if (!c) { status.append(message('error', 'App not found.')); return; }
+      if (!c) { clear(actions); status.append(message('error', 'App not found.')); return; }
       showCircuit(body.enabled ? c : null);
       if (!body.enabled) state.textContent = 'Circuit breaker disabled';
       else if (body.suspended) status.append(message('error', 'Fallbacks suspended by configuration'));
@@ -109,7 +110,10 @@ export function render(root, ctx) {
       if (dead || e.status === 401) return;
       status.append(message('error', 'Could not load the circuit: ' + e.message));
     }
-  })();
+  }
+
+  more.addEventListener('click', () => loadEvents(false));
+  loadCircuit();
   loadEvents(true);
   return () => { dead = true; };
 }

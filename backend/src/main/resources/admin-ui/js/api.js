@@ -105,7 +105,7 @@ export const searchNotifications = (params) => request('/notifications', params)
 export const notification = (id) => request('/notifications/' + encodeURIComponent(id));
 export const payload = (id) => request('/notifications/' + encodeURIComponent(id) + '/payload');
 export const devices = (app, userId) => request('/devices', { app, userId });
-export const fallbackCircuits = () => request('/fallback-circuits');
+export const fallbackCircuits = (opts) => request('/fallback-circuits', null, opts);
 export const circuitEvents = (app, cursor) => request('/fallback-circuits/' + encodeURIComponent(app) + '/events', { cursor });
 // A resume answers 503 + Retry-After while a detector run holds the lock: the page shows it instead of retrying.
 export const resumeFallbacks = (app) =>
