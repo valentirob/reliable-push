@@ -10,7 +10,7 @@ webhook (`userId`, message, `trackingId`) that routes to SMS, email or any other
 channel. It runs as a sidecar: your existing backend keeps sending pushes itself
 and keeps the FCM/APNs credentials.
 
-![reliable-push at a glance: your backend, FCM/APNs, an iPhone and an Android phone with the tracking module, the reliable-push backend, the fallback clock and your SMS service](docs/images/reliable-push-at-a-glance.png)
+![reliable-push at a glance: your backend, FCM/APNs, an iPhone and an Android phone with the tracking module, the reliable-push backend, the fallback clock and your SMS service](docs/images/reliable-push-at-a-glance.svg)
 
 The backend also serves an **ops dashboard** at `/admin/` (delivery and read rates, the due backlog, daily trends,
 search, a timeline per notification and each app's fallback circuit), off until you configure an admin key:
@@ -31,20 +31,7 @@ they never change how your notifications are sent or shown:
   (2 s by default), and on Android, where the SDK posts tracked notifications itself (data messages, the market-standard
   model), any SDK error still ends in a posted notification. Errors stay inside the SDK and never reach the app.
 
-```mermaid
-flowchart TB
-  subgraph main["Your push path: unchanged"]
-    BE["Your backend"] -- "push with your FCM / APNs credentials" --> PS["FCM / APNs"]
-    PS --> DEV["Device: the notification is shown"]
-  end
-  subgraph side["reliable-push: the sidecar next to it"]
-    RP["reliable-push backend<br/>(tracking + fallback)"]
-    FR["Your fallback receiver<br/>(SMS, email, ...)"]
-    RP -. "③ signed webhook, only if unconfirmed in time" .-> FR
-  end
-  BE -. "① register with its trackingId, then send" .-> RP
-  DEV -. "② SDK reports DELIVERED / READ" .-> RP
-```
+![The sidecar principle](docs/diagrams/sidecar.svg)
 
 What happens when each part fails, the component diagrams and the full lifecycle: [docs/overview.md](docs/overview.md).
 To present the project, open [docs/presentation.html](docs/presentation.html) in a browser.

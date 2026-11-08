@@ -21,23 +21,7 @@ reliable-push calls when a push was not delivered or read in time; (3) embed the
 - [ ] **Catch `PayloadException`** and send that push untracked, as before.
 - [ ] **Untracked pushes stay exactly as they are:** no call to reliable-push, no `rp_tid`.
 
-```mermaid
-sequenceDiagram
-  autonumber
-  participant BE as Your backend + payload jar
-  participant RP as reliable-push
-  participant PP as FCM / APNs
-  participant SDK as Device SDK
-  participant FR as Your fallback receiver
-  Note over BE: tid = TrackingIds.newId(), payload built with tid
-  BE->>RP: POST /v1/notifications {trackingId: tid, userId, fallback} (timeout 1 s)
-  RP-->>BE: 201 PENDING or NO_DEVICE_REGISTERED (informative only)
-  BE->>PP: send the push with rp_tid = tid, always
-  PP->>SDK: push arrives
-  SDK->>RP: DELIVERED (then READ on tap)
-  Note over RP: due and policy unmet?
-  RP->>FR: signed webhook (SMS, email, ...)
-```
+![What your backend does, in order](diagrams/integration.svg)
 
 **Your push path does not depend on reliable-push.** Registration is a separate, bounded call and the push goes out
 whatever it answers. Tracking and the fallback need a registered notification **and** a user with a registered device

@@ -1,0 +1,500 @@
+# reliable-push at a glance: README, overview, presentation. Animated: the numbered steps play in order (CSS only, so
+# it plays where GitHub shows the SVG as an image); the PNG next to it is the static frame (reduced motion).
+slug = "glance"
+output = "../images/reliable-push-at-a-glance.svg"
+png = "../images/reliable-push-at-a-glance.png"
+title = "reliable-push at a glance"
+desc = "Your backend sends pushes through FCM and APNs to an iPhone and an Android phone, as today. For each tracked push it generates a tracking id with the payload jar, registers the push with the reliable-push backend with a 1 s timeout, and always sends the push with that id. On the iPhone the Notification Service Extension saves DELIVERED, sends it once and hands the notification back within 2 s; on Android the SDK turns a data message into a local notification after saving DELIVERED. The tracking module in each app reports DELIVERED when the push arrives and READ when it is tapped. If the policy is not met before the timeout, the reliable-push worker calls your signed fallback webhook, and your fallback service sends an SMS or an email. A per-app circuit breaker stops the fallbacks of an app whose delivery tracking is missing, so an outage does not turn into a storm of needless SMS. The ops dashboard shows each app's circuit. The numbered steps light up one after the other."
+width = 1600
+height = 1320
+animate = true
+step_seconds = 2
+css = [
+  ".glance .cur{animation:glance-cur 14s linear infinite}",
+  "@keyframes glance-cur{0%{transform:translateX(0)}57.1%{transform:translateX(560px)}71.4%{transform:translateX(640px)}100%{transform:translateX(640px)}}",
+  "@media (prefers-reduced-motion: reduce){.glance .cur{display:none}}",
+]
+
+[ramp]
+name = 20
+sub = 14
+tag = 11
+label = 14
+legend = 15
+body = 15
+title = 40
+
+[legend]
+input = "Yours"
+external = "Google and Apple"
+focal = "Tracking module, in your app"
+backend = "reliable-push"
+store = "Data store"
+alert = "Fallback path"
+push = "Your push path (unchanged)"
+track = "reliable-push tracking (sidecar)"
+fallback = "Fallback"
+flow = "Data"
+dashed = "Reads"
+
+# ------------------------------------------------------------------ header
+[[shape]]
+kind = "text"
+class = "ti"
+x = 60
+y = 76
+text = "reliable-push at a glance"
+
+[[shape]]
+kind = "text"
+x = 60
+y = 112
+font_size = 18
+fill = "#5b6478"
+text = "A sidecar: your backend keeps sending pushes (plus a payload jar and one register call). reliable-push only tracks them and triggers a fallback."
+
+# ------------------------------------------------------------------ phones
+[[shape]]
+kind = "rect"
+x = 1060
+y = 152
+width = 240
+height = 472
+rx = 28
+fill = "#ffffff"
+stroke = "#172033"
+stroke_width = 2.5
+
+[[shape]]
+kind = "rect"
+x = 1140
+y = 164
+width = 80
+height = 12
+rx = 6
+fill = "#172033"
+
+[[shape]]
+kind = "text"
+x = 1180
+y = 204
+font_size = 18
+font_weight = 700
+fill = "#172033"
+text_anchor = "middle"
+text = "iPhone · iOS 15+"
+
+[[shape]]
+kind = "rect"
+x = 1320
+y = 152
+width = 240
+height = 472
+rx = 28
+fill = "#ffffff"
+stroke = "#172033"
+stroke_width = 2.5
+
+[[shape]]
+kind = "circle"
+cx = 1440
+cy = 170
+r = 6
+fill = "#172033"
+
+[[shape]]
+kind = "text"
+x = 1440
+y = 204
+font_size = 18
+font_weight = 700
+fill = "#172033"
+text_anchor = "middle"
+text = "Android 8+"
+
+# ------------------------------------------------------------------ notes
+[[shape]]
+kind = "text"
+layer = "front"
+x = 616
+y = 680
+font_size = 14
+fill = "#0b7268"
+text_anchor = "middle"
+text = "trackingId, userId, policy, timeout, fallback · 1 s timeout"
+
+[[shape]]
+kind = "text"
+layer = "front"
+x = 562
+y = 860
+font_size = 14
+fill = "#b42318"
+text_anchor = "middle"
+text = "HMAC-signed\nonly if not met"
+
+[[shape]]
+kind = "text"
+layer = "front"
+x = 1540
+y = 740
+font_size = 15
+fill = "#0b7268"
+text_anchor = "end"
+text = "tracks every push, never sends one"
+
+[[shape]]
+kind = "text"
+layer = "front"
+x = 632
+y = 952
+font_size = 14
+fill = "#5b6478"
+text = "checks due pushes every 5 s"
+
+# ------------------------------------------------------------------ zones
+[[zone]]
+x = 600
+y = 704
+w = 960
+h = 284
+tone = "accent"
+label = "reliable-push backend"
+
+[[zone]]
+x = 60
+y = 1104
+w = 1500
+h = 200
+tone = "plain"
+label = "When does the fallback fire?"
+
+# ------------------------------------------------------------------ nodes
+[[node]]
+id = "be"
+x = 60
+y = 180
+w = 440
+h = 240
+kind = "input"
+tag = "yours"
+name = "Your backend"
+sub = "push sender, keeps its FCM / APNs keys"
+bullets = ["payload jar: tracking id + payload", "registers the push first, 1 s timeout", "always sends it with rp_tid", "untracked pushes: unchanged"]
+
+[[node]]
+id = "ps"
+x = 640
+y = 228
+w = 320
+h = 144
+kind = "external"
+tag = "cloud"
+name = "FCM / APNs"
+sub = ["Google and Apple push services", "APNs → iPhone · FCM → Android"]
+
+[[node]]
+id = "iosapp"
+x = 1076
+y = 216
+w = 208
+h = 136
+kind = "input"
+tag = "app"
+name = "Your iOS app"
+sub = "ReliablePush SDK"
+bullets = ["ensureRegistered", "READ when tapped"]
+
+[[node]]
+id = "iostrack"
+x = 1076
+y = 368
+w = 208
+h = 240
+kind = "focal"
+tag = "extension"
+name = "Tracking module"
+sub = "Service Extension"
+bullets = ["saves DELIVERED,", "sends it once,", "shows the push", "within 2 s, also", "with the app closed", "SDK error: shown now"]
+
+[[node]]
+id = "andapp"
+x = 1336
+y = 216
+w = 208
+h = 136
+kind = "input"
+tag = "app"
+name = "Your Android app"
+sub = "ReliablePush SDK"
+bullets = ["ensureRegistered", "READ when tapped"]
+
+[[node]]
+id = "andtrack"
+x = 1336
+y = 368
+w = 208
+h = 240
+kind = "focal"
+tag = "hook"
+name = "Tracking module"
+sub = "messaging service"
+bullets = ["data message:", "saves DELIVERED,", "posts the local", "notification, also", "if the app is killed", "SDK error: minimal"]
+
+[[node]]
+id = "cb"
+x = 624
+y = 760
+w = 192
+h = 128
+kind = "alert"
+tag = "guard"
+name = "Circuit breaker"
+bullets = ["per app: tracking", "missing → stops", "the webhooks"]
+
+[[node]]
+id = "w"
+x = 864
+y = 760
+w = 192
+h = 128
+kind = "backend"
+tag = "worker"
+name = "Worker"
+bullets = ["watches the clock,", "calls the webhook"]
+
+[[node]]
+id = "api"
+x = 1088
+y = 760
+w = 232
+h = 128
+kind = "backend"
+tag = "api"
+name = "API"
+bullets = ["registers pushes,", "devices and events;", "no device: no fallback"]
+
+[[node]]
+id = "dash"
+x = 1344
+y = 760
+w = 192
+h = 128
+kind = "backend"
+tag = "admin"
+name = "Dashboard"
+sub = "/admin"
+bullets = ["ops view,", "circuits"]
+
+[[node]]
+id = "db"
+x = 864
+y = 908
+w = 192
+h = 60
+kind = "store"
+name = "PostgreSQL"
+
+[[node]]
+id = "fb"
+x = 60
+y = 728
+w = 440
+h = 200
+kind = "alert"
+tag = "yours"
+name = "Your fallback service"
+bullets = ["gets userId, trackingId and", "the fallback you registered", "checks the signature", "sends the SMS or the email"]
+
+[[node]]
+id = "sms"
+x = 60
+y = 1004
+w = 440
+h = 64
+kind = "input"
+tag = "user"
+name = "The user gets an SMS or an email"
+
+# ------------------------------------------------------------------ edges (steps in order)
+[[edge]]
+points = [[180, 420], [180, 652], [1112, 652], [1112, 760]]
+style = "track"
+label = "REGISTER THE PUSH"
+step = 1
+label_seg = 1
+label_at = 0.47
+
+[[edge]]
+points = [[500, 300], [640, 300]]
+style = "push"
+label = "SEND"
+step = 2
+
+[[edge]]
+points = [[960, 300], [1076, 300]]
+style = "push"
+label = "DELIVER"
+step = 3
+
+[[edge]]
+points = [[900, 228], [900, 124], [1500, 124], [1500, 216]]
+style = "push"
+label = "DELIVER (ANDROID: DATA-ONLY)"
+step = 3
+label_seg = 0
+label_side = "left"
+
+[[edge]]
+points = [[1180, 608], [1180, 760]]
+style = "track"
+step = 4
+label_side = "on"
+label_at = 0.3
+
+[[edge]]
+points = [[1440, 608], [1440, 680], [1272, 680], [1272, 760]]
+style = "track"
+label = "DELIVERED · READ"
+step = 4
+label_seg = 1
+
+[[edge]]
+points = [[864, 824], [816, 824]]
+style = "fallback"
+step = 5
+no_badge = true
+
+[[edge]]
+points = [[624, 824], [500, 824]]
+style = "fallback"
+label = "WEBHOOK"
+step = 5
+
+[[edge]]
+points = [[280, 928], [280, 1004]]
+style = "fallback"
+label = "SMS / EMAIL"
+step = 6
+
+[[edge]]
+points = [[960, 888], [960, 908]]
+
+[[edge]]
+points = [[1204, 888], [1204, 932], [1056, 932]]
+
+[[edge]]
+points = [[1440, 888], [1440, 952], [1056, 952]]
+style = "dashed"
+
+# ------------------------------------------------------------------ timeline
+[[shape]]
+kind = "text"
+x = 1520
+y = 1140
+font_size = 14
+fill = "#5b6478"
+text_anchor = "end"
+text = "example: timeout 10 min, trigger window 20 min (the default)"
+
+[[shape]]
+kind = "rect"
+x = 120
+y = 1196
+width = 560
+height = 16
+fill = "rgba(47,85,150,0.18)"
+
+[[shape]]
+kind = "rect"
+x = 680
+y = 1196
+width = 560
+height = 16
+fill = "rgba(180,35,24,0.18)"
+
+[[shape]]
+kind = "rect"
+x = 1240
+y = 1196
+width = 260
+height = 16
+fill = "rgba(23,32,51,0.08)"
+
+[[shape]]
+kind = "path"
+d = "M 120 1184 V 1224 M 680 1184 V 1224 M 1240 1184 V 1224"
+stroke = "#172033"
+stroke_width = 2
+
+[[shape]]
+kind = "text"
+x = 120
+y = 1174
+font_size = 16
+font_weight = 700
+fill = "#172033"
+text = "t0 · push registered ①"
+
+[[shape]]
+kind = "text"
+x = 680
+y = 1174
+font_size = 16
+font_weight = 700
+fill = "#172033"
+text = "t0 + timeout · policy checked"
+
+[[shape]]
+kind = "text"
+x = 1240
+y = 1174
+font_size = 16
+font_weight = 700
+fill = "#172033"
+text = "+ trigger window"
+
+[[shape]]
+kind = "text"
+x = 400
+y = 1240
+font_size = 15
+fill = "#172033"
+text_anchor = "middle"
+text = "waiting for DELIVERED / READ ④\nevent in time: done, no fallback"
+
+[[shape]]
+kind = "text"
+x = 960
+y = 1240
+font_size = 15
+fill = "#b42318"
+text_anchor = "middle"
+text = "policy not met: webhook ⑤, retried after 1, 2, 4, 8 min\ncircuit open (tracking missing): expired, no call"
+
+[[shape]]
+kind = "text"
+x = 1370
+y = 1240
+font_size = 15
+fill = "#172033"
+text_anchor = "middle"
+text = "too late\nexpired, no call"
+
+[[shape]]
+kind = "text"
+x = 810
+y = 1292
+font_size = 14
+fill = "#5b6478"
+text_anchor = "middle"
+text = "Policy NOT_DELIVERED is met by DELIVERED or READ · NOT_READ only by READ · policy and timeout never reach the device"
+
+[[shape]]
+kind = "path"
+class = "cur"
+layer = "front"
+d = "M 120 1184 V 1224"
+stroke = "#0b7268"
+stroke_width = 4
+stroke_linecap = "round"

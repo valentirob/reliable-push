@@ -1,0 +1,163 @@
+# Notification states: overview §3 and architecture.md.
+title = "Notification states"
+desc = "A registered notification starts PENDING, or closes at once as NO_DEVICE_REGISTERED; DELIVERED and READ events move it forward; the sender can cancel it; when it is due with its policy unmet the worker dispatches the webhook, retrying with backoff, and it ends FALLBACK_TRIGGERED, FALLBACK_FAILED or FALLBACK_EXPIRED."
+width = 960
+height = 520
+
+[legend]
+skip = ["state"]
+final = "Final state"
+flow = "Transition"
+
+[[zone]]
+x = 144
+y = 72
+w = 496
+h = 104
+tone = "dashed"
+label = "Pending or delivered"
+
+[[shape]]
+kind = "circle"
+cx = 72
+cy = 128
+r = 7
+fill = "#172033"
+
+[[node]]
+id = "pending"
+x = 168
+y = 104
+w = 176
+h = 48
+kind = "state"
+name = "PENDING"
+
+[[node]]
+id = "delivered"
+x = 440
+y = 104
+w = 176
+h = 48
+kind = "state"
+name = "DELIVERED"
+
+[[node]]
+id = "read"
+x = 736
+y = 104
+w = 176
+h = 48
+kind = "final"
+name = "READ"
+
+[[node]]
+id = "nodevice"
+x = 40
+y = 440
+w = 216
+h = 48
+kind = "final"
+name = "NO_DEVICE_REGISTERED"
+
+[[node]]
+id = "cancelled"
+x = 168
+y = 232
+w = 176
+h = 48
+kind = "final"
+name = "CANCELLED"
+
+[[node]]
+id = "dispatching"
+x = 440
+y = 232
+w = 176
+h = 48
+kind = "state"
+name = "DISPATCHING"
+
+[[node]]
+id = "triggered"
+x = 736
+y = 232
+w = 176
+h = 48
+kind = "final"
+name = "FALLBACK_TRIGGERED"
+
+[[node]]
+id = "failed"
+x = 736
+y = 360
+w = 176
+h = 48
+kind = "final"
+name = "FALLBACK_FAILED"
+
+[[node]]
+id = "expired"
+x = 440
+y = 360
+w = 176
+h = 48
+kind = "final"
+name = "FALLBACK_EXPIRED"
+
+[[edge]]
+points = [[80, 128], [168, 128]]
+label = "ACTIVE DEVICE"
+
+[[edge]]
+points = [[72, 136], [72, 440]]
+label = "NO DEVICE"
+label_at = 0.5
+
+[[edge]]
+points = [[344, 128], [440, 128]]
+label = "DELIVERED"
+
+[[edge]]
+points = [[616, 128], [736, 128]]
+label = "READ"
+
+[[edge]]
+points = [[320, 104], [320, 48], [824, 48], [824, 104]]
+label = "READ"
+label_seg = 1
+
+[[edge]]
+points = [[232, 176], [232, 232]]
+label = "SENDER DELETE"
+
+[[edge]]
+points = [[528, 176], [528, 232]]
+label = "DUE, POLICY UNMET"
+
+[[edge]]
+points = [[376, 176], [376, 384], [440, 384]]
+label = "AFTER WINDOW\nOR CIRCUIT OPEN"
+label_seg = 0
+label_side = "left"
+label_at = 0.72
+
+[[edge]]
+points = [[616, 248], [736, 248]]
+label = "WEBHOOK 2XX"
+
+[[edge]]
+points = [[616, 268], [676, 268], [676, 384], [736, 384]]
+label = "FINAL 4XX\nOR EXHAUSTED"
+label_seg = 1
+
+[[edge]]
+points = [[504, 280], [504, 360]]
+label = "TOO LATE / OPEN"
+label_side = "left"
+
+[[edge]]
+points = [[560, 280], [560, 316], [600, 316], [600, 280]]
+label = "RETRY, BACKOFF"
+label_seg = 1
+label_side = "below"

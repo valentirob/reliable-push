@@ -20,6 +20,17 @@ All notable changes to this project are documented here. Versions follow [Semant
   Antigravity (`.agents/hooks.json`) run the check at session start and on every prompt or model call; CI runs the
   scripts' tests (`scripts/tests/waits-test.sh`) on Linux.
 
+### Documentation
+
+- The 17 Mermaid diagrams are replaced by 15 SVG diagrams in the style of the diagram-design plugin, with the
+  reliable-push palette, generated from TOML sources in `docs/diagrams/src/` by `scripts/diagrams.py` (Python standard
+  library), which also enforces the layout rules (4px grid, orthogonal connectors, no arrow behind a box, labels on a
+  mask, text inside its box, contrast). The Android SDK diagram is split in two (receiving a push; registration and
+  events). CI job `docs-diagrams.yml` checks that the SVGs match their sources.
+- The at-a-glance picture is redrawn in the same style and animated: the numbered steps light up in order and a cursor
+  shows the fallback timeline (CSS only, so it plays on GitHub and in the presentation; still for reduced motion). The
+  PNG is its static frame; the 0.2.0 picture is kept in `docs/images/backup/`.
+
 ## 0.2.0 — 2026-11-08
 
 Feature release: the ops dashboard, the per-app fallback circuit breaker and the sidecar integration revision with the

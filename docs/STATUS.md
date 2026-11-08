@@ -8,6 +8,26 @@ Everything left after `v0.1.0` is in [TODO.md](TODO.md): each item says why it i
 unblocks it. Agents: remind the maintainer of its section 1 (real APNs and the locked-device check, real FCM, Maven
 Central) at the start of a session.
 
+## 2026-11-09 (21) — Claude Code — diagrams with diagram-design, animated at-a-glance (`feature/diagram-design`)
+
+- **Asked by the maintainer:** replace Mermaid with the diagram-design plugin, back up the at-a-glance SVG, animate the
+  execution flow. Choices made with the maintainer: CSS-only animation inside the SVG (plays on GitHub; the plugin
+  itself keeps step animations for HTML), the reliable-push palette instead of the plugin's default, and a short
+  repository rule instead of copying the plugin into the repository (Antigravity has no such plugin).
+- **Done:** `scripts/diagrams.py` (TOML → SVG, layout checks, `--check`, `--png`, `--html`), 15 sources in
+  `docs/diagrams/src/` replacing the 17 Mermaid blocks (README, overview, architecture, integration guide; README and
+  overview §1 share one, the two state diagrams are merged, Android is split in two), the animated at-a-glance picture
+  from `glance.toml` with its static PNG, the 0.2.0 picture in `docs/images/backup/`, `docs/diagrams/README.md`, rule
+  `docs-sync`, AGENTS.md, CLAUDE.md, CONTRIBUTING, getting-started, CI `docs-diagrams.yml`, generator tests.
+- **Fidelity:** what the redraw merged or dropped against the Mermaid: the three controllers of the backend diagram are
+  one box with three lines; the state transitions shared by PENDING and DELIVERED come out of a group (the precise list
+  is now in `architecture.md`); the iOS "Keychain read by the extension" arrow is a line in the Keychain box; the
+  dashboard's three API-to-database arrows are one; the harness's worker-a and worker-b are one box.
+- **State:** `python3 scripts/diagrams.py --check` passes; 11 generator tests pass; the plugin's `self_check.py`
+  passes on every HTML preview; the animation runs in Chrome with the SVG shown as an image. Not checked: Safari and
+  Firefox, and how GitHub's image proxy serves the animated SVG (it should: CSS animations in SVG images are standard).
+- **Next:** unchanged from entry 19 (open questions 4.11, 1.3, 5.1).
+
 ## 2026-11-08 (20) — Claude Code — bounded waits and the stuck-wait check (`feature/bounded-waits`)
 
 - **Why:** a hand-written wait loop from cycle 2 (`until grep … t8-e2e.log; do sleep 10; done`) ran for more than three

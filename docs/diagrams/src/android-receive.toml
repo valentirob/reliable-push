@@ -1,0 +1,176 @@
+# Android SDK, receiving a tracked push: overview §7.
+title = "Android SDK: receiving a tracked push"
+desc = "An FCM data-only message reaches your FirebaseMessagingService, which hands it to ReliablePushMessaging; without rp_tid your own handling continues; a tracked message becomes a notification built with your customizer, gated on its final channel; if the system would not show it nothing is recorded, otherwise DELIVERED is persisted on disk, the local notification is posted and one event POST is sent; any SDK error still posts a minimal notification."
+width = 960
+height = 512
+
+[legend]
+input = "Your app"
+optional = "Fallback inside the SDK"
+
+[[node]]
+id = "fcm"
+x = 40
+y = 40
+w = 192
+h = 72
+kind = "external"
+tag = "cloud"
+name = "FCM data message"
+sub = ["data-only, high priority", "rp_tid, title, body"]
+
+[[node]]
+id = "ms"
+x = 288
+y = 44
+w = 192
+h = 64
+kind = "input"
+tag = "yours"
+name = "Messaging service"
+sub = "FirebaseMessagingService"
+
+[[node]]
+id = "h"
+x = 536
+y = 44
+w = 224
+h = 64
+kind = "focal"
+tag = "sdk"
+name = "onMessageReceived"
+sub = "ReliablePushMessaging"
+
+[[node]]
+id = "own"
+x = 800
+y = 176
+w = 120
+h = 64
+kind = "input"
+tag = "yours"
+name = "Own handling"
+sub = "returns false"
+
+[[node]]
+id = "min"
+x = 288
+y = 176
+w = 192
+h = 64
+kind = "optional"
+tag = "sdk"
+name = "Minimal notification"
+sub = "posted anyway"
+
+[[node]]
+id = "b"
+x = 536
+y = 176
+w = 224
+h = 64
+kind = "backend"
+tag = "sdk"
+name = "Build the notification"
+sub = "your customizer"
+
+[[node]]
+id = "g"
+x = 536
+y = 304
+w = 224
+h = 72
+kind = "backend"
+tag = "gate"
+name = "Final channel open?"
+sub = ["enabled, permitted,", "channel not blocked"]
+
+[[node]]
+id = "sys"
+x = 288
+y = 304
+w = 192
+h = 72
+kind = "final"
+tag = "system"
+name = "Nothing recorded"
+sub = ["returns false,", "the fallback decides"]
+
+[[node]]
+id = "q"
+x = 536
+y = 432
+w = 224
+h = 64
+kind = "store"
+tag = "disk"
+name = "DELIVERED persisted"
+sub = "before anything else"
+
+[[node]]
+id = "post"
+x = 288
+y = 432
+w = 192
+h = 64
+kind = "backend"
+tag = "sdk"
+name = "Notification posted"
+sub = "local notification"
+
+[[node]]
+id = "s"
+x = 40
+y = 432
+w = 192
+h = 64
+kind = "backend"
+tag = "sdk"
+name = "One POST /v1/events"
+sub = "SDK thread, no renewal"
+
+[[edge]]
+points = [[232, 76], [288, 76]]
+style = "push"
+
+[[edge]]
+points = [[480, 76], [536, 76]]
+style = "push"
+
+[[edge]]
+points = [[760, 68], [860, 68], [860, 176]]
+label = "NO RP_TID"
+label_seg = 1
+label_side = "left"
+
+[[edge]]
+points = [[648, 108], [648, 176]]
+style = "track"
+label = "TRACKED"
+
+[[edge]]
+points = [[568, 108], [568, 140], [384, 140], [384, 176]]
+style = "dashed"
+label = "ANY SDK ERROR"
+label_seg = 1
+
+[[edge]]
+points = [[648, 240], [648, 304]]
+style = "track"
+
+[[edge]]
+points = [[536, 340], [480, 340]]
+label = "NO"
+
+[[edge]]
+points = [[648, 376], [648, 432]]
+style = "track"
+label = "YES"
+
+[[edge]]
+points = [[536, 464], [480, 464]]
+style = "track"
+
+[[edge]]
+points = [[288, 464], [232, 464]]
+style = "track"

@@ -1,0 +1,50 @@
+name: Docs diagrams
+
+# The documentation diagrams are generated from docs/diagrams/src by scripts/diagrams.py (docs/diagrams/README.md):
+# this job fails when a committed SVG is stale or a source breaks a layout rule, and runs the generator's tests.
+# Python standard library only, no tools to install.
+
+on:
+  push:
+    branches:
+      - develop
+      - main
+      - 'release/**'
+      - 'hotfix/**'
+    paths:
+      - 'docs/diagrams/**'
+      - 'docs/images/reliable-push-at-a-glance.*'
+      - 'scripts/diagrams.py'
+      - 'scripts/tests/test_diagrams.py'
+      - '.github/workflows/docs-diagrams.yml'
+  pull_request:
+    paths:
+      - 'docs/diagrams/**'
+      - 'docs/images/reliable-push-at-a-glance.*'
+      - 'scripts/diagrams.py'
+      - 'scripts/tests/test_diagrams.py'
+      - '.github/workflows/docs-diagrams.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  check:
+    name: Diagrams in sync with their sources
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Test the generator
+        run: python3 -m unittest discover -s scripts/tests -p 'test_diagrams.py'
+
+      - name: Check the diagrams
+        run: python3 scripts/diagrams.py --check

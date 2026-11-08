@@ -1,0 +1,193 @@
+# Android SDK, registration and events: overview §7.
+title = "Android SDK: registration and events"
+desc = "ensureRegistered returns at once and, only when needed, registers the device with an ID token or refreshes its token, kept encrypted with the Android Keystore; DELIVERED and READ events go out one at a time from the SDK thread, offline and server errors are retried by JobScheduler, and a 401 stores renewalNeeded and keeps the events for the next ensureRegistered."
+width = 960
+height = 568
+
+[legend]
+input = "Your app"
+alert = "Renewal needed"
+fallback = "401 Unauthorized"
+
+[[zone]]
+x = 24
+y = 32
+w = 912
+h = 128
+tone = "plain"
+label = "Registration"
+
+[[zone]]
+x = 24
+y = 200
+w = 912
+h = 352
+tone = "plain"
+label = "Events"
+
+[[node]]
+id = "start"
+x = 40
+y = 64
+w = 168
+h = 64
+kind = "input"
+tag = "yours"
+name = "App start"
+sub = ["foreground, login"]
+
+[[node]]
+id = "er"
+x = 256
+y = 56
+w = 208
+h = 80
+kind = "focal"
+tag = "sdk"
+name = "ensureRegistered"
+sub = ["returns at once; registers", "or refreshes only", "when needed"]
+
+[[node]]
+id = "api"
+x = 544
+y = 64
+w = 160
+h = 64
+kind = "backend"
+tag = "api"
+name = "reliable-push"
+
+[[node]]
+id = "ts"
+x = 784
+y = 64
+w = 136
+h = 64
+kind = "store"
+tag = "disk"
+name = "TokenStore"
+sub = "Android Keystore"
+
+[[node]]
+id = "tap"
+x = 40
+y = 232
+w = 168
+h = 64
+kind = "input"
+tag = "user"
+name = "User taps"
+sub = "the notification"
+
+[[node]]
+id = "to"
+x = 256
+y = 232
+w = 208
+h = 64
+kind = "backend"
+tag = "sdk"
+name = "trackOpen(intent)"
+
+[[node]]
+id = "q2"
+x = 544
+y = 232
+w = 160
+h = 64
+kind = "store"
+tag = "disk"
+name = "READ queued"
+
+[[node]]
+id = "dlv"
+x = 256
+y = 360
+w = 208
+h = 64
+kind = "store"
+tag = "disk"
+name = "Push received"
+sub = "DELIVERED persisted"
+
+[[node]]
+id = "s"
+x = 544
+y = 360
+w = 160
+h = 64
+kind = "focal"
+tag = "sdk"
+name = "POST /v1/events"
+sub = "one at a time"
+
+[[node]]
+id = "j"
+x = 544
+y = 472
+w = 160
+h = 56
+kind = "backend"
+tag = "android"
+name = "JobScheduler"
+sub = "retry"
+
+[[node]]
+id = "rn"
+x = 784
+y = 360
+w = 136
+h = 72
+kind = "alert"
+tag = "401"
+name = "renewalNeeded"
+sub = ["events kept for", "ensureRegistered"]
+
+[[edge]]
+points = [[208, 96], [256, 96]]
+
+[[edge]]
+points = [[464, 96], [544, 96]]
+style = "track"
+label = "/v1/devices"
+
+[[edge]]
+points = [[704, 96], [784, 96]]
+style = "track"
+label = "DEVICE JWT"
+
+[[edge]]
+points = [[208, 264], [256, 264]]
+
+[[edge]]
+points = [[464, 264], [544, 264]]
+label = "READ"
+
+[[edge]]
+points = [[624, 296], [624, 360]]
+
+[[edge]]
+points = [[464, 392], [544, 392]]
+label = "DELIVERED"
+
+[[edge]]
+points = [[704, 376], [736, 376], [736, 144], [680, 144], [680, 128]]
+style = "track"
+label = "/v1/events"
+label_seg = 1
+label_at = 0.45
+
+[[edge]]
+points = [[600, 424], [600, 472]]
+style = "dashed"
+label = "OFFLINE, 5XX, 429"
+label_side = "left"
+
+[[edge]]
+points = [[648, 472], [648, 424]]
+style = "dashed"
+
+[[edge]]
+points = [[704, 408], [784, 408]]
+style = "fallback"
+label = "401"

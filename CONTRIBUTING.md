@@ -46,10 +46,11 @@ The roles are defined in `.agents/skills/review-loop/SKILL.md`.
 ## Docs, diagrams and presentation
 
 Every change updates, in the same branch, the documentation it makes stale:
-the guides in `docs/`, the README, the Mermaid diagrams in `docs/overview.md`,
-the at-a-glance picture (`docs/images/reliable-push-at-a-glance.svg`, with its
-PNG re-rendered), `docs/presentation.html` and `CHANGELOG.md`. Full rule:
-`.agents/rules/docs-sync.md`.
+the guides in `docs/`, the README, the diagrams (TOML sources in
+`docs/diagrams/src/`, rebuilt with `python3 scripts/diagrams.py`; the at-a-glance
+picture and its PNG come from `glance.toml`), `docs/presentation.html` and
+`CHANGELOG.md`. Full rule: `.agents/rules/docs-sync.md`; diagram style and
+source format: `docs/diagrams/README.md`.
 
 ## End-to-end tests run locally
 

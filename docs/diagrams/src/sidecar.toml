@@ -1,0 +1,113 @@
+# The sidecar principle: README "How it works" and overview §1.
+title = "The sidecar principle"
+desc = "Your backend keeps sending pushes through FCM and APNs as today; it also registers each tracked push with reliable-push, the app's SDK reports DELIVERED and READ, and only when a push is not confirmed in time reliable-push calls your fallback receiver with a signed webhook."
+width = 960
+height = 420
+
+[legend]
+input = "Your system"
+alert = "Your fallback receiver"
+
+[[zone]]
+x = 40
+y = 48
+w = 880
+h = 140
+tone = "link"
+label = "Your push path: unchanged"
+
+[[zone]]
+x = 40
+y = 264
+w = 880
+h = 140
+tone = "accent"
+label = "reliable-push: the sidecar next to it"
+
+[[node]]
+id = "be"
+x = 64
+y = 88
+w = 176
+h = 64
+kind = "input"
+tag = "yours"
+name = "Your backend"
+sub = "your FCM / APNs keys"
+
+[[node]]
+id = "ps"
+x = 392
+y = 88
+w = 176
+h = 64
+kind = "external"
+tag = "cloud"
+name = "FCM / APNs"
+sub = "Google, Apple"
+
+[[node]]
+id = "dev"
+x = 720
+y = 88
+w = 176
+h = 64
+kind = "input"
+tag = "device"
+name = "Your app + SDK"
+sub = "notification shown"
+
+[[node]]
+id = "rp"
+x = 392
+y = 304
+w = 176
+h = 64
+kind = "focal"
+tag = "sidecar"
+name = "reliable-push"
+sub = "tracking + fallback"
+
+[[node]]
+id = "fr"
+x = 720
+y = 304
+w = 176
+h = 64
+kind = "alert"
+tag = "yours"
+name = "Fallback receiver"
+sub = "SMS, email, ..."
+
+[[edge]]
+points = [[240, 120], [392, 120]]
+style = "push"
+label = "PUSH"
+
+[[edge]]
+points = [[568, 120], [720, 120]]
+style = "push"
+label = "DELIVER"
+
+[[edge]]
+points = [[152, 152], [152, 336], [392, 336]]
+style = "track"
+dashed = true
+label = "REGISTER (1 S)"
+step = 1
+label_seg = 1
+
+[[edge]]
+points = [[808, 152], [808, 228], [520, 228], [520, 304]]
+style = "track"
+dashed = true
+label = "DELIVERED / READ"
+step = 2
+label_seg = 1
+
+[[edge]]
+points = [[568, 336], [720, 336]]
+style = "fallback"
+label = "IF UNCONFIRMED"
+step = 3
+label_side = "below"
