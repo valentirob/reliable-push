@@ -137,6 +137,33 @@ class ApnsPayloadsTest {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
+    void decorateMapVariantReturnsADeeplyUnmodifiableMapNotSharingTheInput() {
+        Map<String, Object> alert = new LinkedHashMap<String, Object>();
+        alert.put("title", "T");
+        Map<String, Object> aps = new LinkedHashMap<String, Object>();
+        aps.put("alert", alert);
+        java.util.List<Object> list = new java.util.ArrayList<Object>(Arrays.asList("a", alert));
+        Map<String, Object> in = new LinkedHashMap<String, Object>();
+        in.put("aps", aps);
+        in.put("list", list);
+
+        Map<String, Object> out = ApnsPayloads.decorate(in, TID);
+
+        assertThatThrownBy(() -> out.put("x", 1)).isInstanceOf(UnsupportedOperationException.class);
+        Map<String, Object> outAps = (Map<String, Object>) out.get("aps");
+        assertThatThrownBy(() -> outAps.put("x", 1)).isInstanceOf(UnsupportedOperationException.class);
+        Map<String, Object> outAlert = (Map<String, Object>) outAps.get("alert");
+        assertThatThrownBy(() -> outAlert.put("x", 1)).isInstanceOf(UnsupportedOperationException.class);
+        java.util.List<Object> outList = (java.util.List<Object>) out.get("list");
+        assertThatThrownBy(() -> outList.add("x")).isInstanceOf(UnsupportedOperationException.class);
+        alert.put("title", "changed");
+        list.add("later");
+        assertThat(outAlert.get("title")).isEqualTo("T");
+        assertThat(outList).hasSize(2);
+    }
+
+    @Test
     void decorateRejectsPayloadsWithoutAVisibleAlert() {
         assertCode(() -> ApnsPayloads.decorate("{\"aps\":{\"content-available\":1}}", TID), Code.APNS_NO_ALERT);
         assertCode(() -> ApnsPayloads.decorate("{}", TID), Code.APNS_NO_ALERT);

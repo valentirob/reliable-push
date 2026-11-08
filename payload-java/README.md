@@ -97,6 +97,10 @@ try {
 | `FCM_TOO_LARGE` | the FCM `data` map is above 4,096 bytes: the UTF-8 length of its compact JSON serialization, so a slightly conservative bound; the rest of the message is not counted |
 | `INVALID_JSON` | `decorate`: the input is not a JSON object of the expected shape (also: duplicate keys, nesting beyond 64 levels) |
 
+A localized alert (only `loc-key` / `title-loc-key`, no literal `title` or `body`) is rejected with `APNS_NO_ALERT`:
+the Notification Service Extension cannot report it as seen, so send that push untracked (no `rp_tid`).
+The map variant `ApnsPayloads.decorate(Map, tid)` returns a deeply unmodifiable copy.
+
 ## Output format
 
 Compact JSON, keys in input order, reliable-push keys appended, numbers as given, strings escaped per RFC 8259 and

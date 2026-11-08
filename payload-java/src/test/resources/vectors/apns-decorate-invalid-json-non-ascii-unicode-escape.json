@@ -1,0 +1,12 @@
+{
+  "name": "apns-decorate-invalid-json-non-ascii-unicode-escape",
+  "description": "\\u escapes accept only ASCII hex digits: Arabic-Indic digits are not hex digits",
+  "operation": "apns.decorate",
+  "input": {
+    "trackingId": "6f1c2b9e-5d1a-4c55-9a38-0c1f3a7d9e11",
+    "apnsJson": "{\"aps\":{\"alert\":\"\\u\u0663\u0663\u0663\u0663\"}}"
+  },
+  "expect": {
+    "error": "INVALID_JSON"
+  }
+}

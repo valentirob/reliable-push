@@ -254,7 +254,7 @@ public final class Json {
                         }
                         int cp = 0;
                         for (int i = 1; i <= 4; i++) {
-                            int d = Character.digit(s.charAt(pos + i), 16);
+                            int d = hexValue(s.charAt(pos + i));
                             if (d < 0) {
                                 throw error();
                             }
@@ -268,6 +268,20 @@ public final class Json {
                 }
                 pos++;
             }
+        }
+
+        /** ASCII hex digit value, or -1 ({@code Character.digit} would also accept non-ASCII digits). */
+        private int hexValue(char c) {
+            if (c >= '0' && c <= '9') {
+                return c - '0';
+            }
+            if (c >= 'a' && c <= 'f') {
+                return c - 'a' + 10;
+            }
+            if (c >= 'A' && c <= 'F') {
+                return c - 'A' + 10;
+            }
+            return -1;
         }
 
         Num number() {

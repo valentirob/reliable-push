@@ -3,7 +3,10 @@ package io.reliablepush.payload;
 import io.reliablepush.payload.PayloadException.Code;
 import io.reliablepush.payload.internal.Json;
 import io.reliablepush.payload.internal.JsonWriter;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -87,8 +90,8 @@ public final class ApnsPayloads {
 
     /**
      * Same rules as {@link #decorate(String, String)} for a payload held as a map. Returns a new map (the input is not
-     * modified; the top level and {@code aps} are copied, deeper values are shared) with {@code mutable-content} and
-     * {@code rp_tid} added. The result must fit 4,096 bytes when serialized as compact UTF-8 JSON.
+     * modified) with {@code mutable-content} and {@code rp_tid} added. The result is deeply unmodifiable: nested maps
+     * and lists are copied and wrapped, so it shares no mutable state with the input. The result must fit 4,096 bytes when serialized as compact UTF-8 JSON.
      *
      * @throws PayloadException as for {@link #decorate(String, String)} except {@code INVALID_JSON}
      * @throws IllegalArgumentException a key is not a string or a value has an unsupported type
@@ -100,7 +103,29 @@ public final class ApnsPayloads {
         }
         Map<String, Object> result = decorateMap(apnsPayload, trackingId);
         serialize(result);
-        return result;
+        return freezeMap(result);
+    }
+
+    private static Map<String, Object> freezeMap(Map<?, ?> in) {
+        Map<String, Object> out = new LinkedHashMap<String, Object>();
+        for (Map.Entry<?, ?> e : in.entrySet()) {
+            out.put((String) e.getKey(), freeze(e.getValue()));
+        }
+        return Collections.unmodifiableMap(out);
+    }
+
+    private static Object freeze(Object v) {
+        if (v instanceof Map) {
+            return freezeMap((Map<?, ?>) v);
+        }
+        if (v instanceof List) {
+            List<Object> out = new ArrayList<Object>();
+            for (Object o : (List<?>) v) {
+                out.add(freeze(o));
+            }
+            return Collections.unmodifiableList(out);
+        }
+        return v;
     }
 
     private static Map<String, Object> decorateMap(Map<?, ?> in, String trackingId) {
