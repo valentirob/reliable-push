@@ -93,9 +93,10 @@ class AdminSmokeE2E {
     private static final String OPEN_SINCE = "2026-11-08T10:00:00Z";
 
     /**
-     * The fallback circuit view. The stack's circuits are CLOSED, so the CLOSED badge and the empty history come from the real
-     * API; an OPEN circuit, the {@code fallback-control} permission and the resume answer are staged by intercepting the
-     * page's own calls (the harness admin key has only {@code payload}, and an open circuit would need real tracking misses).
+     * The fallback circuit view. The stack's circuits are CLOSED (the {@code fallback-circuit} scenario closes its app's
+     * circuit again), so the CLOSED badge and the history view come from the real API; an OPEN circuit, the
+     * {@code fallback-control} permission and the resume answer are staged by intercepting the page's own calls (the
+     * harness admin key has only {@code payload}).
      */
     private static void circuitBadgesAndHistory(BrowserContext context, String url, String key) {
         Page plain = context.newPage();

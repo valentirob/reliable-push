@@ -37,6 +37,11 @@ class AdminApiClientTest {
                 body = "{\"items\":[{\"appId\":\"shop\",\"window\":\"1h\",\"registered\":2,\"delivered\":1}]}";
             } else if (path.equals("/v1/admin/notifications")) {
                 body = "{\"items\":[{\"trackingId\":\"" + KNOWN + "\"}],\"nextCursor\":null}";
+            } else if (path.equals("/v1/admin/fallback-circuits")) {
+                body = "{\"suspended\":false,\"enabled\":true,\"items\":[{\"appId\":\"shop\",\"state\":\"OPEN\","
+                        + "\"suppressed\":3}]}";
+            } else if (path.equals("/v1/admin/fallback-circuits/shop/events")) {
+                body = "{\"items\":[{\"transition\":\"OPENED\",\"reason\":\"tracking_missing\"}],\"nextCursor\":null}";
             } else if (path.equals("/v1/admin/notifications/" + KNOWN)) {
                 body = "{\"notification\":{\"trackingId\":\"" + KNOWN + "\"},\"events\":[],\"attempts\":[]}";
             } else {
@@ -80,6 +85,19 @@ class AdminApiClientTest {
         assertThat(client.detail(KNOWN)).get().satisfies(d ->
                 assertThat(d.at("/notification/trackingId").asText()).isEqualTo(KNOWN.toString()));
         assertThat(client.detail(UUID.randomUUID())).isEmpty();
+    }
+
+    @Test
+    void circuitFindsTheAppAndEventsListTheHistory() {
+        assertThat(client.circuit("shop")).get().satisfies(c -> {
+            assertThat(c.path("state").asText()).isEqualTo("OPEN");
+            assertThat(c.path("suppressed").asLong()).isEqualTo(3);
+        });
+        assertThat(client.circuit("news")).isEmpty();
+        JsonNode events = client.circuitEvents("shop");
+        assertThat(events.at("/items/0/transition").asText()).isEqualTo("OPENED");
+        assertThat(requests).containsExactly("/v1/admin/fallback-circuits?null key=" + KEY,
+                "/v1/admin/fallback-circuits?null key=" + KEY, "/v1/admin/fallback-circuits/shop/events?limit=50 key=" + KEY);
     }
 
     @Test
