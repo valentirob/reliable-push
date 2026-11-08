@@ -23,8 +23,7 @@ is the app side.
 If the reliable-push backend cannot be reached, your notifications are shown as usual and the events wait in the App
 Group queue. The flow diagram is in [overview.md §8](overview.md#8-ios-sdk).
 
-> **Status.** This page describes `0.2.0` (in development on `develop`, not tagged yet; the last release is `0.1.2`),
-> tested on the iOS Simulator locally (package tests, end-to-end suite) and in CI (`ios-ci.yml`: package tests, sample
+> **Status.** This page describes `0.2.0`, tested on the iOS Simulator locally (package tests, end-to-end suite) and in CI (`ios-ci.yml`: package tests, sample
 > builds, size gate). SwiftPM by git tag is the only distribution channel (no
 > XCFramework, no CocoaPods). Real APNs delivery on a device has not been verified yet.
 
@@ -35,7 +34,7 @@ enter the repository URL, pick the `ReliablePush` library and add it to **both**
 a `Package.swift`:
 
 ```swift
-.package(url: "https://github.com/valentirob/reliable-push.git", from: "0.1.2"),
+.package(url: "https://github.com/valentirob/reliable-push.git", from: "0.2.0"),
 // target dependency: .product(name: "ReliablePush", package: "reliable-push")
 ```
 

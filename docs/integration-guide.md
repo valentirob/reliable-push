@@ -148,7 +148,7 @@ builds a tracked payload from title and body (`build`), or adds what tracking ne
 <dependency>
   <groupId>io.reliablepush</groupId>
   <artifactId>reliable-push-payload</artifactId>
-  <version>0.2.0-SNAPSHOT</version>   <!-- not on Maven Central yet: ./mvnw -B -pl payload-java install -->
+  <version>0.2.0</version>   <!-- not on Maven Central yet: ./mvnw -B -pl payload-java install -->
 </dependency>
 ```
 

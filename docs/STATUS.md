@@ -8,6 +8,26 @@ Everything left after `v0.1.0` is in [TODO.md](TODO.md): each item says why it i
 unblocks it. Agents: remind the maintainer of its section 1 (real APNs and the locked-device check, real FCM, Maven
 Central) at the start of a session.
 
+## 2026-11-08 (18) — Claude Code — release 0.2.0
+
+- **Done:** cycle 6 (sidecar integration revision) merged into `develop` (`4818e44`) after the final review fix wave
+  and one more Android fix found by its re-review (`6779eca`: the minimal notification is gated on its own channel
+  before `DELIVERED` is recorded, so a notification the system drops never suppresses the fallback). CI on `develop`
+  green: Backend, Android, iOS, Client and harness (payload jar on Java 8 and 21), CodeQL. `release/0.2.0` bumped every
+  component from `0.2.0-SNAPSHOT` to `0.2.0` (Maven modules, Android, iOS, Helm chart `0.2.0`), dated the CHANGELOG,
+  and updated README, guides, TODO 5.1 and the presentation; merged into `main` with tag `v0.2.0` and back into
+  `develop`, which is now `0.3.0-SNAPSHOT`. GitHub release page `reliable-push 0.2.0`.
+- **Verification before the merge:** backend `Tests run: 352` unit and `342` IT; root verify; iOS 135 tests (1
+  skipped), size `292896 bytes (limit 307200)`; Android 149 unit tests; `[e2e] summary: 23/23 passed`; iOS E2E 8/8
+  (1 skipped); Android E2E 7/8 (1 skipped) with only `offline-delivery-is-sent-when-network-returns` failing, the known
+  JobScheduler flake (fails on the pre-fix head too, passes alone: `Android E2E: 1/1 passed`); Helm checks passed.
+- **Open:** make the Android offline-delivery E2E robust (the emulator's JobScheduler leaves the retry job ready and
+  never starts it; no SDK change). V7 was edited in place before the release: local databases migrated on the feature
+  branch need a reset. TODO section 1 (real APNs and the locked-device check, real FCM, Maven Central) still waits for
+  the maintainer.
+- **Next:** TODO 5.1, pick the 0.3.0 scope (for example the push gateway mode, once the sender teams say how much they
+  can change).
+
 ## 2026-11-08 (17) — Claude Code — cycle 6: sidecar integration revision (0.2.0, on `feature/sidecar-integration-revision`)
 
 - **Done:** the sidecar integration revision (spec `docs/specs/2026-11-08-sidecar-integration-revision-design.md`,

@@ -2,7 +2,12 @@
 
 All notable changes to this project are documented here. Versions follow [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## 0.2.0 — 2026-11-08
+
+Feature release: the ops dashboard, the per-app fallback circuit breaker and the sidecar integration revision with the
+payload jar. It is not compatible with 0.1.x: senders must generate the `trackingId` and register each tracked push
+before sending it, and apps must move to the new SDK calls (see "Changed (incompatible, pre-1.0)"). Flyway applies the
+migrations `V4` to `V7` at startup.
 
 ### Added
 

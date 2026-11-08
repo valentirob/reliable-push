@@ -190,7 +190,7 @@
 <!-- 1 -->
 <section class="slide" data-title="reliable-push">
   <div class="grow">
-    <p class="kicker">Open source · MIT · v0.1.2 · 0.2.0 in development</p>
+    <p class="kicker">Open source · MIT · v0.2.0</p>
     <h1>reliable-push</h1>
     <p class="lead">Know whether each push notification was <b>delivered</b> and <b>read</b>. When it was not, in time,
       trigger a <b>fallback</b> (SMS, email, anything) through a signed webhook.</p>
@@ -633,7 +633,7 @@ send(...);                                 // always, with rp_tid</code></pre>
         <path class="e side" d="M235 310 V336"/>
       </svg>
       <div class="cols">
-        <div class="card"><h3>Swift package</h3><p class="small">iOS 15+, Swift 6, Apple frameworks only, under 300 KB. Add it by tag with SwiftPM: <code>from: "0.1.2"</code>.</p></div>
+        <div class="card"><h3>Swift package</h3><p class="small">iOS 15+, Swift 6, Apple frameworks only, under 300 KB. Add it by tag with SwiftPM: <code>from: "0.2.0"</code>.</p></div>
         <div class="card"><h3>Bounded wait, app closed too</h3><p class="small">The extension saves <code>DELIVERED</code>, sends it once (no token renewal) and calls the content handler <b>exactly once</b>: after the send, at 2 s, or when iOS ends it; at once on an SDK error. Only <code>ensureRegistered</code> in the app renews the token.</p></div>
         <div class="card"><h3>Store ready</h3><p class="small">Privacy manifest included. Short work in the extension, no hidden background activity.</p></div>
       </div>
@@ -789,23 +789,22 @@ answer 2xx</code></pre>
   <div class="grow">
     <div class="cols c3">
       <div class="card ok">
-        <h3>Released: v0.1.2 (2026-11-06)</h3>
+        <h3>Released: v0.2.0 (2026-11-08)</h3>
         <ul class="clean small">
-          <li>Backend, Java client, harness and web console</li>
+          <li>Backend, Java client, payload jar, harness and web console</li>
           <li>Helm chart, load tests</li>
           <li>Android SDK and iOS SDK</li>
           <li>CI green: build, tests, CodeQL (Java/Kotlin, Swift)</li>
-          <li>0.1.2: iOS burst flush fix, harness device proxy on loopback</li>
+          <li>E2E 23/23; iOS and Android device suites 8/8 (1 skipped each)</li>
         </ul>
       </div>
       <div class="card side">
-        <h3>On develop: 0.2.0 in progress</h3>
+        <h3>New in 0.2.0</h3>
         <ul class="clean small">
           <li>Ops dashboard: <code>/admin/</code> page and read-only admin API</li>
           <li>Per-attempt webhook history and daily rollups</li>
           <li>Fallback circuit breaker per app: no SMS storm when tracking is missing; resume from the dashboard</li>
-          <li>Cycle 6, sidecar integration revision: payload jar, sender-generated <code>trackingId</code>, register before send, <code>NO_DEVICE_REGISTERED</code>, 90-day events grace, <code>ensureRegistered</code> (no renewal on receive), iOS 2 s bounded wait, hardened Android posting</li>
-          <li>E2E 23/23; iOS and Android device suites 8/8 (1 skipped each)</li>
+          <li>Sidecar integration revision: payload jar, sender-generated <code>trackingId</code>, register before send, <code>NO_DEVICE_REGISTERED</code>, 90-day events grace, <code>ensureRegistered</code> (no renewal on receive), iOS 2 s bounded wait, hardened Android posting</li>
         </ul>
       </div>
       <div class="card fall">

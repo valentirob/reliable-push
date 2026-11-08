@@ -25,7 +25,7 @@ here and record the result in [STATUS.md](STATUS.md).
 | 4.10 | Circuit event times can be up to the lock wait out of order | Agent | Action: clamp the check instant to the circuit's `since` |
 | 4.11 | iOS size gate: about 440 bytes left in the last 16 KB page | Maintainer + agent | Action: the next iOS SDK addition (decide: raise the gate or trim code) |
 | 4.12 | Harness device simulator drops `429` / `503` / network-error events (the SDKs keep them) | Agent | Action: a scenario that needs the SDKs' retry behaviour in the simulator |
-| 5.1 | 0.2.0 release | Maintainer | Action: maintainer decision to release (ops dashboard, fallback circuit breaker, sidecar integration revision) |
+| 5.1 | Pick the 0.3.0 scope | Maintainer | Action: maintainer decision (0.2.0 shipped on 2026-11-08) |
 
 ## 1. Maintainer-only: needs personal accounts and credentials
 
@@ -204,14 +204,13 @@ Agents never create accounts or keys, sign in, or enter credentials. These steps
 
 ## 5. Next scope
 
-### 5.1 Release 0.2.0 (ops dashboard, fallback circuit breaker, sidecar integration revision)
+### 5.1 Pick the 0.3.0 scope
 
-- **What:** 0.2.0 is the ops dashboard ([admin.md](admin.md), FR-16 and FR-17, cycle 4), the fallback circuit breaker
-  ([operations.md](operations.md#fallback-circuit-breaker), FR-18 and FR-19, cycle 5) and the sidecar integration
-  revision ([integration-guide.md](integration-guide.md), FR-20 to FR-24, cycle 6: payload jar, sender-generated
-  `trackingId`, `NO_DEVICE_REGISTERED`, events grace, `ensureRegistered`). Its incompatible changes are listed in
-  [CHANGELOG.md](../CHANGELOG.md); the release also publishes the payload jar (with item 1.3). Anything beyond it needs a
-  new scope, for example a push gateway mode (out of scope of the cycle 6 spec), items 1.3 and 2.1, or new requirements from
+- **What:** 0.2.0 shipped on 2026-11-08: the ops dashboard ([admin.md](admin.md), FR-16 and FR-17), the fallback
+  circuit breaker ([operations.md](operations.md#fallback-circuit-breaker), FR-18 and FR-19) and the sidecar integration
+  revision ([integration-guide.md](integration-guide.md), FR-20 to FR-24). Nothing is planned after it. Candidates: a
+  push gateway mode (if the sender teams cannot make the sidecar changes), items 1.3 and 2.1, or new requirements from
   [requirements.md](requirements.md) "Out of scope (for now)", for example web push.
-- **Why deferred:** releasing is a maintainer decision; the 0.2.0 release comes after the merge to `develop`.
-- **Unblocked by:** the maintainer deciding to release.
+- **Why deferred:** it is a product decision.
+- **Unblocked by:** the maintainer choosing the scope. Then write a spec or plan in `docs/plans/` as for the earlier
+  cycles.
