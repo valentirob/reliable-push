@@ -10,6 +10,7 @@ import io.reliablepush.devices.DeviceTokenService;
 import io.reliablepush.support.OpenApiAssert;
 import io.reliablepush.support.PostgresTestBase;
 import io.reliablepush.support.TestDevices;
+import java.net.URI;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.UUID;
@@ -170,11 +171,14 @@ class EventsGraceIT extends PostgresTestBase {
         String bearer = tokenExpiredAgo(device, Duration.ofDays(10));
 
         for (String path : new String[] {"/v1/events/../devices/token:refresh", "/v1/events/%2e%2e/devices/token:refresh",
-            "/v1/events;x=1/../devices/token:refresh"}) {
-            ResponseEntity<String> response = http.post().uri(path).header("Authorization", "Bearer " + bearer)
+            "/v1/events/%2E%2E/devices/token:refresh", "/v1/events;x=1/../devices/token:refresh"}) {
+            // a java.net.URI is sent as is: no template expansion, so "%2e" reaches the server unencoded (not "%252e")
+            URI raw = URI.create("http://localhost:" + port + path);
+            assertThat(raw.getRawPath()).isEqualTo(path);
+            ResponseEntity<String> response = http.post().uri(raw).header("Authorization", "Bearer " + bearer)
                     .retrieve().onStatus(s -> true, (q, r) -> {}).toEntity(String.class);
-            assertThat(response.getStatusCode().value()).isIn(400, 401, 404);
-            assertThat(response.getBody() == null ? "" : response.getBody()).doesNotContain("\"token\"");
+            assertThat(response.getStatusCode().value()).as(path).isIn(400, 401, 404);
+            assertThat(response.getBody() == null ? "" : response.getBody()).as(path).doesNotContain("deviceToken");
         }
     }
 }
