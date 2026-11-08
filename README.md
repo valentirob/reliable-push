@@ -161,6 +161,7 @@ Building from source needs JDK 21 and Docker: `cd backend && ./mvnw -B verify` (
 
 - [System overview with diagrams](docs/overview.md)
 - [Presentation (HTML slides)](docs/presentation.html)
+- [reliable-push and the market](docs/market-comparison.md): Catapush, OneSignal, Airship, Braze
 - [Getting started: run and test each component](docs/getting-started.md)
 - [Requirements](docs/requirements.md)
 - [Design spec](docs/specs/2026-11-03-reliable-push-design.md)

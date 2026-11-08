@@ -8,6 +8,15 @@ Everything left after `v0.1.0` is in [TODO.md](TODO.md): each item says why it i
 unblocks it. Agents: remind the maintainer of its section 1 (real APNs and the locked-device check, real FCM, Maven
 Central) at the start of a session.
 
+## 2026-11-09 (23) — Claude Code — market comparison (`feature/market-comparison`)
+
+- **Asked by the maintainer:** compare reliable-push's capabilities with the market products named before, Catapush
+  included, in the slides.
+- **Done:** `docs/market-comparison.md` (table, where each fits, the limits of reliable-push, nine sources read on
+  2026-11-09) and slides "Market comparison" and "Where it fits" before "Status and next"; link from the README.
+- **Caveat:** Airship and Braze document no device-confirmed delivery and no fallback on it; the page says "not
+  documented", not "missing". Re-check before using the comparison outside the team.
+
 ## 2026-11-09 (22) — Claude Code — presentation: the flow from the top down (`feature/presentation-flows`)
 
 - **Asked by the maintainer:** explain the flow in `docs/presentation.html`, from the animated at-a-glance picture down
