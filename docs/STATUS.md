@@ -8,6 +8,24 @@ Everything left after `v0.1.0` is in [TODO.md](TODO.md): each item says why it i
 unblocks it. Agents: remind the maintainer of its section 1 (real APNs and the locked-device check, real FCM, Maven
 Central) at the start of a session.
 
+## 2026-11-08 (20) — Claude Code — bounded waits and the stuck-wait check (`feature/bounded-waits`)
+
+- **Why:** a hand-written wait loop from cycle 2 (`until grep … t8-e2e.log; do sleep 10; done`) ran for more than three
+  days after its workspace was deleted, and the maintainer saw it as a task still running; earlier a `gh` wait with a
+  short SHA never ended. Stopped by hand.
+- **Done:** rule `.agents/rules/long-running.md` (`always_on`, imported by `CLAUDE.md`); `scripts/wait-until.sh`
+  (mandatory `--timeout`, `--needs <path>`, `--needs-pid <pid>`, exit 124 / 125, registers each running wait);
+  `scripts/check-waits.sh` (lists the waits, flags OVERDUE ones and LOOPs without a timeout older than 30 min; `--hook
+  claude|antigravity`); hooks in `.claude/settings.json` (`SessionStart`, `UserPromptSubmit`) and `.agents/hooks.json`
+  (`SessionStart`, `PreInvocation`, format from the Antigravity hooks docs); `scripts/sync-agent-skills.sh --check`
+  fails when a hook is missing; `agent-context.yml` runs `scripts/tests/waits-test.sh`; release skill waits for CI
+  with the script. Docs checked: diagrams and presentation need no change (no product change).
+- **State:** `scripts/tests/waits-test.sh` 33/33 on macOS; both hook commands pipe-tested (silent / `{}` when clean,
+  the finding as context or `injectSteps` otherwise). Not verified: the Antigravity hooks in a real Antigravity run
+  (not installed here), and the Claude Code hooks in a session started in the repository (this session started in the
+  parent folder, so it does not load the project settings).
+- **Next:** unchanged from entry 19 (open questions 4.11, 1.3, 5.1).
+
 ## 2026-11-08 (19) — Claude Code — agent context for Claude Code and Antigravity (`feature/agent-context-portability`)
 
 - **Done:** the repository carries the whole context to continue on another machine (macOS, Linux, Windows) with

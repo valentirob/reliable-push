@@ -1,0 +1,10 @@
+{
+  "check-waits": {
+    "SessionStart": [
+      { "type": "command", "command": "./scripts/check-waits.sh --hook antigravity", "timeout": 10 }
+    ],
+    "PreInvocation": [
+      { "type": "command", "command": "./scripts/check-waits.sh --hook antigravity", "timeout": 10 }
+    ]
+  }
+}

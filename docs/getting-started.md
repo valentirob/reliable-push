@@ -39,7 +39,8 @@ and Xcode. `.gitattributes` keeps `*.sh`, `mvnw` and `gradlew` in LF, so a WSL o
 are.
 
 To continue development with an AI agent (Claude Code or Antigravity) on any of these systems, nothing else is needed:
-the shared context is in the repository (`AGENTS.md`, `.agents/`); see [AGENTS.md](../AGENTS.md#ai-agent-context-one-source-for-every-tool).
+the shared context is in the repository (`AGENTS.md`, `.agents/`, including the hooks that flag stuck waits); see
+[AGENTS.md](../AGENTS.md#ai-agent-context-one-source-for-every-tool).
 
 All commands run from the repository root unless the step says otherwise.
 

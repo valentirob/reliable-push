@@ -71,4 +71,7 @@ Agents (Claude Code, Antigravity, others) must follow `AGENTS.md`, the rules in
 `docs/STATUS.md` at the end of a session. Every tool gets the same context from
 those files: Antigravity reads them natively, Claude Code through `CLAUDE.md`
 and the generated wrappers in `.claude/skills/`. After changing a skill, run
-`scripts/sync-agent-skills.sh` (CI runs it with `--check`).
+`scripts/sync-agent-skills.sh` (CI runs it with `--check`). Agents wait for long
+commands only through `scripts/wait-until.sh` (always with a timeout), and both
+tools' hooks run `scripts/check-waits.sh` to flag waits that are stuck
+(`.agents/rules/long-running.md`).

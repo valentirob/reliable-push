@@ -14,6 +14,11 @@ All notable changes to this project are documented here. Versions follow [Semant
 - `.gitattributes` keeps `mvnw` and `gradlew` in LF (and the `.cmd` / `.bat` wrappers in CRLF); `.gitignore` ignores
   `.claude/settings.local.json` and `.superpowers/`.
 - `scripts/helm-smoke.sh` parses dates with GNU `date` too, so it runs on Linux and WSL.
+- Bounded waits (rule `.agents/rules/long-running.md`): `scripts/wait-until.sh` waits for a condition with a mandatory
+  timeout and stops as soon as the folder or the process it depends on is gone; `scripts/check-waits.sh` lists the
+  running waits and flags overdue ones and shell loops without a timeout. Claude Code (`.claude/settings.json`) and
+  Antigravity (`.agents/hooks.json`) run the check at session start and on every prompt or model call; CI runs the
+  scripts' tests (`scripts/tests/waits-test.sh`) on Linux.
 
 ## 0.2.0 — 2026-11-08
 

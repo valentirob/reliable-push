@@ -10,7 +10,15 @@ Done this way for v0.1.0 to v0.2.0. Never push to `main` outside this flow (or a
 ## 1. Before cutting
 
 - `develop` is green in CI for the commit you release. With `gh`, filter by the **full** SHA
-  (`gh run list --commit "$(git rev-parse HEAD)"`): a short SHA silently matches nothing.
+  (`gh run list --commit "$(git rev-parse HEAD)"`): a short SHA silently matches nothing. Check the command once by
+  hand, then wait with a bound (rule `long-running.md`):
+
+  ```bash
+  scripts/wait-until.sh --timeout 30m --interval 30 --label "CI on $(git rev-parse --short HEAD)" -- sh -c \
+    's=$(gh run list --commit "$(git rev-parse HEAD)" --json status -q ".[].status"); [ -n "$s" ] && ! echo "$s" | grep -q -e queued -e in_progress'
+  ```
+
+  Then read the conclusions (`gh run list --commit "$(git rev-parse HEAD)"`): finished is not green.
 - The last local verification of every component the release contains is recorded in `docs/STATUS.md` (backend
   verify, root verify, iOS tests and size gate, Android build, `e2e.sh`, the device E2E suites, Helm checks).
 
@@ -62,4 +70,4 @@ must change, `docs/integration-guide.md` at the tag. No binaries are attached (M
 
 ## 5. After
 
-Check CI on `main`, then tell the maintainer what was released and remind them of TODO section 1.
+Check CI on `main` (bounded wait as in section 1), then tell the maintainer what was released and remind them of TODO section 1.

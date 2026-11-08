@@ -2,7 +2,8 @@ name: Agent context
 
 # Keeps Claude Code and Antigravity on the same context (AGENTS.md "AI agent context"): the Claude Code skill wrappers in
 # .claude/skills match .agents/skills, every rule in .agents/rules has a valid trigger, CLAUDE.md imports every
-# always_on rule and the AGENTS.md indexes list every rule and skill. Bash only, no tools to install.
+# always_on rule, the AGENTS.md indexes list every rule and skill and both tools' hooks run scripts/check-waits.sh; then
+# the tests of the bounded-wait scripts (rule long-running.md) run on Linux. Bash only, no tools to install.
 
 on:
   push:
@@ -17,6 +18,10 @@ on:
       - '.agents/**'
       - '.claude/**'
       - 'scripts/sync-agent-skills.sh'
+      - 'scripts/wait-until.sh'
+      - 'scripts/check-waits.sh'
+      - 'scripts/lib/waits.sh'
+      - 'scripts/tests/**'
       - '.github/workflows/agent-context.yml'
   pull_request:
     paths:
@@ -25,6 +30,10 @@ on:
       - '.agents/**'
       - '.claude/**'
       - 'scripts/sync-agent-skills.sh'
+      - 'scripts/wait-until.sh'
+      - 'scripts/check-waits.sh'
+      - 'scripts/lib/waits.sh'
+      - 'scripts/tests/**'
       - '.github/workflows/agent-context.yml'
 
 permissions:
@@ -36,7 +45,7 @@ concurrency:
 
 jobs:
   check:
-    name: Skill wrappers, rule frontmatter, imports
+    name: Skill wrappers, rule frontmatter, imports, wait scripts
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -47,3 +56,6 @@ jobs:
 
       - name: Check the agent context
         run: scripts/sync-agent-skills.sh --check
+
+      - name: Test the bounded-wait scripts
+        run: scripts/tests/waits-test.sh
