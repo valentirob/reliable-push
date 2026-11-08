@@ -1,2 +1,11 @@
 * text=auto
 *.sh eol=lf
+mvnw eol=lf
+gradlew eol=lf
+*.bat eol=crlf
+*.cmd eol=crlf
+# AI agent context: LF everywhere, so the YAML frontmatter parses the same on a Windows checkout
+AGENTS.md eol=lf
+CLAUDE.md eol=lf
+.agents/** eol=lf
+.claude/** eol=lf

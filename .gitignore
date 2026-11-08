@@ -59,3 +59,7 @@ apns.properties
 # SwiftPM (root package)
 /.build/
 /.swiftpm/
+
+# AI coding tools: local settings and plugin scratch (shared context lives in AGENTS.md and .agents/)
+.claude/settings.local.json
+.superpowers/

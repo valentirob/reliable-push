@@ -1,0 +1,49 @@
+name: Agent context
+
+# Keeps Claude Code and Antigravity on the same context (AGENTS.md "AI agent context"): the Claude Code skill wrappers in
+# .claude/skills match .agents/skills, every rule in .agents/rules has a valid trigger, CLAUDE.md imports every
+# always_on rule and the AGENTS.md indexes list every rule and skill. Bash only, no tools to install.
+
+on:
+  push:
+    branches:
+      - develop
+      - main
+      - 'release/**'
+      - 'hotfix/**'
+    paths:
+      - 'AGENTS.md'
+      - 'CLAUDE.md'
+      - '.agents/**'
+      - '.claude/**'
+      - 'scripts/sync-agent-skills.sh'
+      - '.github/workflows/agent-context.yml'
+  pull_request:
+    paths:
+      - 'AGENTS.md'
+      - 'CLAUDE.md'
+      - '.agents/**'
+      - '.claude/**'
+      - 'scripts/sync-agent-skills.sh'
+      - '.github/workflows/agent-context.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  check:
+    name: Skill wrappers, rule frontmatter, imports
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check the agent context
+        run: scripts/sync-agent-skills.sh --check

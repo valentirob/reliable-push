@@ -309,8 +309,11 @@ for p in $OLD_PODS; do
     fi
     dts="$(echo "$line" | cut -d' ' -f2)"
     grace="$(echo "$line" | cut -d' ' -f3)"
-    epoch="$(date -j -u -f '%Y-%m-%dT%H:%M:%SZ' "$dts" +%s)" || fail "cannot parse deletionTimestamp '$dts'"
-    sigterm="$(date -u -r $((epoch - grace)) +%Y-%m-%dT%H:%M:%S.000Z)"
+    # BSD date (macOS) first, then GNU date (Linux, WSL)
+    epoch="$(date -j -u -f '%Y-%m-%dT%H:%M:%SZ' "$dts" +%s 2>/dev/null || date -u -d "$dts" +%s)" \
+        || fail "cannot parse deletionTimestamp '$dts'"
+    sigterm="$(date -u -r $((epoch - grace)) +%Y-%m-%dT%H:%M:%S.000Z 2>/dev/null \
+        || date -u -d "@$((epoch - grace))" +%Y-%m-%dT%H:%M:%S.000Z)"
     n="$(awk -v s="$sigterm" '
         { if (match($0, /"@timestamp":"[^"]*"/)) ts = substr($0, RSTART + 14, RLENGTH - 15); else next
           if (match($0, /"rp.tracking_id":"[^"]*"/)) id = substr($0, RSTART + 17, RLENGTH - 18); else next

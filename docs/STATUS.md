@@ -8,6 +8,25 @@ Everything left after `v0.1.0` is in [TODO.md](TODO.md): each item says why it i
 unblocks it. Agents: remind the maintainer of its section 1 (real APNs and the locked-device check, real FCM, Maven
 Central) at the start of a session.
 
+## 2026-11-08 (19) — Claude Code — agent context for Claude Code and Antigravity (`feature/agent-context-portability`)
+
+- **Done:** the repository carries the whole context to continue on another machine (macOS, Linux, Windows) with
+  Claude Code or Antigravity: see AGENTS.md "AI agent context", "Maintainer agreement", "Environment by operating
+  system" and "Pitfalls". `.claude/skills` symlink replaced by generated wrappers (`scripts/sync-agent-skills.sh`,
+  CI `agent-context.yml`); `CLAUDE.md` imports the `always_on` rules; new skills `plan-feature` and `release`;
+  `.gitattributes` and `.gitignore` for cross-OS checkouts; `helm-smoke.sh` portable `date`; Linux and Windows setup in
+  `getting-started.md` §0; TODO 4.11 rewritten with the measured iOS size breakdown. Docs checked: diagrams and
+  presentation need no change.
+- **State:** `scripts/sync-agent-skills.sh --check` passes (6 skills) and fails on a broken wrapper, an orphan wrapper
+  and an invalid rule trigger (checked by hand). No product code changed.
+- **Open questions for the maintainer:**
+  - TODO 4.11: which iOS size metric (recommended: measure what the app and the extension really carry).
+  - TODO 1.3: Maven Central namespace, `io.reliablepush` (needs the `reliablepush.io` domain) or `io.github.valentirob`.
+  - TODO 5.1: the 0.3.0 scope (gateway mode after talking to the sender teams; Maven Central first, because the sender
+    teams need the payload jar from a registry).
+- **Next:** the maintainer's answers above; agent-only hardening meanwhile: the flaky Android offline-delivery E2E,
+  TODO 4.9 (circuit breaker under load).
+
 ## 2026-11-08 (18) — Claude Code — release 0.2.0
 
 - **Done:** cycle 6 (sidecar integration revision) merged into `develop` (`4818e44`) after the final review fix wave

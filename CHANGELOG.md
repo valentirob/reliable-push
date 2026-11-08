@@ -2,6 +2,19 @@
 
 All notable changes to this project are documented here. Versions follow [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+### Process
+
+- One AI agent context for Claude Code and Antigravity on macOS, Linux and Windows: `.claude/skills` is now generated
+  wrapper files instead of a symlink (a symlink breaks on a Windows checkout), `CLAUDE.md` imports the `always_on`
+  rules, `AGENTS.md` gains the agent-context table, the maintainer agreement, the environment by operating system and
+  the pitfalls seen so far. New skills `plan-feature` (spec, plan, then code) and `release`. `scripts/sync-agent-skills.sh`
+  regenerates the wrappers; CI job `agent-context.yml` runs it with `--check`.
+- `.gitattributes` keeps `mvnw` and `gradlew` in LF (and the `.cmd` / `.bat` wrappers in CRLF); `.gitignore` ignores
+  `.claude/settings.local.json` and `.superpowers/`.
+- `scripts/helm-smoke.sh` parses dates with GNU `date` too, so it runs on Linux and WSL.
+
 ## 0.2.0 — 2026-11-08
 
 Feature release: the ops dashboard, the per-app fallback circuit breaker and the sidecar integration revision with the
