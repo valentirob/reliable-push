@@ -5,8 +5,9 @@ backend sends through FCM: it posts the notification, reports `DELIVERED`, repor
 retries events that could not be sent. Runtime dependencies: Kotlin stdlib only (no AndroidX, OkHttp, WorkManager or
 coroutines); `firebase-messaging` is a `compileOnly` dependency, so your app supplies it. The release AAR is about 75 KB.
 
-Your backend registers each notification with reliable-push and puts the returned `trackingId` into the FCM message as
-`rp_tid`: see [integration-guide.md](integration-guide.md) §1 and §2. This page is the app side.
+Your backend generates a tracking id, registers the notification with reliable-push and sends a data-only FCM message
+with that id as `rp_tid` (the payload jar builds it): see [integration-guide.md](integration-guide.md) §1 and §2. This
+page is the app side.
 
 **A sidecar inside your app.** The SDK tracks your pushes without owning them:
 - It ignores every message without `rp_tid`.
@@ -127,7 +128,10 @@ data map instead. Title and body come from the `title` and `body` data keys (fal
 block, then the app name and an empty body).
 
 **Data message, local notification.** Your backend sends a data-only, high-priority FCM message (no `notification`
-block), so FCM always hands it to your service, also in the background, and the SDK posts the notification. This is
+block; the payload jar's `FcmPayloads` builds it). For a message with a `notification` block, Android shows the
+notification itself while the app is in the background and runs no app code, so nothing could report `DELIVERED`. A
+data message is always handed to your service, also in the background or after the app was killed, and the SDK posts
+the notification. This is
 the market-standard way to confirm delivery on Android: services with confirmed delivery (Catapush, OneSignal, Braze,
 Airship) work the same way, because it is the only way to run code when a push arrives in the background (the other
 one, `AndroidConfigV2`, is not generally available, see section 10). The trade-off: the notification depends on the
@@ -156,7 +160,8 @@ the app name) on the configured channel, with the `rp_tid` tap extra, without yo
 
 `true` means the notification was posted. `handle` returns `false` only when:
 - the message is not the SDK's (no or malformed `rp_tid`);
-- the gate is closed: notifications disabled for the app, `POST_NOTIFICATIONS` denied, or notifications paused;
+- the gate is closed: no `NotificationManager` (the system service is unavailable), notifications disabled for the
+  app, `POST_NOTIFICATIONS` denied, or notifications paused;
 - the final channel is unusable: missing, set to none, or in a blocked group (including a channel your customizer
   chose);
 - even the minimal notification could not be posted (also when its channel cannot be created).
@@ -228,9 +233,12 @@ Tag `ReliablePush`, message `event=<name> key=value ...`. Names: `device.registe
 `ensureRegistered`), `device.revoked`, `tracking.event_queued`, `tracking.event_sent`, and at WARN
 `tracking.event_dropped`, `tracking.not_registered`, `auth.failed`, `rate_limit.exceeded`, `token.unreadable`,
 `device.register_failed`, `notification.not_shown` (gate closed), `notification.not_posted`,
-`notification.channel_failed` (the minimal notification's channel could not be created), `tracking.persist_slow` (a
-main-thread `handle` waited 500 ms for the `DELIVERED` write and posted anyway), `sdk.internal_error`
-(an error caught inside the SDK; class name only). Below WARN is logged only when the
+`notification.channel_failed` (the minimal notification's channel could not be created),
+`notification.customizer_failed` (your customizer threw; the notification is posted without it),
+`notification.no_launch_activity` (the minimal notification is posted without a tap action), `tracking.persist_slow` (a
+main-thread `handle` waited 500 ms for the `DELIVERED` write and posted anyway), `retry.schedule_failed` (the OS refused
+the retry job; the events wait for the next flush), `retry.failed`, `device.revoked` with `confirmed=false`,
+`sdk.internal_error` (an error caught inside the SDK; class name only). Below WARN is logged only when the
 host app is debuggable. Tokens, ID tokens, user ids and notification title or body are never logged; the `rp_tid` and the
 device id are.
 

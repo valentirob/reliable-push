@@ -190,7 +190,7 @@
 <!-- 1 -->
 <section class="slide" data-title="reliable-push">
   <div class="grow">
-    <p class="kicker">Open source · MIT · v0.1.2</p>
+    <p class="kicker">Open source · MIT · v0.1.2 · 0.2.0 in development</p>
     <h1>reliable-push</h1>
     <p class="lead">Know whether each push notification was <b>delivered</b> and <b>read</b>. When it was not, in time,
       trigger a <b>fallback</b> (SMS, email, anything) through a signed webhook.</p>
@@ -268,7 +268,7 @@
       <text class="t-muted" x="810" y="352" text-anchor="middle">SMS, email, …</text>
 
       <path class="e side" d="M150 150 V335 H366"/>
-      <text x="162" y="230">① register → trackingId</text>
+      <text x="162" y="230">① register its trackingId, then send</text>
       <path class="e side" d="M790 150 L560 297"/>
       <text x="690" y="215">② DELIVERED / READ</text>
       <path class="e fall" d="M590 335 H696"/>
@@ -286,11 +286,12 @@
     <div class="cols c3">
       <div class="card main"><div class="icon">🚀</div><h3>You keep sending</h3><p>Your backend sends every push with its own credentials. reliable-push never sends a push and never sees your FCM / APNs keys.</p></div>
       <div class="card ok"><div class="icon">🛟</div><h3>Down? Pushes still go out</h3><p>If reliable-push is down, only tracking and fallbacks pause. Device events wait in the SDK queue and are sent later.</p></div>
-      <div class="card side"><div class="icon">🫥</div><h3>SDKs only observe</h3><p>Pushes without <code>rp_tid</code> are left alone. A tracked notification is never hidden, and SDK errors never reach the app.</p></div>
+      <div class="card side"><div class="icon">🫥</div><h3>Display never waits on tracking</h3><p>Pushes without <code>rp_tid</code> are left alone. iOS hands a tracked notification back within 2 s; on Android the SDK posts it, and any SDK error still ends in a notification.</p></div>
     </div>
     <table style="margin-top:22px">
       <tr><th>If this fails…</th><th>Your pushes</th><th>reliable-push</th></tr>
-      <tr><td>reliable-push backend down</td><td><span class="pill ok">sent and shown</span></td><td>Tracking pauses; events are queued on the device; due fallbacks are sent late, inside the trigger window</td></tr>
+      <tr><td>reliable-push backend down</td><td><span class="pill ok">sent and shown</span></td><td>Registration times out after 1 s and the push goes out anyway; events are queued on the device; due fallbacks are sent late, inside the trigger window</td></tr>
+      <tr><td>User has no registered device</td><td><span class="pill ok">sent as usual</span></td><td><code>NO_DEVICE_REGISTERED</code>: not tracked, never a fallback</td></tr>
       <tr><td>Device offline</td><td><span class="pill ok">delivered later, as today</span></td><td><code>DELIVERED</code> is queued; if the timeout passes first, the fallback fires</td></tr>
       <tr><td>SDK cannot reach the backend</td><td><span class="pill ok">shown</span></td><td>Retried from the on-disk queue</td></tr>
       <tr><td>Fallback receiver down</td><td><span class="pill ok">not affected</span></td><td>Retried with backoff, then <code>FALLBACK_FAILED</code> / <code>FALLBACK_EXPIRED</code></td></tr>
@@ -361,9 +362,9 @@
   <h2>One notification, end to end</h2>
   <div class="grow">
     <div class="flow">
-      <div class="step side"><div class="n">1</div><h3>Register</h3><p class="small">Your backend calls <code>POST /v1/notifications</code> with <code>userId</code>, policy, timeout and fallback text, and gets a <code>trackingId</code>.</p></div>
+      <div class="step side"><div class="n">1</div><h3>Register</h3><p class="small">Your backend generates a <code>trackingId</code> (payload jar) and calls <code>POST /v1/notifications</code> with it, <code>userId</code>, policy, timeout and fallback text; 1 s timeout.</p></div>
       <div class="arrow">→</div>
-      <div class="step main"><div class="n">2</div><h3>Send</h3><p class="small">Your backend sends the push through FCM / APNs as today, adding <code>rp_tid = trackingId</code>.</p></div>
+      <div class="step main"><div class="n">2</div><h3>Send</h3><p class="small">Your backend always sends the push through FCM / APNs, with <code>rp_tid = trackingId</code>, whatever step 1 answered.</p></div>
       <div class="arrow">→</div>
       <div class="step side"><div class="n">3</div><h3>Delivered</h3><p class="small">The SDK reports <code>DELIVERED</code> when the notification is shown, even with the app closed.</p></div>
       <div class="arrow">→</div>
@@ -373,8 +374,8 @@
     </div>
     <div class="cols c2" style="margin-top:22px">
       <pre><code>POST /v1/notifications            X-Api-Key: …
-{ "userId": "user-42", "policy": "NOT_READ",
-  "timeoutMinutes": 10,
+{ "trackingId": "6f1c…", "userId": "user-42",
+  "policy": "NOT_READ", "timeoutMinutes": 10,
   "fallback": { "sms": "Your order has shipped." } }
 → 201 { "trackingId": "6f1c…", "state": "PENDING" }</code></pre>
       <pre><code>POST https://your-receiver/hook
@@ -383,6 +384,37 @@ X-RP-Signature: v1=…   Idempotency-Key: 6f1c…
   "fallback": { "sms": "Your order has shipped." },
   "reason": "NOT_READ", "attempt": 1 }</code></pre>
     </div>
+  </div>
+</section>
+
+<!-- 6b -->
+<section class="slide" data-title="Sender flow">
+  <p class="kicker">How it works · 0.2.0</p>
+  <h2>The sender: payload jar, register, always send</h2>
+  <div class="grow">
+    <div class="cols c2">
+      <pre><code>// reliable-push-payload: Java 8+, zero dependencies
+String tid = TrackingIds.newId();          // local, no network
+try {
+  client.register(RegisterRequest.builder() // timeout 1 s
+      .trackingId(tid).userId("user-42")
+      .fallback(Map.of("sms", "…")).build());
+} catch (ReliablePushException e) { /* informative only */ }
+
+String apns = ApnsPayloads.build(tid, title, body, null);
+Map&lt;String, String&gt; data = FcmPayloads.data(tid, title, body, null);
+send(...);                                 // always, with rp_tid</code></pre>
+      <table>
+        <tr><th>Register result</th><th>Tracking</th><th>Fallback</th></tr>
+        <tr><td><code>201 PENDING</code></td><td><span class="pill ok">yes</span></td><td>if the policy is unmet when due</td></tr>
+        <tr><td><code>201 NO_DEVICE_REGISTERED</code></td><td>no</td><td>never</td></tr>
+        <tr><td><code>4xx</code></td><td>no</td><td>never: a sender bug</td></tr>
+        <tr><td>timeout, row not stored</td><td>no</td><td>never: a missed fallback</td></tr>
+        <tr><td>timeout, row stored</td><td><span class="pill ok">yes</span></td><td>as <code>PENDING</code>, no duplicate</td></tr>
+        <tr><td>retry, same <code>trackingId</code></td><td>same row</td><td>once</td></tr>
+      </table>
+    </div>
+    <p class="small muted" style="margin-top:14px">The jar builds APNs payloads (<code>mutable-content</code>, top-level <code>rp_tid</code>) and Android data-only, high-priority FCM messages, or decorates the sender's own; a <code>PayloadException</code> means "send it untracked". Golden vectors define the same rules for Node, .NET, PHP. Untracked pushes are unchanged.</p>
   </div>
 </section>
 
@@ -546,19 +578,19 @@ X-RP-Signature: v1=…   Idempotency-Key: 6f1c…
   <div class="grow">
     <div class="cols c2">
       <div class="vflow">
-        <div class="row main">📨 FCM data message with <code>rp_tid</code></div>
+        <div class="row main">📨 FCM data-only message: <code>rp_tid</code>, title, body</div>
         <div class="down">↓</div>
         <div class="row">Your <code>FirebaseMessagingService</code> → <code>ReliablePushMessaging.onMessageReceived</code></div>
         <div class="down">↓</div>
-        <div class="row side">🔔 Notification posted (never hidden) · <code>DELIVERED</code> queued on disk</div>
+        <div class="row side">🚦 Gate → 💾 <code>DELIVERED</code> on disk → 🔔 local notification</div>
         <div class="down">↓</div>
-        <div class="row side">📤 Sent in a batch on the SDK thread · offline? JobScheduler retries</div>
+        <div class="row side">📤 One send on the SDK thread, no token renewal · offline? JobScheduler retries</div>
         <div class="down">↓</div>
         <div class="row ok">👆 Tap → <code>trackOpen(intent)</code> → <code>READ</code></div>
       </div>
       <div class="cols">
-        <div class="card"><h3>Small and plain</h3><p class="small">Kotlin, minSdk 26, Android APIs only: no AndroidX, OkHttp, WorkManager or coroutines. The release AAR is about 66 KB.</p></div>
-        <div class="card"><h3>Honest delivery</h3><p class="small"><code>DELIVERED</code> only when the notification was really shown. If it was blocked, the fallback decides, which is the point.</p></div>
+        <div class="card"><h3>The market-standard model</h3><p class="small">Data message → local notification: the only way to run code for a push in the background, as Catapush, OneSignal, Braze and Airship do. Any SDK error still posts a minimal notification. <code>AndroidConfigV2</code> waits for Google's GA; the payload jar is the switch point.</p></div>
+        <div class="card"><h3>Honest delivery</h3><p class="small"><code>DELIVERED</code> only when the notification will be shown. If it is blocked, the fallback decides. The app calls <code>ensureRegistered</code>; Kotlin stdlib only, AAR about 75 KB.</p></div>
         <div class="card"><h3>Integration</h3><pre><code>if (ReliablePushMessaging
       .onMessageReceived(this, msg)) return
 // your own handling</code></pre></div>
@@ -580,10 +612,11 @@ X-RP-Signature: v1=…   Idempotency-Key: 6f1c…
         <rect class="box side" x="20" y="120" width="200" height="80" rx="10"/>
         <text class="t-b" x="120" y="152" text-anchor="middle">Notification</text>
         <text class="t-b" x="120" y="172" text-anchor="middle">Service Extension</text>
-        <text class="t-muted" x="120" y="192" text-anchor="middle">DELIVERED, ≤ 5 s</text>
+        <text class="t-muted" x="120" y="192" text-anchor="middle">DELIVERED, ≤ 2 s</text>
         <rect class="box side" x="250" y="120" width="200" height="80" rx="10"/>
-        <text class="t-b" x="350" y="160" text-anchor="middle">App</text>
-        <text class="t-muted" x="350" y="182" text-anchor="middle">register · trackOpen = READ</text>
+        <text class="t-b" x="350" y="150" text-anchor="middle">App</text>
+        <text class="t-muted" x="350" y="172" text-anchor="middle">ensureRegistered</text>
+        <text class="t-muted" x="350" y="190" text-anchor="middle">trackOpen = READ</text>
         <rect class="box" x="20" y="250" width="200" height="60" rx="10"/>
         <text class="t-b" x="120" y="276" text-anchor="middle">App Group</text>
         <text class="t-muted" x="120" y="296" text-anchor="middle">event queue + state</text>
@@ -601,7 +634,7 @@ X-RP-Signature: v1=…   Idempotency-Key: 6f1c…
       </svg>
       <div class="cols">
         <div class="card"><h3>Swift package</h3><p class="small">iOS 15+, Swift 6, Apple frameworks only, under 300 KB. Add it by tag with SwiftPM: <code>from: "0.1.2"</code>.</p></div>
-        <div class="card"><h3>Works with the app closed</h3><p class="small">The extension records <code>DELIVERED</code> and calls the content handler <b>exactly once</b>: after the send, at the timeout, or when iOS ends the extension.</p></div>
+        <div class="card"><h3>Bounded wait, app closed too</h3><p class="small">The extension saves <code>DELIVERED</code>, sends it once (no token renewal) and calls the content handler <b>exactly once</b>: after the send, at 2 s, or when iOS ends it; at once on an SDK error. Only <code>ensureRegistered</code> in the app renews the token.</p></div>
         <div class="card"><h3>Store ready</h3><p class="small">Privacy manifest included. Short work in the extension, no hidden background activity.</p></div>
       </div>
     </div>
@@ -616,25 +649,26 @@ X-RP-Signature: v1=…   Idempotency-Key: 6f1c…
     <div class="cols c3">
       <div class="card main">
         <h3>1 · Sender backend</h3>
-        <p class="small">Register each notification, then put <code>rp_tid</code> in the push. Use <code>client-java</code> or any HTTP client.</p>
-        <pre><code>Notification n = client.register(
-  RegisterRequest.builder()
-    .userId("user-42")
+        <p class="small">Generate the id and payload with the payload jar, register (1 s timeout), always send with <code>rp_tid</code>. Use <code>client-java</code> or any HTTP client.</p>
+        <pre><code>String tid = TrackingIds.newId();
+client.register(RegisterRequest.builder()
+    .trackingId(tid).userId("user-42")
     .policy(NOT_READ)
     .fallback(Map.of("sms", "…"))
     .build());
-// push data: rp_tid = n.trackingId()</code></pre>
+send(ApnsPayloads.build(tid, t, b, null));</code></pre>
       </div>
       <div class="card side">
         <h3>2 · Mobile apps</h3>
-        <p class="small">Configure the SDK, register after login, hand pushes and taps to it.</p>
-        <pre><code>// iOS NSE
+        <p class="small">Configure the SDK, call <code>ensureRegistered</code> at start and after login, hand pushes and taps to it.</p>
+        <pre><code>// app (iOS and Android)
+ReliablePush.ensureRegistered(...)
+// iOS NSE
 reliablePush.didReceive(request,
     withContentHandler: handler)
-// app
-ReliablePush.trackOpen(response:)
-// Android
-ReliablePush.trackOpen(intent)</code></pre>
+// Android FirebaseMessagingService
+ReliablePushMessaging
+    .onMessageReceived(this, msg)</code></pre>
       </div>
       <div class="card fall">
         <h3>3 · Fallback receiver</h3>
@@ -735,13 +769,13 @@ answer 2xx</code></pre>
   <div class="grow">
     <div class="cols c4">
       <div class="card side"><div class="big">1,000/s</div><p class="small">events on one API replica (2 CPU / 1 GiB) for 5 min, plus 500 registrations/s. p99 38 ms, 0 failed.</p></div>
-      <div class="card side"><div class="big">~66 KB</div><p class="small">Android release AAR (gate: 100 KB)</p></div>
-      <div class="card side"><div class="big">~292 KB</div><p class="small">iOS stripped arm64 library (gate: 300 KB)</p></div>
+      <div class="card side"><div class="big">~75 KB</div><p class="small">Android release AAR (gate: 100 KB)</p></div>
+      <div class="card side"><div class="big">~293 KB</div><p class="small">iOS stripped arm64 library (gate: 300 KB)</p></div>
       <div class="card side"><div class="big">~105 MB</div><p class="small">backend container image (budget: 250 MB)</p></div>
     </div>
     <div class="cols c3" style="margin-top:18px">
-      <div class="card"><h3>1 call per event</h3><p class="small">The device makes at most one call per push event, plus rare token renewals.</p></div>
-      <div class="card"><h3>0 runtime dependencies</h3><p class="small">In the Java client and the iOS SDK. Kotlin stdlib only in the Android SDK.</p></div>
+      <div class="card"><h3>1 call per event</h3><p class="small">The device makes at most one call per push event; token renewals only from the app's <code>ensureRegistered</code>.</p></div>
+      <div class="card"><h3>0 runtime dependencies</h3><p class="small">In the Java client, the payload jar (Java 8+) and the iOS SDK. Kotlin stdlib only in the Android SDK.</p></div>
       <div class="card"><h3>1 stateful dependency</h3><p class="small">PostgreSQL. No queue, cache or broker to run.</p></div>
     </div>
     <p class="small muted" style="margin-top:12px">Load figures come from a local run on one Mac (2026-11-05). Use them as orders of magnitude.</p>
@@ -770,7 +804,8 @@ answer 2xx</code></pre>
           <li>Ops dashboard: <code>/admin/</code> page and read-only admin API</li>
           <li>Per-attempt webhook history and daily rollups</li>
           <li>Fallback circuit breaker per app: no SMS storm when tracking is missing; resume from the dashboard</li>
-          <li>E2E 19/19 with the new <code>admin-dashboard</code> and <code>fallback-circuit</code> scenarios</li>
+          <li>Cycle 6, sidecar integration revision: payload jar, sender-generated <code>trackingId</code>, register before send, <code>NO_DEVICE_REGISTERED</code>, 90-day events grace, <code>ensureRegistered</code> (no renewal on receive), iOS 2 s bounded wait, hardened Android posting</li>
+          <li>E2E 23/23; iOS and Android device suites 8/8 (1 skipped each)</li>
         </ul>
       </div>
       <div class="card fall">

@@ -373,7 +373,9 @@ admin disabled, or the rollup schedule `-`, retention behaves as before.
 - **Mixed-version deployments:** migrations are forward-only and run at startup. `V3` adds `notification.lease_until`
   and a CHECK that only `DISPATCHING` rows hold a lease; older API instances are unaffected, but do not run pre-V3 and
   current workers side by side (an old worker that re-claims a row left with a lease would fail to close it). Replace worker
-  replicas with a stop-then-start (`Recreate`) rollout across that boundary.
+  replicas with a stop-then-start (`Recreate`) rollout across that boundary. The same holds for `V7` (0.2.0) for every
+  replica, API included: pre-V7 instances cannot register devices or read `NO_DEVICE_REGISTERED` rows, and V7 locks
+  `notification` while it re-checks its state constraint ([deployment.md](deployment.md#upgrades)).
 - **Config skew during rollouts:** a worker without an app's configuration leaves that app's due rows alone (retried
   after one lease) and expires them 20 minutes after `due_at`; add new apps to all replicas before sending traffic.
 - **Circuit detection cost:** per tick, every configured app costs two small reads of the due-set indexes (and a

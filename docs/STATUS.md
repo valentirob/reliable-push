@@ -8,6 +8,57 @@ Everything left after `v0.1.0` is in [TODO.md](TODO.md): each item says why it i
 unblocks it. Agents: remind the maintainer of its section 1 (real APNs and the locked-device check, real FCM, Maven
 Central) at the start of a session.
 
+## 2026-11-08 (17) — Claude Code — cycle 6: sidecar integration revision (0.2.0, on `feature/sidecar-integration-revision`)
+
+- **Done:** the sidecar integration revision (spec `docs/specs/2026-11-08-sidecar-integration-revision-design.md`,
+  plan `docs/plans/2026-11-08-cycle6-sidecar-integration-revision.md`; FR-1, FR-5, FR-6, NFR-2 changed, FR-20 to FR-24
+  new). The sidecar stays; what changed:
+  - Task 1, payload jar `payload-java/` (Java 8 bytecode, zero dependencies): `TrackingIds`, `ApnsPayloads`,
+    `FcmPayloads`, `PayloadException` (8 codes), 39 golden vectors for other languages; CI runs it on Java 8 and 21.
+  - Tasks 2-3, backend: required sender `trackingId` (lower-cased, idempotent, `409` cross-app and `externalId`
+    mismatch), `NO_DEVICE_REGISTERED` (no active device: stored closed, never a fallback), migration
+    `V7__sidecar_revision.sql`, per-app `device-token-events-grace` (90 days, capped at 3650) on exactly
+    `POST /v1/events` and `DELETE /v1/devices/me`, metrics `rp_notifications_registered_total{outcome}`,
+    `rp_notification_registration_seconds`, `rp_events_total{token}`.
+  - Task 4, `client-java`: `trackingId` required and lower-cased, `NO_DEVICE_REGISTERED`, 1 s timeout advice.
+  - Task 5, iOS: no renewal on receive, `ensureRegistered` (async provider, 30 s cap), extension timeout 2 s, handler
+    exactly once on every path (fault injection tests).
+  - Task 6, Android: no renewal, `ensureRegistered` with a callback provider (no coroutines, NFR-10), `handle` gates on
+    the final channel, persists `DELIVERED`, then posts; catch-all with a minimal notification.
+  - Task 7, harness, load test and device E2E: fake sender and console on the jar, simulator without renewal, four new
+    scenarios (`no-device-registered`, `client-tracking-id`, `registration-lost`, `token-grace`), device logout tests
+    expect `NO_DEVICE_REGISTERED`.
+  - Task 8 (this entry): docs, diagrams and presentation. `integration-guide.md` rewritten around the sender flow
+    (checklist, outcome table, residual case, raw APNs / Pushy / Firebase Admin SDK examples, golden vectors) and the
+    false "the SDK never hides a notification" corrected (Android posts it: data message → local notification, the
+    market-standard model); `ios.md` / `android.md` completed (parked minors: `provider_timeout` in the WARN list, "no
+    NotificationManager" false case, missing Android WARN names); `api.md` and `openapi.yaml` (lower case, `409`
+    cases, validation order, grace only on events and logout); `security.md` (cross-app `409`); `deployment.md` and
+    `operations.md` (V7: one transaction, exclusive lock on `notification` while the state check is re-validated,
+    stop-then-start, backend before senders); `architecture.md`, `getting-started.md`, `requirements.md`, `README.md`,
+    `testing.md`, `CONTRIBUTING.md`, `overview.md` (sender flow with the jar, iOS bounded wait, Android gate → persist →
+    post, `ensureRegistered`), the at-a-glance SVG (PNG re-rendered at 2x with headless Chrome), the presentation (new
+    "Sender flow" slide, Android and iOS slides, sizes, status), `CHANGELOG.md` (cycle 6 entries and the incompatible
+    changes), `TODO.md` (2.1: the jar is the switch point; 4.11 iOS size headroom; 4.12 simulator drops 429/503).
+    Backend minors: V7 kept as is (a `not valid` constraint plus `validate` in the same Flyway transaction would still
+    hold the exclusive lock; documented instead); `EventsGraceIT` sends the dot-segment paths raw (`java.net.URI`), adds
+    `%2E%2E`, and checks that no `deviceToken` comes back.
+- **State:** from the task ledger: payload jar 96 tests (39 vectors); `client-java` 39; iOS package tests 133 (1
+  skipped), size 292,896 bytes; Android 143 unit tests, release AAR 75,197 bytes; `./scripts/e2e.sh`
+  `[e2e] summary: 23/23 passed`; `iOS E2E: 8/8 passed, 1 skipped`; `Android E2E: 8/8 passed, 1 skipped`. Runs of this
+  entry (2026-11-08, after the docs and the `EventsGraceIT` change): `cd backend && ./mvnw -B verify`: unit 352, IT 341,
+  0 failures, line coverage 95.4 %, BUILD SUCCESS; root `./mvnw -B verify`: payload 96, client 39, harness 169 unit +
+  92 IT, loadtest 19, BUILD SUCCESS; `deploy/helm/scripts/validate.sh`: 93 unit tests, all checks passed. Not re-run
+  here: E2E, device suites (no code change since Task 7).
+- **Open:** the Mermaid diagrams were not rendered locally (no Mermaid CLI; GitHub renders them); parked minors from
+  the reviews: Task 7 (`TokenGraceScenario` margin 3 → 5 s with a cross-reference to the 60 s skew, simulator Javadoc
+  on the 429/503 drop, check that the load stack's token validity outlasts a run), Task 6 (narrow window between
+  `logout` and a new `ensureRegistered`), Task 5 (weak slot-id assertion in a test); TODO 4.11 (iOS size headroom) and
+  4.12; the Java 8 CI leg of the payload jar has not run yet (first push); TODO section 1 (real APNs and FCM, Maven
+  Central, now with the payload jar).
+- **Next:** final review wave of the branch, merge `feature/sidecar-integration-revision` into `develop` (`--no-ff`),
+  push, CI (first run of the payload jar's Java 8 leg); then release 0.2.0 when the maintainer decides (TODO 5.1).
+
 ## 2026-11-08 (16) — Claude Code — cycle 5: fallback circuit breaker (0.2.0, on `feature/fallback-circuit-breaker`)
 
 - **Done:** the per-app fallback circuit breaker (FR-18, FR-19; spec

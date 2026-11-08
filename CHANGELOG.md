@@ -58,6 +58,60 @@ All notable changes to this project are documented here. Versions follow [Semant
   `architecture.md`, `deployment.md`, `integration-guide.md` (senders see `FALLBACK_EXPIRED` during an open circuit),
   `testing.md`, `overview.md`, `requirements.md`, the at-a-glance picture and the presentation.
 
+- Sidecar integration revision (0.2.0, cycle 6; spec `docs/specs/2026-11-08-sidecar-integration-revision-design.md`,
+  FR-20 to FR-24):
+  - Payload jar `payload-java/` (`io.reliablepush:reliable-push-payload`, Java 8 bytecode, zero runtime dependencies):
+    `TrackingIds.newId()`, `ApnsPayloads.build/decorate`, `FcmPayloads.build/data/decorate`, `PayloadException` with
+    eight codes; golden vectors in `payload-java/src/test/resources/vectors/` for other languages. CI runs its tests on
+    Java 8 and 21.
+  - Sender-generated `trackingId` on `POST /v1/notifications`, idempotent per app (`insert ... on conflict do
+    nothing`), stored and returned in lower case; `client-java` `RegisterRequest.trackingId(...)` (required).
+  - New final state `NO_DEVICE_REGISTERED`: a registration for a user without an active device is stored closed and
+    never falls back (log `notification.no_device_registered`); admin overview, trends, search and daily statistics
+    count it as `noDeviceRegistered`; `client-java` knows it.
+  - Per-app `device-token-events-grace` (default 90 days, `0` disables, at most 3650): `POST /v1/events` and
+    `DELETE /v1/devices/me` (exact route match) accept an expired device token inside it; log field `token_state`,
+    metric tag `rp_events_total{token}`.
+  - Metrics `rp_notifications_registered_total{outcome}` and the histogram `rp_notification_registration_seconds`.
+  - Migration `V7__sidecar_revision.sql`: the new state in `notification_state_check`, `device.token_expires_at`
+    (backfilled as `last_seen_at` + 90 days, `not null`), `daily_stats.no_device_registered`. It locks `notification`
+    while re-checking the constraint and needs a stop-then-start upgrade (`deployment.md`).
+  - SDKs: `ensureRegistered(idTokenProvider)` on iOS (async provider, 30 s cap, completion or `async`) and Android
+    (callback provider `(deliver) -> Unit`, 30 s cap); one run at a time; `RegisterResult` gains `notLoggedIn` /
+    `NotLoggedIn` and `alreadyRegistered` / `AlreadyRegistered`; a `401` on an event send keeps the events and stores
+    `renewalNeeded`.
+  - Harness: the fake sender and the console use the payload jar; the device simulator never renews on the event path
+    and has an "Ensure registered" button; E2E scenarios `no-device-registered`, `client-tracking-id`,
+    `registration-lost`, `token-grace` (the full run is now 23 entries); the load test registers devices and sends
+    `trackingId`.
+  - Docs: `integration-guide.md` rewritten around the sender flow (checklist, outcome table, residual case, raw APNs,
+    Pushy and Firebase Admin SDK examples); `ios.md` and `android.md` (extension step by step, data message and local
+    notification, robustness, `ensureRegistered`); `api.md`, `openapi.yaml`, `security.md`, `operations.md`,
+    `deployment.md` (V7 upgrade), `architecture.md`, `requirements.md`, `overview.md`, the at-a-glance picture and the
+    presentation (new "Sender flow" slide).
+
+### Changed (incompatible, pre-1.0)
+
+- `POST /v1/notifications` requires the sender's `trackingId` (`400` naming the field without it or when it is not a
+  UUID, after the `422` field validation). An `externalId` already registered under another `trackingId`, and a
+  `trackingId` of another app, are `409` (before: a repeated `externalId` returned the existing record).
+- `POST /v1/notifications` for a user without an active device no longer schedules a fallback
+  (`NO_DEVICE_REGISTERED`). Clients that switch over states must handle the new value.
+- The SDKs no longer renew the device token on their own (not on receive, not in any flush): apps must call
+  `ensureRegistered` (or `register`) from time to time, at least at start or foreground and after login. Exhaustive
+  `switch` / `when` over `RegisterResult` must handle the two new cases.
+- iOS `extensionSendTimeout` default 5 s → 2 s. The extension persists `DELIVERED`, sends it once and hands the
+  notification back when the send ends or the timeout expires; any SDK error hands it back at once.
+- Android `handle` gates on the notification's final channel, persists `DELIVERED`, then posts; anything that throws
+  before the post ends in a minimal notification (title and body, else the app name), and nothing reaches the host.
+  A post that fails after `DELIVERED` was persisted means a missed fallback, not a duplicate one.
+- Admin overview and daily statistics gain `noDeviceRegistered` and leave it out of the rate denominators; the circuit
+  breaker's cohort leaves it out too.
+- `rp_notifications_registered_total` gains the tag `outcome` (`pending`, `no_device_registered`);
+  `rp_events_total` gains `token` (`valid`, `grace`).
+- Docs: the statement that the SDK never hides a notification is corrected: on Android the SDK posts tracked
+  notifications itself (data message → local notification, the market-standard model).
+
 ### Fixed
 
 - iOS: `ReliablePushExtension` reads the stored configuration (App Group, Keychain access group) only in `didReceive`,

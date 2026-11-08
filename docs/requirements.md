@@ -17,16 +17,18 @@ one or more apps.
 ## Functional requirements
 
 ### Notification tracking (sender side)
-- **FR-1** An existing notification backend registers each push it sends via an API, receiving (or supplying) a `trackingId` to embed in the push payload. reliable-push does not send pushes itself.
+- **FR-1** An existing notification backend registers each tracked push via an API **before sending it**, supplying the `trackingId` it embeds in the push payload (a payload library builds the id and the payload, FR-22), and sends the push whatever the registration outcome. reliable-push does not send pushes itself. (Changed in 0.2.0, [spec](specs/2026-11-08-sidecar-integration-revision-design.md))
 - **FR-2** Each registration carries `appId`, `userId`, the fallback message content, and a fallback policy: condition `NOT_DELIVERED` or `NOT_READ`, and a timeout in minutes (default per app).
 - **FR-3** The sender can cancel a pending notification and query its status.
+- **FR-24** The registration call is idempotent on the sender-supplied `trackingId`. (0.2.0)
 
 ### Device side
 - **FR-4** The mobile SDK registers the device when the user logs in or opens the app, proving user identity with the app's existing OIDC ID token (pluggable verifier; signed grant as alternative).
-- **FR-5** The backend issues a long-lived device token (default 90 days, configurable per app). The SDK validates expiry locally and renews only when near expiry (default: < 20% validity left).
-- **FR-6** The SDK reports `DELIVERED` when a tracked push arrives, **including when the app is not running** (iOS Notification Service Extension; Android FCM service).
+- **FR-5** The backend issues a long-lived device token (default 90 days, configurable per app). The SDK renews it only in an app-initiated, asynchronous `ensureRegistered` (when it is near expiry, default < 20% validity left, or was rejected), never on the push receive path. (Changed in 0.2.0)
+- **FR-6** The SDK reports `DELIVERED` when a tracked push arrives, **including when the app is not running** (iOS Notification Service Extension; Android FCM service). `DELIVERED` is recorded first and sent at once, with no token renewal; on iOS the notification is handed back when the send ends or after a bounded timeout (default 2 s). (Changed in 0.2.0)
 - **FR-7** The SDK reports `READ` when the user opens the notification.
 - **FR-8** The SDK unregisters the device on logout.
+- **FR-21** `POST /v1/events` and `DELETE /v1/devices/me` accept a device token expired by at most a per-app grace period (default 90 days); token refresh does not. (0.2.0)
 
 ### Fallback
 - **FR-9** If the policy condition is still unmet at `sentAt + timeout`, the backend calls the app's configured fallback webhook once with `userId`, message, `trackingId` and reason.
@@ -36,6 +38,11 @@ one or more apps.
 - **FR-12a** A fallback (first attempt, retry, or recovery after a worker crash/outage) is dispatched only within a configurable trigger window after its scheduled time (default 20 minutes). Outside the window it is not sent and ends in `FALLBACK_EXPIRED`.
 - **FR-18** The backend stops triggering fallbacks for an app when, within a configurable window, many notifications come due unmet while almost no `DELIVERED` event arrives for that app (circuit open). It resumes by itself when `DELIVERED` events arrive again. Notifications that come due while the circuit is open end without a fallback and are never resumed. Every open and close is logged, counted and stored with its counters. (0.2.0, [spec](specs/2026-11-07-fallback-circuit-breaker-design.md))
 - **FR-19** Configuration can disable the circuit breaker, and can suspend fallback triggering for every app regardless of the circuit. An operator with the admin permission `fallback-control` can force an open circuit closed from the admin console for a configurable time; the action is audit-logged.
+- **FR-20** A notification registered for a user with no active device for the app is stored closed as `NO_DEVICE_REGISTERED` and never triggers a fallback. (0.2.0)
+
+### Sender and SDK integration
+- **FR-22** A standalone Java 8+ library with zero runtime dependencies generates tracking ids and builds and validates tracked APNs and FCM payloads; golden test vectors define the same rules for other languages. (0.2.0)
+- **FR-23** The SDK's tracking never prevents a tracked notification from being shown or delays it beyond the bounded iOS timeout: any SDK error ends in the notification being shown (iOS: the content handed back at once; Android: the simplest notification the SDK can post). (0.2.0)
 
 ### Multi-app
 - **FR-13** One deployment serves several apps of one organisation, each with its own sender API key, OIDC issuer/audience, device-token validity, default timeout and fallback webhook.
@@ -51,7 +58,7 @@ one or more apps.
 ## Non-functional requirements
 
 - **NFR-1 Security** All APIs authenticated (sender API key; device JWT). Events accepted only for `trackingId`s of the same app and user as the device token. Rate limiting per device and per app. No secrets in the repo.
-- **NFR-2 Performance** Lightweight: the device side makes at most one call per push event plus rare token renewals. Target ≥ 1,000 events/s per backend replica. **Validated (plan 1C, 2026-11-05): passed**: one API replica limited to 2 CPUs / 1 GiB, criterion and results in [operations.md, "Measured capacity"](operations.md#measured-capacity) (local load test `./scripts/load.sh`).
+- **NFR-2 Performance** Lightweight: the device side makes at most one call per push event; token renewals happen only from `ensureRegistered` (changed in 0.2.0). Target ≥ 1,000 events/s per backend replica. **Validated (plan 1C, 2026-11-05): passed**: one API replica limited to 2 CPUs / 1 GiB, criterion and results in [operations.md, "Measured capacity"](operations.md#measured-capacity) (local load test `./scripts/load.sh`).
 - **NFR-3 Reliability** Survives restarts; runs as multiple replicas without double-firing fallbacks.
 - **NFR-4 Portability** Runs on Google Cloud GKE and Red Hat OpenShift (non-root, arbitrary UID), PostgreSQL as the only stateful dependency.
 - **NFR-5 Store compliance** SDKs follow Apple App Store and Google Play policies: short work in extensions/services, no hidden background activity, minimal data, privacy manifests and documented data collection.

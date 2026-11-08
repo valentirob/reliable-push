@@ -32,6 +32,11 @@ Summary of how the backend protects data and authenticates callers. The binding 
   (startup fails).
 - Each app has exactly one key hash, so rotating a key is a switch-over: deploy the new `sender-api-key-sha256` and update
   the sender at the same time (or accept a short window of `401`s on the sender, which should retry registration).
+- **Sender-generated tracking ids.** The sender supplies `trackingId` (spec 2026-11-08, sidecar revision). A
+  `trackingId` that already exists for **another app** answers `409`, so a sender can learn that an id exists in another
+  app of the same deployment, and nothing else (no state, user or content). Low risk: ids are random UUIDs
+  (`TrackingIds.newId()`), all apps belong to one organisation, and a guessed id still gives no access to the other
+  app's notification (`GET` and `DELETE` answer `404` for it, events from another app's devices get `NOT_FOUND`).
 
 ## Admin keys
 
@@ -187,6 +192,9 @@ environment variables.
 - **Rate limits are per instance:** with N replicas a caller can use up to N times the configured rate. Unauthenticated
   floods (for example `POST /v1/devices` with garbage credentials) are limited only by the ingress: configure per-IP limits
   there.
+- **Expired device tokens on events and logout:** a stolen device token keeps working on those two routes for at most
+  `device-token-validity + device-token-events-grace` after its last refresh ([Device tokens](#device-tokens)).
+- **Cross-app `409` on registration** reveals that a `trackingId` exists in another app ([Sender API keys](#sender-api-keys)).
 - **Revocation latency:** another instance may honour a revoked token for up to `revocation-cache-ttl` (default 60 s).
 - **User hash:** pseudonymisation, not anonymisation.
 - **`azp` is ignored** when verifying OIDC ID tokens; scope tokens by `aud`.

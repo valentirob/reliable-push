@@ -223,6 +223,18 @@ kubectl -n reliable-push rollout status deploy/rp-reliable-push --timeout=180s
 - **V6 (fallback circuit breaker, 0.2.0):** `V6__fallback_circuit.sql` adds two small tables (`fallback_circuit`,
   `fallback_circuit_event`); quick on any table size. From 0.2.0 the circuit breaker is **on by default**
   ([Fallback circuit breaker](#fallback-circuit-breaker) below).
+- **V7 (sidecar integration revision, 0.2.0):** `V7__sidecar_revision.sql` runs in one transaction. It re-creates the
+  `notification_state_check` constraint, which checks every `notification` row while holding an exclusive lock on the
+  table (registrations, events and the worker wait for it), fills the new `device.token_expires_at` for every device
+  row and makes it `not null`, and adds a column to `daily_stats`. Seconds on small tables; on tens of millions of
+  notifications plan a maintenance window (the first new pod starts only after it, within the 180 s startup probe).
+  Do not run pre-V7 and V7 pods side by side: an old pod cannot register a device (it does not write
+  `token_expires_at`) and cannot read a `NO_DEVICE_REGISTERED` row. Stop the old pods first, as for V3 (split mode
+  `worker.strategy: Recreate` plus scaling the API to 0; combined mode scale to 0, then `helm upgrade`).
+  **Senders** must switch at the same time: 0.2.0 requires `trackingId` on `POST /v1/notifications` (`400` without
+  it). The other way round is worse: a 0.1.x backend ignores the sender's `trackingId` and creates its own, so the
+  devices report an id it does not know and those fallbacks fire although the push was delivered. Upgrade the backend
+  first and switch the senders right after; in between, old senders get `400` and their pushes go out untracked.
 - Add a new app to `config.apps` on all replicas before sending its traffic (one `helm upgrade` does that).
 
 ## Graceful shutdown

@@ -33,6 +33,7 @@ Reports: `target/surefire-reports/` (unit), `target/failsafe-reports/` (integrat
 | Container image | `ContainerImageIT`, tagged `image` | failsafe, only with `-Pimage` | Starts as an arbitrary non-root UID, stays below the 250 MB budget (sum of uncompressed layers), read-only root filesystem with a writable `/tmp`, JSON-only stdout |
 | Logging assertions | inside the ITs and `EcsTemplateTest` | both | Catalogue events are emitted, fields are unique, and no secrets, tokens, user ids or message content reach the log |
 | Client | `client-java/`, JUnit 5 against a local HTTP server | surefire | The Java sender client: requests, problem details, timeouts, redirects, `Retry-After`; an enforcer rule keeps it free of runtime dependencies |
+| Payload jar | `payload-java/`, JUnit 5 + AssertJ, `GoldenVectorsTest` | surefire (JDK 21; CI also forks a Java 8 JVM) | Tracking ids, APNs and FCM build and decorate, every `PayloadException` code, the JSON parser, and every golden vector in `src/test/resources/vectors/`; an enforcer rule keeps it free of runtime dependencies; it compiles with `--release 8` |
 | Harness | `harness/`, JUnit 5, `*Test` and `*IT` (Spring on a random port, no Docker needed) | surefire / failsafe | The harness itself: device simulator, signed grants, fallback receiver, fake sender, tracking poller, scenario runner, console REST and SSE |
 | End-to-end | `harness/`, `./scripts/e2e.sh` | local only, never in CI | 22 scenarios across the real backend (one API, two workers), PostgreSQL, the fallback receiver and the device simulator, with the fast clock |
 | Console smoke | Playwright for Java against the harness web console | local only | The 23rd entry of the E2E run: `ConsoleSmokeE2E` (a headless browser registers a device, sends a push and sees `DELIVERED` and the fallback in the inbox) and `AdminSmokeE2E` (signs in to `/admin/` with the per-run admin key, checks the overview, a search, a notification detail and the fallback circuit view) |
@@ -55,11 +56,13 @@ Reports: `target/surefire-reports/` (unit), `target/failsafe-reports/` (integrat
 
 ## Client and harness builds
 
-Run from the repository root (one Maven wrapper for `client-java` and `harness`; the backend keeps `backend/mvnw`):
+Run from the repository root (one Maven wrapper for `client-java`, `payload-java`, `harness` and `loadtest`; the backend
+keeps `backend/mvnw`):
 
 | Goal | Command |
 |---|---|
 | Client build and tests (what CI runs) | `./mvnw -B -pl client-java verify` |
+| Payload jar build and tests, golden vectors included (CI also runs them on Java 8: `-Djvm=<path to java 8>`) | `./mvnw -B -pl payload-java verify` |
 | Harness build and tests, including `client-java` (what CI runs) | `./mvnw -B -pl harness -am verify` |
 | Console smoke test against a running stack (needs Playwright's Chromium, about 150 MB, downloaded on first use) | `./mvnw -B -pl harness -am verify -Pconsole-smoke` |
 | Loadtest module: compiles the simulations, runs the unit tests, never starts Gatling (what CI runs) | `./mvnw -B -pl loadtest verify` |
@@ -146,7 +149,9 @@ The release build is minified with R8 (`android/reliablepush/proguard-rules.pro`
 `ANDROID_AVD`; it is stopped again if the script started it), runs the sample's instrumented tests and the library's
 Keystore tests, and writes `harness/build/android-e2e/` (`summary.json`, `junit/`, `logs/`); it ends with `Android E2E: 8/8 passed, 1 skipped`
 (the skipped entry is `fcm-real-delivery`, see the next section). The emulator reaches the stack at `10.0.2.2`
-(`8080` backend, `8090` harness). On Android 17 the E2E grants the sample `ACCESS_LOCAL_NETWORK`. The workflow
+(`8080` backend, `8090` harness). On Android 17 the E2E grants the sample `ACCESS_LOCAL_NETWORK`. Since 0.2.0 the sample calls `ensureRegistered`
+at start and after login, and the logout test expects `NO_DEVICE_REGISTERED` and no webhook; the fault injection in
+`handle` (store, queue, gate or poster throwing) is covered by the Robolectric unit tests. The workflow
 `.github/workflows/android-ci.yml` never runs it: CI has no emulator and no Firebase files.
 
 ## iOS SDK tests
@@ -166,7 +171,10 @@ Versions are pinned in `ios/README.md`. No Docker for the unit tests.
 `harness/build/ios-e2e/` (`summary.json`, result bundles, `logs/`); it ends with `iOS E2E: 8/8 passed, 1 skipped`. The
 Simulator does not run a Notification Service Extension for `xcrun simctl push` or `.apns` files, so the tests open the
 sample's debug URL `rpsample://debug-push?...`, which runs the same `ReliablePushExtension` code in the app process and
-shows the result as a local notification that the test taps. "Offline" is the harness device proxy's online/offline switch
+shows the result as a local notification that the test taps. Since 0.2.0 the sample calls `ensureRegistered` at start and after login, the token
+refresh test drives it by bringing the app to the foreground, and the logout test expects `NO_DEVICE_REGISTERED` and no
+webhook (the user's only device is revoked). The extension's bounded wait (handler on time, exactly once, also with a
+hanging settings read or a failing Keychain) is covered by the package tests, not by the Simulator suite. "Offline" is the harness device proxy's online/offline switch
 (the Simulator shares the Mac's network and has no airplane mode). `.github/workflows/ios-ci.yml` never runs it: CI builds
 and unit-tests the package, builds the sample (Debug and Release) and checks the size and the manifest.
 

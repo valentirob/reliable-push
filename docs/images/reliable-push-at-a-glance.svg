@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1100" width="1600" height="1100" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" role="img" aria-labelledby="title desc">
   <title id="title">reliable-push at a glance</title>
-  <desc id="desc">Your backend sends pushes through FCM and APNs to an iPhone and an Android phone, as today. It also registers each push with the reliable-push backend. A tracking module in each app reports DELIVERED when the push arrives and READ when it is tapped. If the policy is not met before the timeout, the reliable-push worker calls your signed fallback webhook, and your fallback service sends an SMS or an email. A per-app circuit breaker in front of the webhook stops the fallbacks of an app whose delivery tracking is missing, so an outage does not turn into a storm of needless SMS. The ops dashboard shows each app's circuit.</desc>
+  <desc id="desc">Your backend sends pushes through FCM and APNs to an iPhone and an Android phone, as today. For each tracked push it generates a tracking id with the payload jar, registers the push with the reliable-push backend with a 1 s timeout, and always sends the push with that id. On the iPhone the Notification Service Extension saves DELIVERED, sends it once and hands the notification back within 2 s; on Android the SDK turns a data message into a local notification after saving DELIVERED. A tracking module in each app reports DELIVERED when the push arrives and READ when it is tapped. If the policy is not met before the timeout, the reliable-push worker calls your signed fallback webhook, and your fallback service sends an SMS or an email. A per-app circuit breaker in front of the webhook stops the fallbacks of an app whose delivery tracking is missing, so an outage does not turn into a storm of needless SMS. The ops dashboard shows each app's circuit.</desc>
   <defs>
     <marker id="m-main" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#2563eb"/></marker>
     <marker id="m-side" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#0d9488"/></marker>
@@ -14,7 +14,7 @@
 
   <!-- Title and legend -->
   <text x="60" y="50" font-size="30" font-weight="700" fill="#0f172a">reliable-push at a glance</text>
-  <text x="60" y="78" font-size="16" fill="#475569">A sidecar: your backend keeps sending pushes. reliable-push only tracks them and triggers a fallback.</text>
+  <text x="60" y="78" font-size="16" fill="#475569">A sidecar: your backend keeps sending pushes (plus a payload jar and one register call). reliable-push only tracks them and triggers a fallback.</text>
   <g font-size="14" fill="#334155">
     <line x1="60" y1="104" x2="100" y2="104" stroke="#2563eb" stroke-width="4"/><text x="108" y="109">your push path (unchanged)</text>
     <line x1="310" y1="104" x2="350" y2="104" stroke="#0d9488" stroke-width="4"/><text x="358" y="109">reliable-push tracking (sidecar)</text>
@@ -24,12 +24,12 @@
   <!-- Your backend (sender) -->
   <g filter="url(#shadow)"><rect x="60" y="130" width="360" height="180" rx="16" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/></g>
   <text x="240" y="166" font-size="20" font-weight="700" fill="#1e3a8a" text-anchor="middle">Your backend</text>
-  <text x="240" y="188" font-size="14" fill="#1e40af" text-anchor="middle">(push sender, unchanged)</text>
+  <text x="240" y="188" font-size="14" fill="#1e40af" text-anchor="middle">(push sender, keeps its FCM / APNs keys)</text>
   <g font-size="14" fill="#334155">
-    <text x="84" y="220">• sends pushes via FCM / APNs, as today</text>
-    <text x="84" y="244">• adds one call: register the push ①</text>
-    <text x="84" y="268">• puts rp_tid in the push payload</text>
-    <text x="84" y="292">• register fails? send it anyway</text>
+    <text x="84" y="220">• payload jar: tracking id + payload</text>
+    <text x="84" y="244">• registers the push first ① (1 s timeout)</text>
+    <text x="84" y="268">• always sends it with rp_tid ②</text>
+    <text x="84" y="292">• untracked pushes: unchanged</text>
   </g>
 
   <!-- FCM / APNs -->
@@ -47,7 +47,7 @@
   <line x1="960" y1="230" x2="1124" y2="230" stroke="#2563eb" stroke-width="4" marker-end="url(#m-main)"/>
   <path d="M930,164 L930,130 L1465,130 L1465,144" fill="none" stroke="#2563eb" stroke-width="4" marker-end="url(#m-main)"/>
   <text x="1042" y="216" font-size="15" font-weight="700" fill="#1e40af" text-anchor="middle">③ deliver</text>
-  <text x="1042" y="122" font-size="13" fill="#1e40af" text-anchor="middle">③ deliver</text>
+  <text x="1042" y="122" font-size="13" fill="#1e40af" text-anchor="middle">③ deliver (Android: data-only message)</text>
 
   <!-- iPhone -->
   <g filter="url(#shadow)"><rect x="1130" y="150" width="210" height="430" rx="34" fill="#0f172a"/></g>
@@ -58,7 +58,7 @@
   <text x="1235" y="246" font-size="15" font-weight="700" fill="#1e3a8a" text-anchor="middle">Your iOS app</text>
   <g font-size="12.5" fill="#334155">
     <text x="1164" y="270" font-weight="600" fill="#0f766e">ReliablePush SDK</text>
-    <text x="1164" y="292">• registers the device</text>
+    <text x="1164" y="292">• ensureRegistered</text>
     <text x="1164" y="312">• READ when tapped</text>
     <text x="1164" y="330" fill="#64748b">shows pushes as today</text>
   </g>
@@ -67,12 +67,12 @@
   <g font-size="12.5" fill="#334155">
     <text x="1164" y="398" fill="#0f766e" font-weight="600">Notification Service</text>
     <text x="1164" y="414" fill="#0f766e" font-weight="600">Extension</text>
-    <text x="1164" y="438">• DELIVERED as soon</text>
-    <text x="1164" y="456">  as the push arrives,</text>
-    <text x="1164" y="474">  even if the app is</text>
-    <text x="1164" y="492">  closed</text>
-    <text x="1164" y="516">• at most 5 s, the</text>
-    <text x="1164" y="534">  push is always shown</text>
+    <text x="1164" y="438">• saves DELIVERED,</text>
+    <text x="1164" y="456">  sends it once, then</text>
+    <text x="1164" y="474">  shows the push, also</text>
+    <text x="1164" y="492">  with the app closed</text>
+    <text x="1164" y="516">• waits at most 2 s;</text>
+    <text x="1164" y="534">  SDK error: shown now</text>
   </g>
 
   <!-- Android phone -->
@@ -84,21 +84,21 @@
   <text x="1465" y="246" font-size="15" font-weight="700" fill="#1e3a8a" text-anchor="middle">Your Android app</text>
   <g font-size="12.5" fill="#334155">
     <text x="1394" y="270" font-weight="600" fill="#0f766e">ReliablePush SDK</text>
-    <text x="1394" y="292">• registers the device</text>
+    <text x="1394" y="292">• ensureRegistered</text>
     <text x="1394" y="312">• READ when tapped</text>
-    <text x="1394" y="330" fill="#64748b">shows pushes as today</text>
+    <text x="1394" y="330" fill="#64748b">own pushes as today</text>
   </g>
   <rect x="1382" y="352" width="166" height="204" rx="12" fill="#f0fdfa" stroke="#0d9488" stroke-width="2.5"/>
   <text x="1465" y="376" font-size="14.5" font-weight="700" fill="#115e59" text-anchor="middle">Tracking module</text>
   <g font-size="12.5" fill="#334155">
     <text x="1394" y="398" fill="#0f766e" font-weight="600">hook in your Firebase</text>
     <text x="1394" y="414" fill="#0f766e" font-weight="600">MessagingService</text>
-    <text x="1394" y="438">• DELIVERED as soon</text>
-    <text x="1394" y="456">  as the push arrives,</text>
-    <text x="1394" y="474">  even if the app is</text>
-    <text x="1394" y="492">  killed</text>
-    <text x="1394" y="516">• offline: queued and</text>
-    <text x="1394" y="534">  retried later</text>
+    <text x="1394" y="438">• data message: saves</text>
+    <text x="1394" y="456">  DELIVERED, posts the</text>
+    <text x="1394" y="474">  local notification,</text>
+    <text x="1394" y="492">  also if app killed</text>
+    <text x="1394" y="516">• SDK error: still a</text>
+    <text x="1394" y="534">  minimal notification</text>
   </g>
 
   <!-- ④ phones → reliable-push -->
@@ -109,8 +109,8 @@
 
   <!-- ① sender → reliable-push -->
   <path d="M300,310 L300,440 L930,440 L930,504" fill="none" stroke="#0d9488" stroke-width="4" marker-end="url(#m-side)"/>
-  <text x="500" y="428" font-size="15" font-weight="700" fill="#115e59" text-anchor="middle">① register the push</text>
-  <text x="500" y="462" font-size="13" fill="#115e59" text-anchor="middle">userId, policy, timeout, fallback → trackingId</text>
+  <text x="500" y="428" font-size="15" font-weight="700" fill="#115e59" text-anchor="middle">① register the push, then send it</text>
+  <text x="500" y="462" font-size="13" fill="#115e59" text-anchor="middle">trackingId, userId, policy, timeout, fallback · 1 s timeout</text>
 
   <!-- reliable-push backend -->
   <g filter="url(#shadow)"><rect x="540" y="510" width="480" height="250" rx="18" fill="#f0fdfa" stroke="#0d9488" stroke-width="2.5"/></g>
@@ -131,6 +131,7 @@
   <text x="931" y="606" font-size="15" font-weight="700" fill="#0f172a" text-anchor="middle">API</text>
   <text x="931" y="628" font-size="12" fill="#475569" text-anchor="middle">registers pushes,</text>
   <text x="931" y="646" font-size="12" fill="#475569" text-anchor="middle">devices and events</text>
+  <text x="931" y="662" font-size="11" fill="#475569" text-anchor="middle">no device → no fallback</text>
   <!-- PostgreSQL cylinder -->
   <g>
     <path d="M700,690 L700,736 A80,12 0 0 0 860,736 L860,690" fill="#ffffff" stroke="#14b8a6" stroke-width="1.5"/>

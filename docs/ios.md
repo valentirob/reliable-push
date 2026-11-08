@@ -4,10 +4,12 @@ The iOS SDK (Swift package `ReliablePush`, iOS 15.0+, Swift 6) tracks pushes tha
 Notification Service Extension (NSE) in your app reports `DELIVERED` when the notification is about to be shown, even
 when the app is not running, and the app reports `READ` when the user taps it. Events that could not be sent are
 queued and retried. Apple frameworks only (Foundation, UserNotifications, Security, OSLog); the stripped arm64 library
-is about 292 KB (CI gate: under 307,200 bytes).
+is about 293 KB (292,896 bytes; CI gate: under 307,200 bytes). The gap to the gate is less than one 16 KB page and
+only about 440 bytes are left in the last page, so the next SDK addition will likely cross it ([TODO.md](TODO.md) 4.11).
 
-Your backend registers each notification with reliable-push and puts the returned `trackingId` into the APNs payload as
-`rp_tid`: see [integration-guide.md](integration-guide.md) §1 and §2. This page is the app side.
+Your backend generates a tracking id, registers the notification with reliable-push and sends the APNs payload with
+that id as `rp_tid` (the payload jar builds it): see [integration-guide.md](integration-guide.md) §1 and §2. This page
+is the app side.
 
 **A sidecar inside your app.** The SDK only observes your pushes:
 - `ReliablePushExtension.didReceive` returns `false` for a notification without `rp_tid` and leaves it to your code;
@@ -21,8 +23,9 @@ Your backend registers each notification with reliable-push and puts the returne
 If the reliable-push backend cannot be reached, your notifications are shown as usual and the events wait in the App
 Group queue. The flow diagram is in [overview.md §8](overview.md#8-ios-sdk).
 
-> **Status.** Version `0.1.2` (tag `v0.1.2`), tested on the iOS Simulator locally (package tests, end-to-end suite) and
-> in CI (`ios-ci.yml`: package tests, sample builds, size gate). SwiftPM by git tag is the only distribution channel (no
+> **Status.** This page describes `0.2.0` (in development on `develop`, not tagged yet; the last release is `0.1.2`),
+> tested on the iOS Simulator locally (package tests, end-to-end suite) and in CI (`ios-ci.yml`: package tests, sample
+> builds, size gate). SwiftPM by git tag is the only distribution channel (no
 > XCFramework, no CocoaPods). Real APNs delivery on a device has not been verified yet.
 
 ## 1. Add the package
@@ -141,6 +144,11 @@ never calls `ensureRegistered` stops after the grace period.
 
 `register(idToken:)` stays for an explicit registration (it registers whatever is stored). Call `logout()` on a user
 switch: it clears the token, so the next `ensureRegistered` registers the new user.
+**Upgrading from 0.1.x:** the SDK no longer renews the token on its own while receiving or sending, so an app that
+never calls `ensureRegistered` (or `register`) loses tracking once the token is past expiry plus the backend's grace
+period (default 90 days). `extensionSendTimeout` defaults to 2 s instead of 5 s. `RegisterResult` gained
+`.notLoggedIn` and `.alreadyRegistered`: an exhaustive `switch` must handle them.
+
 `ReliablePush.deviceId` is `nil` while not registered. It is read from the Keychain record, so it is also `nil` after a
 backup restore or a move to a new phone (the record is `ThisDeviceOnly`); `ensureRegistered` then takes path 1.
 While the Keychain is locked it returns the last known id.
@@ -279,7 +287,9 @@ and no event is sent, so the backend's fallback decides (that is the point of th
 
 ## 8. Payload contract
 
-Your backend sends a normal alert push with the tracking id at the top level (spec §6):
+Your backend sends a normal alert push with the tracking id at the top level. The payload jar builds it
+(`ApnsPayloads.build`) or adds the two fields to your own payload (`ApnsPayloads.decorate`):
+[integration-guide.md §2](integration-guide.md#2-build-the-push-with-the-payload-jar).
 
 ```json
 { "aps": { "alert": { "title": "Order shipped", "body": "Tap to see it" }, "mutable-content": 1 },
@@ -330,9 +340,9 @@ Subsystem `io.reliablepush`, category `ReliablePush` (`os_log`), message `event=
 at `os_log` error level, the rest at info level.
 
 - Info level: `device.registered`, `token.refreshed` (by `ensureRegistered` only), `device.register_skipped`
-  (`reason=not_logged_in`; a WARN with `reason=provider_timeout` when the ID-token provider did not answer within 30 s,
-  which gives `.notLoggedIn`), `device.revoked`, `tracking.event_queued`, `tracking.event_sent`, `sdk.reconfigured`.
-- Error level (WARN): `tracking.event_dropped`, `tracking.not_registered`, `auth.failed` (`call=events`: the token was
+  (`reason=not_logged_in`), `device.revoked`, `tracking.event_queued`, `tracking.event_sent`, `sdk.reconfigured`.
+- Error level (WARN): `device.register_skipped` with `reason=provider_timeout` (the ID-token provider did not answer
+  within 30 s, which gives `.notLoggedIn`), `tracking.event_dropped`, `tracking.not_registered`, `auth.failed` (`call=events`: the token was
   rejected on a send, `renewalNeeded` is set; `call=refresh` or `call=register`), `rate_limit.exceeded`,
   `token.unreadable`, `token.unavailable`, `device.register_failed`, `device.revoked` (when the revoke was not
   confirmed), `extension.time_expired`, `sdk.app_group_unavailable`, `lock.unavailable`, `file.protection_failed`.

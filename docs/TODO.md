@@ -11,7 +11,7 @@ here and record the result in [STATUS.md](STATUS.md).
 |---|---|---|---|
 | 1.1 | Real APNs delivery and the locked-device check | Maintainer | Action: enrol in the Apple Developer Program |
 | 1.2 | Real FCM delivery | Maintainer | Action: create a Firebase project |
-| 1.3 | Publish the Android SDK and the Java client to Maven Central | Maintainer | Action: verify a Central namespace and create a signing key |
+| 1.3 | Publish the Android SDK, the Java client and the payload jar to Maven Central | Maintainer | Action: verify a Central namespace and create a signing key |
 | 2.1 | Android mode v2 (`AndroidConfigV2`) | Agent | Date: Google ships `onNotificationReceived` as GA (check quarterly, next 2027-02-01) |
 | 3.1 | Install the Helm chart on a real GKE and OpenShift cluster | Maintainer + agent | Action: access to a cluster |
 | 3.2 | Run the PowerShell scripts on Windows | Maintainer + agent | Action: a Windows machine with PowerShell 7 and Docker |
@@ -23,7 +23,9 @@ here and record the result in [STATUS.md](STATUS.md).
 | 4.8 | Due-set indexes of the circuit detector have no `app_id` | Agent | Action: an install with many apps (tens or more) or a measurement showing slow circuit checks |
 | 4.9 | Circuit breaker untested under load | Agent | Action: a load run with the breaker on (a mixed burst: one app delivered, one not) |
 | 4.10 | Circuit event times can be up to the lock wait out of order | Agent | Action: clamp the check instant to the circuit's `since` |
-| 5.1 | 0.2.0 release | Maintainer | Action: maintainer decision to release (ops dashboard and fallback circuit breaker) |
+| 4.11 | iOS size gate: about 440 bytes left in the last 16 KB page | Maintainer + agent | Action: the next iOS SDK addition (decide: raise the gate or trim code) |
+| 4.12 | Harness device simulator drops `429` / `503` / network-error events (the SDKs keep them) | Agent | Action: a scenario that needs the SDKs' retry behaviour in the simulator |
+| 5.1 | 0.2.0 release | Maintainer | Action: maintainer decision to release (ops dashboard, fallback circuit breaker, sidecar integration revision) |
 
 ## 1. Maintainer-only: needs personal accounts and credentials
 
@@ -55,9 +57,10 @@ Agents never create accounts or keys, sign in, or enter credentials. These steps
   [testing.md, "Real FCM pushes"](testing.md#real-fcm-pushes-optional-maintainers-firebase-project):
   `android/sample/google-services.json` and `harness/build/fcm/service-account.json` (`chmod 600`).
 
-### 1.3 Publish the Android SDK and the Java client to Maven Central
+### 1.3 Publish the Android SDK, the Java client and the payload jar to Maven Central
 
-- **What:** release `io.reliablepush:reliable-push-android` and `io.reliablepush:reliable-push-client` to Maven Central.
+- **What:** release `io.reliablepush:reliable-push-android`, `io.reliablepush:reliable-push-client` and
+  `io.reliablepush:reliable-push-payload` to Maven Central.
   Today they install only into the local repository (`publishToMavenLocal` / `mvn install`). The iOS SDK needs no
   registry: SwiftPM resolves it from the `v0.1.0` tag.
 - **Why deferred:** Central needs a **verified namespace** and a **signing key**:
@@ -74,8 +77,11 @@ Agents never create accounts or keys, sign in, or enter credentials. These steps
 
 - **What:** the opt-in FCM mode described in the spec (§7): the backend sends a real notification with
   `mutable_content: true`, and the SDK confirms it from `onNotificationReceived` within 20 s, as on iOS.
-- **Why deferred:** it needs `firebase-messaging` ≥ 26.1.0, which exists only as an early-access build (`26.1.0-eap01`).
-  The project uses no pre-release dependencies.
+- **Why deferred:** it needs `firebase-messaging` ≥ 26.1.0, which exists only as an early-access build (`26.1.0-eap01`)
+  outside the public Maven repositories, with no announced GA date. The project uses no pre-release dependencies.
+- **Where the switch happens:** in the payload jar (`FcmPayloads`), so senders that build their FCM messages with it
+  change nothing; the Android SDK gains the `onNotificationReceived` path. Until then tracked Android pushes are
+  data-only messages and the SDK posts the notification (the market-standard model, [android.md](android.md)).
 - **Unblocked by:** Google publishing `onNotificationReceived` as GA. **Check quarterly; next check 2027-02-01.** Until
   then the data-only mode v1 covers delivery tracking, including when the app is killed.
 
@@ -177,14 +183,35 @@ Agents never create accounts or keys, sign in, or enter credentials. These steps
 - **Why deferred:** cosmetic for the stored times; found by the final review of cycle 5.
 - **Unblocked by:** nothing; clamp the instant to `max(at, current.since)` when writing a transition.
 
+### 4.11 iOS size gate headroom (NFR-10)
+
+- **What:** the stripped arm64 library is 292,896 bytes against the gate of 307,200 (`ios/scripts/size.sh`). The gap is
+  less than one 16 KB page and only about 440 bytes are left in the last page (measured in cycle 6, after
+  `ensureRegistered` and the hardened extension), so the next SDK addition will most likely cross the gate.
+- **Why deferred:** nothing needs to be added now; the choice is a maintainer decision.
+- **Unblocked by:** the next iOS SDK change. Decide then: raise the gate (NFR-10 says "under 300 KB") or trim code (for
+  example merge small types, drop rarely used log strings) and measure again.
+
+### 4.12 Harness device simulator drops `429` / `503` / network-error events
+
+- **What:** the simulator keeps an event queued only after a `401` (`renewalNeeded`); after `429`, `503` or a network
+  error it reports the outcome and drops the event, while the SDKs keep it and retry (`Retry-After`, the next launch,
+  the Android retry job).
+- **Why deferred:** no E2E scenario depends on it (`rate-limited` checks the `429` itself); the device suites cover the
+  SDKs' own retries.
+- **Unblocked by:** a scenario that needs the SDK retry behaviour in the simulator. Then keep the event and retry it at
+  the next flush, honouring `Retry-After`.
+
 ## 5. Next scope
 
-### 5.1 Release 0.2.0 (the ops dashboard and the fallback circuit breaker)
+### 5.1 Release 0.2.0 (ops dashboard, fallback circuit breaker, sidecar integration revision)
 
-- **What:** 0.2.0 is the ops dashboard ([admin.md](admin.md), FR-16 and FR-17, cycle 4) and the fallback circuit breaker
-  ([operations.md](operations.md#fallback-circuit-breaker), FR-18 and FR-19, cycle 5). Anything beyond it needs a new
-  scope, for example the iOS extension sending `DELIVERED` without waiting for the result (out of scope of the circuit
-  breaker spec), items 1.3 and 2.1, or new requirements from
+- **What:** 0.2.0 is the ops dashboard ([admin.md](admin.md), FR-16 and FR-17, cycle 4), the fallback circuit breaker
+  ([operations.md](operations.md#fallback-circuit-breaker), FR-18 and FR-19, cycle 5) and the sidecar integration
+  revision ([integration-guide.md](integration-guide.md), FR-20 to FR-24, cycle 6: payload jar, sender-generated
+  `trackingId`, `NO_DEVICE_REGISTERED`, events grace, `ensureRegistered`). Its incompatible changes are listed in
+  [CHANGELOG.md](../CHANGELOG.md); the release also publishes the payload jar (with item 1.3). Anything beyond it needs a
+  new scope, for example a push gateway mode (out of scope of the cycle 6 spec), items 1.3 and 2.1, or new requirements from
   [requirements.md](requirements.md) "Out of scope (for now)", for example web push.
 - **Why deferred:** releasing is a maintainer decision; the 0.2.0 release comes after the merge to `develop`.
 - **Unblocked by:** the maintainer deciding to release.
