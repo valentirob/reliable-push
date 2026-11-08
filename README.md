@@ -188,7 +188,8 @@ Building from source needs JDK 21 and Docker: `cd backend && ./mvnw -B verify` (
 - [Project status](docs/STATUS.md)
 - [Remaining work (TODO)](docs/TODO.md)
 - [Changelog](CHANGELOG.md)
-- [AGENTS.md](AGENTS.md) (context for AI coding agents)
+- [AGENTS.md](AGENTS.md) (context for AI coding agents: the same for Claude Code and Antigravity, on macOS, Linux and
+  Windows)
 - [Contributing](CONTRIBUTING.md)
 - [Security policy](SECURITY.md)
 - [License](LICENSE)

@@ -68,4 +68,7 @@ placeholders. Report vulnerabilities privately as described in `SECURITY.md`.
 
 Agents (Claude Code, Antigravity, others) must follow `AGENTS.md`, the rules in
 `.agents/rules/` and the skills in `.agents/skills/`, and must update
-`docs/STATUS.md` at the end of a session.
+`docs/STATUS.md` at the end of a session. Every tool gets the same context from
+those files: Antigravity reads them natively, Claude Code through `CLAUDE.md`
+and the generated wrappers in `.claude/skills/`. After changing a skill, run
+`scripts/sync-agent-skills.sh` (CI runs it with `--check`).

@@ -26,6 +26,21 @@ export DOCKER_HOST=unix://$HOME/.colima/default/docker.sock TESTCONTAINERS_DOCKE
 export ANDROID_HOME=$HOME/Library/Android/sdk
 ```
 
+On **Linux**, install a JDK 21 and Docker Engine with the compose plugin; the default socket needs no `DOCKER_HOST`.
+Set `JAVA_HOME` if `java -version` is not 21, and `ANDROID_HOME` to the Android SDK (usually `$HOME/Android/Sdk`). The
+emulator suite needs KVM (`/dev/kvm`). CI builds and tests every Java module, the Android SDK and the Helm chart on
+Ubuntu; the local-only scripts (`e2e.sh`, `demo.sh`, `load.sh`, `android-e2e.sh`, `helm-smoke.sh`) have not been run on
+Linux yet, so report what you find in `docs/STATUS.md`.
+
+On **Windows**, use WSL 2 (Ubuntu) and follow the Linux notes: the scripts are bash. Without WSL, the Maven and Gradle
+wrappers (`mvnw.cmd`, `gradlew.bat`) build the Java modules and the Android SDK, and PowerShell 7 runs the backend E2E
+and the demo (`pwsh scripts/e2e.ps1`, `scripts\demo.ps1`; not run on Windows yet, TODO 3.2). The iOS SDK needs macOS
+and Xcode. `.gitattributes` keeps `*.sh`, `mvnw` and `gradlew` in LF, so a WSL or Git Bash checkout runs them as they
+are.
+
+To continue development with an AI agent (Claude Code or Antigravity) on any of these systems, nothing else is needed:
+the shared context is in the repository (`AGENTS.md`, `.agents/`); see [AGENTS.md](../AGENTS.md#ai-agent-context-one-source-for-every-tool).
+
 All commands run from the repository root unless the step says otherwise.
 
 ## 1. Ten-minute tour: the demo console

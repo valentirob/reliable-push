@@ -23,7 +23,7 @@ here and record the result in [STATUS.md](STATUS.md).
 | 4.8 | Due-set indexes of the circuit detector have no `app_id` | Agent | Action: an install with many apps (tens or more) or a measurement showing slow circuit checks |
 | 4.9 | Circuit breaker untested under load | Agent | Action: a load run with the breaker on (a mixed burst: one app delivered, one not) |
 | 4.10 | Circuit event times can be up to the lock wait out of order | Agent | Action: clamp the check instant to the circuit's `since` |
-| 4.11 | iOS size gate: about 440 bytes left in the last 16 KB page | Maintainer + agent | Action: the next iOS SDK addition (decide: raise the gate or trim code) |
+| 4.11 | iOS size gate: about 240 bytes left in the last 16 KB code page | Maintainer + agent | Action: maintainer decision on the metric (proposal: measure what ships in the app and the extension) |
 | 4.12 | Harness device simulator drops `429` / `503` / network-error events (the SDKs keep them) | Agent | Action: a scenario that needs the SDKs' retry behaviour in the simulator |
 | 5.1 | Pick the 0.3.0 scope | Maintainer | Action: maintainer decision (0.2.0 shipped on 2026-11-08) |
 
@@ -185,12 +185,18 @@ Agents never create accounts or keys, sign in, or enter credentials. These steps
 
 ### 4.11 iOS size gate headroom (NFR-10)
 
-- **What:** the stripped arm64 library is 292,896 bytes against the gate of 307,200 (`ios/scripts/size.sh`). The gap is
-  less than one 16 KB page and only about 440 bytes are left in the last page (measured in cycle 6, after
-  `ensureRegistered` and the hardened extension), so the next SDK addition will most likely cross the gate.
-- **Why deferred:** nothing needs to be added now; the choice is a maintainer decision.
-- **Unblocked by:** the next iOS SDK change. Decide then: raise the gate (NFR-10 says "under 300 KB") or trim code (for
-  example merge small types, drop rarely used log strings) and measure again.
+- **What:** `ios/scripts/size.sh` compiles the whole SDK (app side and extension side) into one stripped arm64 dylib:
+  292,896 bytes against the gate of 307,200 (2026-11-08, `v0.2.0`). The file grows in 16 KB pages: the first page of
+  `__TEXT` is almost only the Mach-O header, about 196 KB is code and metadata, and the last code page has about
+  240 bytes free, so the next addition adds a page (about 309 KB) and fails the gate. The extension itself does little
+  (read `rp_tid`, queue, settings check, send within 2 s, hand the content back once); the size comes from the app-side
+  code (registration, `ensureRegistered`, device API) and from Swift's code generation (`async`/`await`, actors,
+  `Codable`).
+- **Why deferred:** the gate is a proxy. SwiftPM links the library statically by default, and the linker drops unused
+  code, so the extension and the app probably carry less than this dylib; that has not been measured.
+- **Unblocked by:** the maintainer choosing between: measure what ships (link the SDK into the sample app and extension,
+  gate the size each one adds, still under 300 KB; recommended), raise the dylib gate, or trim code (for example replace
+  `Codable` with hand-written JSON; smaller but more fragile).
 
 ### 4.12 Harness device simulator drops `429` / `503` / network-error events
 
