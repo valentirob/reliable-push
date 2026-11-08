@@ -82,8 +82,8 @@ To present the project, open [docs/presentation.html](docs/presentation.html) in
 | `loadtest/` | Local load tests (NFR-2 ingest, fallback burst) run by `./scripts/load.sh` | Java 21, Gatling, docker-compose |
 | `docs/` | Requirements, specs, plans, guides, status | Markdown |
 
-The latest release is `v0.1.2`; 0.2.0 (ops dashboard, fallback circuit breaker, sidecar integration revision with the
-payload jar) is on `develop` ([CHANGELOG.md](CHANGELOG.md)). What is left is in
+The latest release is `v0.2.0` (ops dashboard, fallback circuit breaker, sidecar integration revision with the payload
+jar; [CHANGELOG.md](CHANGELOG.md)). What is left is in
 [docs/TODO.md](docs/TODO.md), and the session log is in [docs/STATUS.md](docs/STATUS.md). To build, run and test each
 component step by step, see [docs/getting-started.md](docs/getting-started.md).
 

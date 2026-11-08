@@ -20,8 +20,7 @@ page is the app side.
 If the reliable-push backend cannot be reached, your notifications are shown as usual and the events wait in the
 queue. The flow diagram is in [overview.md §7](overview.md#7-android-sdk).
 
-> **Status.** Version `0.2.0-SNAPSHOT` (in development; the last release is `0.1.2`), built and tested locally and in
-> CI. It is not on Maven Central yet (`./gradlew :reliablepush:publishToMavenLocal` installs it into `~/.m2`; releasing
+> **Status.** Version `0.2.0`, built and tested locally and in CI. It is not on Maven Central yet (`./gradlew :reliablepush:publishToMavenLocal` installs it into `~/.m2`; releasing
 > needs the maintainer's namespace and signing key).
 
 ## 1. Add the library
@@ -29,7 +28,7 @@ queue. The flow diagram is in [overview.md §7](overview.md#7-android-sdk).
 ```kotlin
 // settings.gradle.kts: mavenLocal() until the library is on Maven Central
 dependencies {
-    implementation("io.reliablepush:reliable-push-android:0.1.2")
+    implementation("io.reliablepush:reliable-push-android:0.2.0")
     implementation("com.google.firebase:firebase-messaging:<your version>")
 }
 ```

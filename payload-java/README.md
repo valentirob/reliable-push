@@ -9,7 +9,7 @@ every class is immutable and thread-safe. Tests run on Java 8 and Java 21.
 <dependency>
   <groupId>io.reliablepush</groupId>
   <artifactId>reliable-push-payload</artifactId>
-  <version>0.2.0-SNAPSHOT</version>
+  <version>0.2.0</version>
 </dependency>
 ```
 
