@@ -2,6 +2,14 @@
 # and generated files under harness/build/demo/. Same images, same services. LOCAL ONLY.
 #   docker compose -p reliable-push-demo -f harness/compose/docker-compose.yml -f harness/compose/demo.override.yml ...
 # With --realtime scripts/demo.sh also uses demo.realtime.override.yml and strips the fast clock from the secrets file.
+# The circuit breaker is set back to the production defaults: backend.env.template carries the E2E tuning (window 30 s,
+# min-due 10), which would trip any demo app after 10 unmet fallbacks in 30 s.
+
+x-circuit-defaults: &circuit-defaults
+  RELIABLEPUSH_FALLBACK_CIRCUITBREAKER_WINDOW: 5m
+  RELIABLEPUSH_FALLBACK_CIRCUITBREAKER_MINDUE: "50"
+  RELIABLEPUSH_FALLBACK_CIRCUITBREAKER_CLOSEMINDELIVERED: "10"
+  RELIABLEPUSH_FALLBACK_CIRCUITBREAKER_MINOPEN: 1m
 
 services:
   secrets:
@@ -18,18 +26,21 @@ services:
       - path: ../build/demo/secrets.env
         required: false
     environment:
+      <<: *circuit-defaults
       SPRING_PROFILES_ACTIVE: api,json,demo
   worker-a:
     env_file: !override
       - path: ../build/demo/secrets.env
         required: false
     environment:
+      <<: *circuit-defaults
       SPRING_PROFILES_ACTIVE: worker,json,demo
   worker-b:
     env_file: !override
       - path: ../build/demo/secrets.env
         required: false
     environment:
+      <<: *circuit-defaults
       SPRING_PROFILES_ACTIVE: worker,json,demo
   harness:
     env_file: !override

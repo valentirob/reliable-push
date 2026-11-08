@@ -87,11 +87,13 @@ JDK 21 and network access (Maven artifacts, Playwright's Chromium). With Colima:
   500 once, then 200), then checks `/v1/admin/overview`, the search and the detail with its events and attempts. The per-run admin
   key (`HARNESS_ADMINKEY`) is generated next to the other secrets and never printed. `fallback-circuit` uses its own app
   `circuit`: a burst of 15 notifications that are never confirmed opens the app's circuit (they end `FALLBACK_EXPIRED`;
-  at most `min-due - 1` calls are allowed, in practice none), 5 more while it is open end `FALLBACK_EXPIRED` with no call,
+  fewer than `min-due` calls are guaranteed, because a tick claims only rows its circuit check counted; in practice none), 5 more while it is open end `FALLBACK_EXPIRED` with no call,
   3 confirmed notifications close it (history `OPENED`/`tracking_missing`, `CLOSED`/`delivered_resumed`), and a later
   unmet notification fires its webhook. The stack tunes the breaker for every app in `harness/compose/backend.env.template`
   (window 30 s, `min-due` 10, `close-min-delivered` 3, `min-open` 5 s, real time); no other scenario comes near 10 unmet
   fallbacks of one app in 30 s. `console-smoke` runs `ConsoleSmokeE2E` and `AdminSmokeE2E`.
+- **Writing a scenario:** send bursts to a dedicated app (as `fallback-circuit` uses `circuit`): the E2E stack trips any
+  app's circuit at 10 unmet fallbacks in 30 s, and an open circuit closes the app's later fallbacks without a call.
 - **Worker-crash scenarios** are driven by the script, not the harness container: it stops `worker-b`, asks the harness to
   `prepare`, waits until the webhook call is in flight, kills `worker-a`, waits (inside or outside the trigger window), starts
   both workers and asks the harness to `verify`.
@@ -218,6 +220,9 @@ generated in the test and a local stub; they never contact Apple.
 `reliable-push-demo` and opens the console at <http://127.0.0.1:8090/>. The default is the fast clock; `--realtime` uses real
 minutes. It keeps running; the script prints the stop command:
 `docker compose -p reliable-push-demo -f harness/compose/docker-compose.yml -f harness/compose/demo.override.yml down -v`.
+The demo stack sets the fallback circuit breaker back to the production defaults (window 5 min, `min-due` 50,
+`close-min-delivered` 10, `min-open` 1 min; `harness/compose/demo.override.yml`), not the E2E tuning of
+`backend.env.template`, so sending a few dozen unconfirmed pushes in the console does not open a circuit.
 
 The console has six screens: Devices, Send push, Live tracking, Fallback inbox, Scenarios and Logs. A permanent banner reads
 "Test harness — simulated data, not for production". No secret is shown in the page or exposed by its API; live updates use
