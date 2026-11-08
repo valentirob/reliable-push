@@ -185,8 +185,10 @@ class AndroidE2ETest {
         awaitUntil(10, "notification $tid posted") {
             notifications.activeNotifications.any { it.tag == "rp" && it.id == tid.hashCode() }
         }
-        awaitState(tid, "FALLBACK_TRIGGERED", 30)
-        awaitWebhooks(tid, 1)
+        // the user's only device is revoked: the backend stores the push closed, never tracked, no fallback (spec D4)
+        awaitState(tid, "NO_DEVICE_REGISTERED", 10)
+        Thread.sleep(7_000) // past the 5 s (fast-clock) timeout
+        awaitWebhooks(tid, 0)
         assertFalse("no DELIVERED in the timeline", timelineHas(tid, "DELIVERED"))
     }
 

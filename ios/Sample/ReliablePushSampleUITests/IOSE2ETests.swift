@@ -111,8 +111,10 @@ final class IOSE2ETests: XCTestCase {
                                                 body: "iOS E2E logout", policy: "NOT_DELIVERED", timeoutMinutes: 5)
         try await sample.debugPush(tid, title: "Logged out")
         XCTAssertEqual(sample.shownDeviceId, "not registered", "still logged out when the push arrived")
-        try await sample.awaitState(tid, "FALLBACK_TRIGGERED", 30)
-        try await sample.awaitWebhooks(tid, 1)
+        // the user's only device is revoked: the backend stores the push closed, never tracked, no fallback (spec D4)
+        try await sample.awaitState(tid, "NO_DEVICE_REGISTERED", 10)
+        try await Task.sleep(nanoseconds: 7_000_000_000) // past the 5 s timeout (fast clock: 1 min = 1 s)
+        try await sample.awaitWebhooks(tid, 0)
         let delivered = try await sample.harness.timelineHas(tid, "DELIVERED")
         XCTAssertFalse(delivered, "no DELIVERED in the timeline")
     }
