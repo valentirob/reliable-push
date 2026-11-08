@@ -137,6 +137,35 @@
   svg.dia .zone-bad { fill: var(--bad-soft); }
   .m-main { fill: var(--main); } .m-side { fill: var(--side); } .m-fall { fill: var(--fall); } .m-muted { fill: var(--muted); }
 
+  /* step-by-step flow schematics */
+  .steps-inline { display: flex; flex-wrap: wrap; gap: 6px 18px; justify-content: center; margin: 10px 0 0; padding: 0; list-style: none; font-size: .78em; color: var(--muted); }
+  .steps-inline b { color: var(--ink); }
+  .pipe { display: grid; gap: 10px; align-items: stretch; }
+  .pipe.p3 { grid-template-columns: .85fr 24px 1.55fr 24px 1.05fr; }
+  .pipe .to { display: grid; place-items: center; color: var(--muted); font-size: 1.3em; }
+  .zone { border: 1.5px dashed var(--line); border-radius: 12px; padding: 10px 12px; display: flex; flex-direction: column; gap: 5px; }
+  .zone.side { border-color: var(--side); }
+  .zone.main { border-color: var(--main); }
+  .zone > h3 { font-size: .74em; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin: 0 0 2px; }
+  .zone.side > h3 { color: var(--side); }
+  .st { display: flex; gap: 9px; align-items: flex-start; border: 1px solid var(--line); border-radius: 9px; padding: 6px 10px; background: var(--slide); font-size: .74em; line-height: 1.35; }
+  .st.side { border-color: var(--side); background: var(--side-soft); }
+  .st.main { border-color: var(--main); background: var(--main-soft); }
+  .st.fall { border-color: var(--fall); background: var(--fall-soft); }
+  .st.ok { border-color: var(--ok); background: var(--ok-soft); }
+  .st.bad { border-color: var(--bad); background: var(--bad-soft); }
+  .st .n { flex: none; display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--side); color: #fff; font-weight: 700; font-size: .9em; }
+  .st.main .n { background: var(--main); } .st.fall .n { background: var(--fall); } .st.ok .n { background: var(--ok); } .st.bad .n { background: var(--bad); }
+  .st.plain .n { background: var(--muted); }
+  .st p { margin: 0; }
+  .st .no { display: block; color: var(--muted); margin-top: 2px; }
+  .dn { text-align: center; color: var(--muted); font-size: .8em; line-height: 1; margin: -1px 0; }
+  .split { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .note { font-size: .74em; color: var(--muted); border-left: 3px solid var(--side); padding: 4px 0 4px 10px; margin: 0; }
+  .note.fall { border-left-color: var(--fall); }
+  .lanes { display: grid; grid-template-columns: 1fr 150px 1fr; gap: 14px; align-items: stretch; }
+  .lanes .db { display: grid; place-items: center; }
+  .lanes .db .card { text-align: center; padding: 14px 10px; font-size: .78em; }
   /* chrome */
   .bar { position: fixed; left: 0; right: 0; bottom: 0; height: 56px; display: flex; align-items: center; gap: 10px; padding: 0 16px; color: var(--muted); font-size: .8em; }
   .bar button { background: var(--slide); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; height: 34px; min-width: 38px; padding: 0 10px; font: inherit; cursor: pointer; }
@@ -161,6 +190,8 @@
     .c2, .c3, .c4 { grid-template-columns: 1fr; }
     .flow { flex-direction: column; }
     .flow .arrow { width: auto; height: 26px; transform: rotate(90deg); }
+    .pipe.p3, .lanes, .split { grid-template-columns: 1fr; }
+    .pipe .to { transform: rotate(90deg); height: 24px; }
     h1 { font-size: 2em; } h2 { font-size: 1.4em; }
     .hint { display: none; }
     .bar { background: var(--bg); border-top: 1px solid var(--line); }
@@ -234,7 +265,148 @@
   <p class="kicker">The big picture</p>
   <h2>Two phones, two backends, one clock</h2>
   <div class="grow">
-    <img class="glance" src="images/reliable-push-at-a-glance.svg" alt="Your backend sends pushes through FCM and APNs to an iPhone and an Android phone and registers each push with reliable-push. The tracking module in each app reports DELIVERED and READ. If the policy is not met before the timeout, the worker calls your signed webhook and your fallback service sends an SMS or an email.">
+    <img class="glance" style="flex:1 1 0;min-height:0;width:100%;background:none;box-shadow:none;border-radius:0" src="images/reliable-push-at-a-glance.svg" alt="Your backend sends pushes through FCM and APNs to an iPhone and an Android phone and registers each push with reliable-push. The tracking module in each app reports DELIVERED and READ. If the policy is not met before the timeout, the worker calls your signed webhook and your fallback service sends an SMS or an email. The numbered steps light up one after the other.">
+    <ol class="steps-inline">
+      <li><b>①</b> register the push</li><li><b>②</b> send it, as today</li><li><b>③</b> FCM / APNs deliver it</li>
+      <li><b>④</b> the app reports DELIVERED, READ</li><li><b>⑤</b> unconfirmed in time: signed webhook</li><li><b>⑥</b> you send the SMS or email</li>
+    </ol>
+    <p class="small muted" style="text-align:center;margin:4px 0 0">The next slides zoom in: the backend (① ④ ⑤), then what happens inside an iPhone and an Android phone (③ ④).</p>
+  </div>
+</section>
+
+<!-- 2b -->
+<section class="slide" data-title="Backend flow">
+  <p class="kicker">The flow · backend</p>
+  <h2>Inside the backend: register, track, wait, fall back</h2>
+  <div class="grow">
+    <div class="lanes">
+      <div class="zone side">
+        <h3>API · every instance · answers at once</h3>
+        <div class="st main"><span class="n">1</span><p><b>Register</b> <code>POST /v1/notifications</code>, sender key<span class="no">your <code>trackingId</code>, <code>userId</code>, policy, timeout, fallback text</span></p></div>
+        <div class="dn">↓</div>
+        <div class="st"><span class="n">·</span><p>Insert once per <code>trackingId</code> (a retry finds the same row)</p></div>
+        <div class="dn">↓</div>
+        <div class="split">
+          <div class="st side"><p><b>Active device</b> → <code>PENDING</code><span class="no"><code>dueAt</code> = now + timeout</span></p></div>
+          <div class="st bad"><p><b>No device</b> → <code>NO_DEVICE_REGISTERED</code><span class="no">closed: never a fallback</span></p></div>
+        </div>
+        <div class="dn">⋯ later, from the phone ⋯</div>
+        <div class="st side"><span class="n">4</span><p><b>Events</b> <code>POST /v1/events</code>, device JWT<span class="no"><code>DELIVERED</code>, then <code>READ</code> on tap; any active device of the user counts</span></p></div>
+        <div class="dn">↓</div>
+        <div class="st ok"><span class="n">✓</span><p><b>Policy met</b> before <code>dueAt</code>: the row is closed, no fallback<span class="no"><code>NOT_DELIVERED</code>: by DELIVERED or READ · <code>NOT_READ</code>: only by READ</span></p></div>
+      </div>
+      <div class="db"><div class="card side"><div class="icon">🗄️</div><b>PostgreSQL</b><br><span class="muted">one row per push,<br>its events and<br>every webhook call</span></div></div>
+      <div class="zone" style="border-color:var(--fall)">
+        <h3 style="color:var(--fall)">Worker · every 5 s · only for due rows</h3>
+        <div class="st fall"><span class="n">a</span><p><b>Circuit check</b> per app<span class="no">due fallbacks while almost nothing was delivered? Tracking is broken: expire them, no SMS storm</span></p></div>
+        <div class="dn">↓</div>
+        <div class="st fall"><span class="n">b</span><p><b>Claim</b> due rows with <code>SKIP LOCKED</code> and a lease<span class="no">many replicas, each row once; a dead worker's rows are re-claimed</span></p></div>
+        <div class="dn">↓</div>
+        <div class="st fall"><span class="n">c</span><p><b>Still in time?</b> <code>dueAt</code> + trigger window<span class="no">no: <code>FALLBACK_EXPIRED</code>, no call (a stale SMS helps nobody)</span></p></div>
+        <div class="dn">↓</div>
+        <div class="st fall"><span class="n">5</span><p><b>Signed webhook</b> to your receiver<span class="no"><code>X-RP-Signature</code> (HMAC), <code>Idempotency-Key</code> = trackingId</span></p></div>
+        <div class="dn">↓</div>
+        <div class="split">
+          <div class="st ok"><p><b>2xx</b> → <code>FALLBACK_TRIGGERED</code></p></div>
+          <div class="st"><p><b>5xx, timeout</b> → retry after 1, 2, 4, 8 min</p></div>
+        </div>
+        <div class="st bad"><p><b>Final 4xx</b> or attempts exhausted → <code>FALLBACK_FAILED</code></p></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 2c -->
+<section class="slide" data-title="iOS flow">
+  <p class="kicker">The flow · inside an iPhone</p>
+  <h2>iOS: the system shows the alert, the extension only confirms it</h2>
+  <div class="grow">
+    <div class="pipe p3">
+      <div class="zone main">
+        <h3>APNs</h3>
+        <div class="st main"><span class="n">③</span><p><b>Alert push</b><span class="no">title and body as today, plus <code>mutable-content: 1</code> and <code>rp_tid</code> (the payload jar adds them)</span></p></div>
+        <p class="note">Because of <code>mutable-content</code>, iOS wakes your <b>Notification Service Extension</b> before showing the alert: a small separate process, also when the app is closed.</p>
+      </div>
+      <div class="to">→</div>
+      <div class="zone side">
+        <h3>Extension process · the SDK</h3>
+        <div class="st plain"><span class="n">?</span><p><b><code>rp_tid</code>?</b><span class="no">no: returns <code>false</code>, nothing read; your code handles it as today</span></p></div>
+        <div class="dn">↓</div>
+        <div class="st side"><span class="n">1</span><p><b>Save <code>DELIVERED</code></b> in the App Group queue<span class="no">on disk first: the send can fail, the event is not lost</span></p></div>
+        <div class="dn">↓</div>
+        <div class="st side"><span class="n">2</span><p><b>Send it once</b>: <code>POST /v1/events</code><span class="no">device token from the shared Keychain; never renewed here (a 401 sets <code>renewalNeeded</code>)</span></p></div>
+        <div class="dn">↓</div>
+        <div class="st side"><span class="n">3</span><p><b>Hand the alert back</b>, exactly once<span class="no">after the send, at 2 s at the latest, at once on an SDK error</span></p></div>
+      </div>
+      <div class="to">→</div>
+      <div class="zone">
+        <h3>System, then your app</h3>
+        <div class="st ok"><span class="n">✓</span><p><b>iOS shows the notification</b><span class="no">iOS draws it from the push content: the SDK never builds it, so a tracking problem never hides it</span></p></div>
+        <div class="dn">↓</div>
+        <div class="st side"><span class="n">④</span><p><b>Tap</b> → app: <code>trackOpen(response)</code> → <code>READ</code><span class="no">queued in the App Group, flushed one at a time</span></p></div>
+        <div class="dn">↓</div>
+        <div class="st"><span class="n">↻</span><p><b><code>ensureRegistered</code></b> at start, foreground, login<span class="no">the only place the device token is registered or renewed; it also sends what is queued</span></p></div>
+        <p class="note fall">No <code>DELIVERED</code> arrives (phone off, push dropped)? At <code>dueAt</code> the backend falls back.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 2d -->
+<section class="slide" data-title="Android flow">
+  <p class="kicker">The flow · inside an Android phone</p>
+  <h2>Android: the SDK turns a data message into the notification</h2>
+  <div class="grow">
+    <div class="pipe p3">
+      <div class="zone main">
+        <h3>FCM</h3>
+        <div class="st main"><span class="n">③</span><p><b>Data-only message</b>, high priority<span class="no"><code>rp_tid</code>, <code>title</code>, <code>body</code> as data, no <code>notification</code> block (the payload jar builds it)</span></p></div>
+        <p class="note">Why data: a <code>notification</code> message is drawn by Android in the background <b>without running app code</b>, so nothing could confirm it. A data message always reaches your app, even after it was killed, as with Catapush, OneSignal, Braze and Airship.</p>
+      </div>
+      <div class="to">→</div>
+      <div class="zone side">
+        <h3>Your messaging service → the SDK</h3>
+        <div class="st plain"><span class="n">?</span><p><b><code>rp_tid</code>?</b><span class="no">no: returns <code>false</code>, your own handling</span></p></div>
+        <div class="dn">↓</div>
+        <div class="st side"><span class="n">1</span><p><b>Build the notification</b> from the data<span class="no">title, body, channel, tap intent; your <code>customizer</code> adds icon, colour, actions</span></p></div>
+        <div class="dn">↓</div>
+        <div class="st side"><span class="n">2</span><p><b>Gate</b>: will it really be shown?<span class="no">notifications on, permission granted, channel open; if not, nothing is recorded and the fallback decides</span></p></div>
+        <div class="dn">↓</div>
+        <div class="st side"><span class="n">3</span><p><b>Save <code>DELIVERED</code></b> on disk, then <b>post</b> the local notification</p></div>
+        <div class="dn">↓</div>
+        <div class="st side"><span class="n">4</span><p><b>Send it once</b> on the SDK thread<span class="no">offline, 5xx, 429: JobScheduler retries · 401: <code>renewalNeeded</code></span></p></div>
+      </div>
+      <div class="to">→</div>
+      <div class="zone">
+        <h3>The user, then your app</h3>
+        <div class="st ok"><span class="n">✓</span><p><b>The notification is shown</b><span class="no">drawn by your app through the SDK, so it appears also when the app was closed or killed</span></p></div>
+        <div class="dn">↓</div>
+        <div class="st side"><span class="n">④</span><p><b>Tap</b> → <code>trackOpen(intent)</code> → <code>READ</code></p></div>
+        <div class="dn">↓</div>
+        <div class="st"><span class="n">↻</span><p><b><code>ensureRegistered</code></b> at start, foreground, login<span class="no">registers or renews the device token, kept encrypted with the Android Keystore</span></p></div>
+        <p class="note fall">Any SDK error: a <b>minimal notification</b> is still posted. Notifications off or channel blocked: no <code>DELIVERED</code>, so the fallback reaches the user.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 2e -->
+<section class="slide" data-title="iOS vs Android">
+  <p class="kicker">The flow · two platforms, one contract</p>
+  <h2>Same events, different mechanics</h2>
+  <div class="grow">
+    <table>
+      <tr><th></th><th>iOS</th><th>Android</th></tr>
+      <tr><td><b>The push</b></td><td>APNs alert + <code>mutable-content: 1</code> + <code>rp_tid</code></td><td>FCM data-only, high priority, <code>rp_tid</code> / <code>title</code> / <code>body</code></td></tr>
+      <tr><td><b>Code that runs</b></td><td>Notification Service Extension (separate process)</td><td>your <code>FirebaseMessagingService</code>, also after the app was killed</td></tr>
+      <tr><td><b>Who draws the notification</b></td><td>iOS, from the push content</td><td>the SDK: it <b>builds and posts</b> a local notification from the data</td></tr>
+      <tr><td><b><code>DELIVERED</code> means</b></td><td>the extension ran: iOS is about to show the alert</td><td>the gate said it will be shown, and it was posted</td></tr>
+      <tr><td><b>Time bound</b></td><td>the alert is handed back within 2 s</td><td>disk write in milliseconds; the send runs after the post</td></tr>
+      <tr><td><b>If tracking fails</b></td><td>the alert is shown anyway</td><td>a minimal notification is shown anyway</td></tr>
+      <tr><td><b><code>READ</code></b></td><td><code>trackOpen(response)</code> on tap</td><td><code>trackOpen(intent)</code> on tap</td></tr>
+      <tr><td><b>Token renewal</b></td><td colspan="2">only <code>ensureRegistered</code> in the app, never on the receive path; offline events wait on disk</td></tr>
+      <tr><td><b>No confirmation in time</b></td><td colspan="2">the backend calls your signed webhook at <code>dueAt</code>: SMS, email or any channel you choose</td></tr>
+    </table>
   </div>
 </section>
 
@@ -574,70 +746,47 @@ send(...);                                 // always, with rp_tid</code></pre>
 <!-- 10 -->
 <section class="slide" data-title="Android SDK">
   <p class="kicker">Component detail</p>
-  <h2>Android SDK</h2>
+  <h2>Android SDK in your app</h2>
   <div class="grow">
-    <div class="cols c2">
-      <div class="vflow">
-        <div class="row main">📨 FCM data-only message: <code>rp_tid</code>, title, body</div>
-        <div class="down">↓</div>
-        <div class="row">Your <code>FirebaseMessagingService</code> → <code>ReliablePushMessaging.onMessageReceived</code></div>
-        <div class="down">↓</div>
-        <div class="row side">🚦 Gate → 💾 <code>DELIVERED</code> on disk → 🔔 local notification</div>
-        <div class="down">↓</div>
-        <div class="row side">📤 One send on the SDK thread, no token renewal · offline? JobScheduler retries</div>
-        <div class="down">↓</div>
-        <div class="row ok">👆 Tap → <code>trackOpen(intent)</code> → <code>READ</code></div>
-      </div>
-      <div class="cols">
-        <div class="card"><h3>The market-standard model</h3><p class="small">Data message → local notification: the only way to run code for a push in the background, as Catapush, OneSignal, Braze and Airship do. Any SDK error still posts a minimal notification. <code>AndroidConfigV2</code> waits for Google's GA; the payload jar is the switch point.</p></div>
-        <div class="card"><h3>Honest delivery</h3><p class="small"><code>DELIVERED</code> only when the notification will be shown. If it is blocked, the fallback decides. The app calls <code>ensureRegistered</code>; Kotlin stdlib only, AAR about 75 KB.</p></div>
-        <div class="card"><h3>Integration</h3><pre><code>if (ReliablePushMessaging
+    <div class="cols c3">
+      <div class="card"><h3>The market-standard model</h3><p class="small">Data message → local notification: the only way to run code for a push in the background, as Catapush, OneSignal, Braze and Airship do. Any SDK error still posts a minimal notification. <code>AndroidConfigV2</code> waits for Google's GA; the payload jar is the switch point.</p></div>
+      <div class="card"><h3>Honest delivery</h3><p class="small"><code>DELIVERED</code> only when the notification will be shown. If it is blocked, the fallback decides. The app calls <code>ensureRegistered</code>; Kotlin stdlib only, AAR about 75 KB.</p></div>
+      <div class="card"><h3>Integration</h3><pre><code>if (ReliablePushMessaging
       .onMessageReceived(this, msg)) return
 // your own handling</code></pre></div>
-      </div>
     </div>
+    <p class="small muted" style="margin-top:14px">What happens when a push arrives: the "Android flow" slide.</p>
   </div>
 </section>
 
 <!-- 11 -->
 <section class="slide" data-title="iOS SDK">
   <p class="kicker">Component detail</p>
-  <h2>iOS SDK</h2>
+  <h2>iOS SDK in your app</h2>
   <div class="grow">
     <div class="cols c2">
-      <svg class="dia" viewBox="0 0 470 400" role="img" aria-label="iOS app and extension share storage">
-        <rect class="box main" x="20" y="20" width="430" height="56" rx="10"/>
-        <text class="t-b" x="235" y="45" text-anchor="middle">APNs alert · mutable-content: 1</text>
-        <text class="t-muted" x="235" y="65" text-anchor="middle">top-level rp_tid</text>
-        <rect class="box side" x="20" y="120" width="200" height="80" rx="10"/>
-        <text class="t-b" x="120" y="152" text-anchor="middle">Notification</text>
-        <text class="t-b" x="120" y="172" text-anchor="middle">Service Extension</text>
-        <text class="t-muted" x="120" y="192" text-anchor="middle">DELIVERED, ≤ 2 s</text>
-        <rect class="box side" x="250" y="120" width="200" height="80" rx="10"/>
-        <text class="t-b" x="350" y="150" text-anchor="middle">App</text>
-        <text class="t-muted" x="350" y="172" text-anchor="middle">ensureRegistered</text>
-        <text class="t-muted" x="350" y="190" text-anchor="middle">trackOpen = READ</text>
-        <rect class="box" x="20" y="250" width="200" height="60" rx="10"/>
-        <text class="t-b" x="120" y="276" text-anchor="middle">App Group</text>
-        <text class="t-muted" x="120" y="296" text-anchor="middle">event queue + state</text>
-        <rect class="box" x="250" y="250" width="200" height="60" rx="10"/>
-        <text class="t-b" x="350" y="276" text-anchor="middle">Keychain group</text>
-        <text class="t-muted" x="350" y="296" text-anchor="middle">device token</text>
-        <rect class="box side" x="20" y="340" width="430" height="44" rx="10"/>
-        <text class="t-b" x="235" y="368" text-anchor="middle">reliable-push /v1/events</text>
-        <path class="e main" d="M120 76 V116"/>
-        <path class="e plain" d="M120 200 V246"/>
-        <path class="e plain" d="M350 200 V246"/>
-        <path class="e plain" d="M300 200 L190 246"/>
-        <path class="e plain" d="M260 250 L200 202"/>
-        <path class="e side" d="M235 310 V336"/>
-      </svg>
+      <pre style="font-size:.7em"><code>// Notification Service Extension target
+final class NotificationService: UNNotificationServiceExtension {
+  private let reliablePush =
+    ReliablePushExtension(appGroup: "group.com.example.app")
+
+  override func didReceive(_ request: UNNotificationRequest,
+      withContentHandler handler: @escaping (UNNotificationContent) -> Void) {
+    if !reliablePush.didReceive(request, withContentHandler: handler) {
+      handler(request.content)   // not tracked: your own handling
+    }
+  }
+  override func serviceExtensionTimeWillExpire() {
+    reliablePush.serviceExtensionTimeWillExpire()
+  }
+}</code></pre>
       <div class="cols">
         <div class="card"><h3>Swift package</h3><p class="small">iOS 15+, Swift 6, Apple frameworks only, under 300 KB. Add it by tag with SwiftPM: <code>from: "0.2.0"</code>.</p></div>
         <div class="card"><h3>Bounded wait, app closed too</h3><p class="small">The extension saves <code>DELIVERED</code>, sends it once (no token renewal) and calls the content handler <b>exactly once</b>: after the send, at 2 s, or when iOS ends it; at once on an SDK error. Only <code>ensureRegistered</code> in the app renews the token.</p></div>
         <div class="card"><h3>Store ready</h3><p class="small">Privacy manifest included. Short work in the extension, no hidden background activity.</p></div>
       </div>
     </div>
+    <p class="small muted" style="margin-top:14px">The app and the extension share an App Group (event queue, state) and a Keychain group (device token). What happens when a push arrives: the "iOS flow" slide.</p>
   </div>
 </section>
 

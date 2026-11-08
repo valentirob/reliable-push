@@ -8,6 +8,18 @@ Everything left after `v0.1.0` is in [TODO.md](TODO.md): each item says why it i
 unblocks it. Agents: remind the maintainer of its section 1 (real APNs and the locked-device check, real FCM, Maven
 Central) at the start of a session.
 
+## 2026-11-09 (22) — Claude Code — presentation: the flow from the top down (`feature/presentation-flows`)
+
+- **Asked by the maintainer:** explain the flow in `docs/presentation.html`, from the animated at-a-glance picture down
+  to the backend flow and to what happens inside iOS and Android (for example Android turning a data message into the
+  notification it shows).
+- **Done:** slide 3 lists the six steps under the animated picture; new slides 4 "Backend flow" (API lane, PostgreSQL,
+  worker lane with outcomes), 5 "iOS flow", 6 "Android flow", 7 "iOS vs Android"; the "Android SDK" and "iOS SDK"
+  slides keep only the in-app integration (the iOS one now shows the extension code). Facts taken from `android.md`,
+  `ios.md`, `architecture.md` and `operations.md` (worker tick 5 s, retries 1, 2, 4, 8 min, 2 s extension bound).
+- **State:** every new or changed slide rendered at 1440x900 in headless Chrome and fits without scrolling; narrow
+  screens stack the columns (not looked at on a phone). Docs checked: no diagram source changed.
+
 ## 2026-11-09 (21) — Claude Code — diagrams with diagram-design, animated at-a-glance (`feature/diagram-design`)
 
 - **Asked by the maintainer:** replace Mermaid with the diagram-design plugin, back up the at-a-glance SVG, animate the
