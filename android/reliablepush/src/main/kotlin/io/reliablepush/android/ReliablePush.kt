@@ -155,7 +155,10 @@ public object ReliablePush {
      *
      * Display never depends on tracking: nothing thrown inside the SDK escapes (WARN `sdk.internal_error`). If anything
      * throws before the notification is posted, the SDK posts a minimal one instead (title and body, else the app label,
-     * on the configured channel, with the `rp_tid` tap extra).
+     * on the configured channel, with the `rp_tid` tap extra). If that happens before `DELIVERED` was written while the
+     * SDK is registered and the gate never answered "not shown", `DELIVERED` is written first (the minimal one is shown).
+     *
+     * `rp_tid` is normalized to lower case (the backend's form) before it is queued or put on the tap intent.
      *
      * Title: data `title`, else [fallbackTitle], else the app label. Body: data `body`, else [fallbackBody], else empty.
      *
@@ -178,17 +181,21 @@ public object ReliablePush {
         var options = DEFAULT_OPTIONS
         var poster: NotificationPoster? = null
         var showable: Boolean? = null
+        var configured: State? = null
+        var persistTried = false
         var tracking: Sdk? = null // set once DELIVERED is on disk
         var posted: Boolean? = null
         try {
-            val tid = data[NotificationPoster.EXTRA_TRACKING_ID] ?: return false
-            if (!Sdk.isTrackingId(tid)) {
+            val raw = data[NotificationPoster.EXTRA_TRACKING_ID] ?: return false
+            if (!Sdk.isTrackingId(raw)) {
                 SdkLog.warn("tracking.event_dropped", "reason" to "malformed_rp_tid")
                 return false
             }
+            // the backend's form: the queued, sent and acknowledged ids (and the tap extra) agree
+            val tid = raw.lowercase()
             trackingId = tid
             app = context.applicationContext
-            val current = stateFor(app)
+            val current = stateFor(app).also { configured = it }
             options = current?.options ?: DEFAULT_OPTIONS
             val p = posterFactory(app, options).also { poster = it }
             val notification = p.prepare(tid, titleOf(app, data, fallbackTitle), bodyOf(data, fallbackBody))
@@ -198,6 +205,7 @@ public object ReliablePush {
                 SdkLog.warn("tracking.not_registered", "tid" to tid, "reason" to "not_configured")
             } else if (canShow) {
                 val occurredAt = System.currentTimeMillis()
+                persistTried = true
                 if (Sdk.persistBeforePost { current.sdk.persist(tid, "DELIVERED", occurredAt) } == true) {
                     tracking = current.sdk
                 }
@@ -209,6 +217,17 @@ public object ReliablePush {
             internalError(t)
             val tid = trackingId ?: return false
             posted?.let { return it && showable == true } // threw after the post
+            // Threw before persisting, and the gate never said "not shown": the minimal notification is shown, so
+            // DELIVERED is recorded first (a missed fallback is preferred to a duplicate one).
+            val sdk = configured?.sdk
+            if (sdk != null && !persistTried && showable != false) {
+                try {
+                    val occurredAt = System.currentTimeMillis()
+                    if (Sdk.persistBeforePost { sdk.persist(tid, "DELIVERED", occurredAt) } == true) tracking = sdk
+                } catch (t2: Throwable) {
+                    internalError(t2)
+                }
+            }
             val shown = try {
                 (poster ?: NotificationPoster(app, options))
                     .postMinimal(tid, minimalTitleOf(app, data, fallbackTitle), bodyOf(data, fallbackBody))
@@ -240,14 +259,15 @@ public object ReliablePush {
         } ?: return
         try {
             if (!Sdk.isTrackingId(trackingId)) return
+            val tid = trackingId.lowercase() // the backend's form, as in handle
             intent?.removeExtra(NotificationPoster.EXTRA_TRACKING_ID)
             val occurredAt = System.currentTimeMillis()
             val current = state
             if (current == null) {
-                SdkLog.warn("tracking.not_registered", "tid" to trackingId, "reason" to "not_configured")
+                SdkLog.warn("tracking.not_registered", "tid" to tid, "reason" to "not_configured")
                 return
             }
-            Sdk.persistOffMain { current.sdk.record(trackingId, "READ", occurredAt) }
+            Sdk.persistOffMain { current.sdk.record(tid, "READ", occurredAt) }
         } catch (t: Throwable) {
             internalError(t)
         }

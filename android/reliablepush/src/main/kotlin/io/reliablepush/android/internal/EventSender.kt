@@ -84,13 +84,13 @@ internal class EventSender(
 
     private fun handleOutcomes(batch: List<QueuedEvent>, items: List<EventOutcome>) {
         val byId = HashMap<String, String>()
-        items.forEach { byId[it.trackingId] = it.outcome }
+        items.forEach { byId[it.trackingId.lowercase()] = it.outcome } // case-insensitive: the backend echoes lower case
         val done = ArrayList<String>()
         val missed = ArrayList<String>()
         var sent = 0
         for (e in batch) {
             val key = EventQueue.keyOf(e.trackingId, e.type)
-            when (val outcome = byId[e.trackingId]) {
+            when (val outcome = byId[e.trackingId.lowercase()]) {
                 "ACCEPTED", "DUPLICATE", "LATE" -> { done.add(key); sent++ }
                 "NOT_FOUND", "FORBIDDEN" -> {
                     done.add(key)

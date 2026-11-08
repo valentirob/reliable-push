@@ -68,7 +68,7 @@ class EventSenderTest {
     }
 
     private fun items(ids: List<String>, outcome: (String) -> String = { "ACCEPTED" }) =
-        """{"accepted":${ids.size},"ignored":0,"items":[${ids.joinToString(",") { """{"trackingId":"$it","outcome":"${outcome(it)}"}""" }}]}"""
+        """{"accepted":${ids.size},"ignored":0,"items":[${ids.joinToString(",") { """{"trackingId":"${it.lowercase()}","outcome":"${outcome(it)}"}""" }}]}"""
 
     private fun echoAll(outcome: (String) -> String = { "ACCEPTED" }) {
         backend.handler = { req -> ScriptedResponse(200, items(sentIds(req), outcome)) }
@@ -89,6 +89,15 @@ class EventSenderTest {
         assertEquals("Bearer $freshJwt", req.headers["authorization"])
         assertEquals(2, ShadowLog.getLogs().count { it.msg.contains("event=tracking.event_dropped") && it.type == android.util.Log.WARN })
         assertTrue(ShadowLog.getLogs().none { it.msg.contains(freshJwt) })
+    }
+
+    @Test
+    fun outcomesMatchQueuedIdsWhateverTheCase() {
+        queue.add(QueuedEvent("TID-UPPER", "DELIVERED", 1)) // queued by an older SDK; the backend echoes lower case
+        echoAll()
+        assertEquals(FlushResult.Done, sender.flush())
+        assertEquals(0, queue.size())
+        assertTrue(ShadowLog.getLogs().none { it.msg.contains("unacknowledged") })
     }
 
     @Test

@@ -94,7 +94,8 @@ class ReliablePushTest {
             jobPendingAtEventsCall.add(js.getPendingJob(jobId) != null)
             if (eventsStatus == 200) {
                 val arr = JSONObject(req.body).getJSONArray("events")
-                val items = List(arr.length()) { """{"trackingId":"${arr.getJSONObject(it).getString("trackingId")}","outcome":"ACCEPTED"}""" }
+                // the real backend echoes ids in lower case (canonical UUID form)
+                val items = List(arr.length()) { """{"trackingId":"${arr.getJSONObject(it).getString("trackingId").lowercase()}","outcome":"ACCEPTED"}""" }
                 ScriptedResponse(200, """{"accepted":${items.size},"ignored":0,"items":[${items.joinToString(",")}]}""")
             } else {
                 ScriptedResponse(eventsStatus, headers = eventsRetryAfter?.let { mapOf("Retry-After" to it) } ?: emptyMap())
@@ -287,7 +288,13 @@ class ReliablePushTest {
         options: ReliablePushOptions,
         private val failPost: Boolean = false,
         private val failMinimal: Boolean = false,
+        private val failPrepare: Boolean = false,
     ) : NotificationPoster(context, options) {
+        override fun prepare(trackingId: String, title: String, body: String): Notification {
+            if (failPrepare) throw IllegalStateException("prepare failed")
+            return super.prepare(trackingId, title, body)
+        }
+
         override fun canShow(channelId: String): Boolean {
             steps.add("gate queued=${queued().size}")
             return super.canShow(channelId)
@@ -306,8 +313,8 @@ class ReliablePushTest {
         }
     }
 
-    private fun probe(failPost: Boolean = false, failMinimal: Boolean = false) {
-        ReliablePush.posterFactory = { _, o -> ProbePoster(o, failPost, failMinimal) }
+    private fun probe(failPost: Boolean = false, failMinimal: Boolean = false, failPrepare: Boolean = false) {
+        ReliablePush.posterFactory = { _, o -> ProbePoster(o, failPost, failMinimal, failPrepare) }
     }
 
     private fun internalErrors() = warnings().filter { it.startsWith("event=sdk.internal_error") }
@@ -386,15 +393,58 @@ class ReliablePushTest {
     }
 
     @Test
-    fun gateThrowingPostsTheMinimalNotificationAndRecordsNothing() {
+    fun gateThrowingPersistsDeliveredThenPostsTheMinimalNotification() {
         registered()
         ReliablePush.posterFactory = { c, o -> NotificationPoster(c, o, paused = { throw SecurityException("x") }) }
         assertTrue(ReliablePush.handle(context, push(title = "Hello")))
         assertEquals("Hello", posted()!!.extras.getString(Notification.EXTRA_TITLE))
         settle()
+        // the gate never said "not shown" and the minimal notification is shown: DELIVERED, so no duplicate fallback
+        assertEquals(listOf(tid to "DELIVERED"), events())
+        assertEquals(0, queueSize())
+        assertEquals(listOf("event=sdk.internal_error error=SecurityException"), internalErrors())
+    }
+
+    @Test
+    fun prepareThrowingPersistsDeliveredBeforeTheMinimalNotification() {
+        registered()
+        probe(failPrepare = true)
+        assertTrue(ReliablePush.handle(context, push()))
+        assertEquals(listOf("minimal delivered=true"), steps)
+        assertNotNull(posted())
+        settle()
+        assertEquals(listOf(tid to "DELIVERED"), events())
+        assertEquals(listOf("event=sdk.internal_error error=IllegalStateException"), internalErrors())
+    }
+
+    @Test
+    fun gateClosedThenThrowingRecordsNothing() {
+        registered()
+        shadowOf(nm).setNotificationsEnabled(false) // the gate answers false
+        probe(failPost = true)
+        ReliablePush.handle(context, push())
+        settle()
         assertEquals(0, queueSize())
         assertTrue(events().isEmpty())
-        assertEquals(listOf("event=sdk.internal_error error=SecurityException"), internalErrors())
+    }
+
+    @Test
+    fun upperCaseRpTidIsQueuedSentAndAcknowledgedInLowerCase() {
+        registered()
+        val upper = tid.uppercase()
+        assertTrue(ReliablePush.handle(context, push(upper)))
+        val n = posted(tid)!!
+        settle()
+        assertEquals(listOf(tid to "DELIVERED"), events())
+        assertEquals("acknowledged once", 0, queueSize())
+        assertTrue(warnings().none { it.contains("unacknowledged") })
+
+        val tap = Intent().putExtra("rp_tid", upper)
+        ReliablePush.trackOpen(tap)
+        settle()
+        assertEquals(listOf(tid to "DELIVERED", tid to "READ"), events())
+        assertEquals(0, queueSize())
+        assertEquals(tid, shadowOf(n.contentIntent).savedIntent.getStringExtra("rp_tid"))
     }
 
     @Test

@@ -139,7 +139,8 @@ app's code, so the SDK is hardened to show it whatever happens to tracking.
 
 **What `handle` does, in this order:**
 
-1. checks `rp_tid` (without a valid one it returns at once and reads nothing else);
+1. checks `rp_tid` (without a valid one it returns at once and reads nothing else) and normalizes it to lower case,
+   the form the backend stores and echoes, so the queued, sent and acknowledged ids (and the tap extra) all agree;
 2. looks up the stored configuration and registration (not configured or not registered: it shows the notification and
    records nothing, WARN `tracking.not_registered`);
 3. builds the notification, with your `customizer` (not posted yet);
@@ -156,7 +157,9 @@ app's code, so the SDK is hardened to show it whatever happens to tracking.
 **Robustness.** The whole of `handle` runs inside a catch-all. If anything throws before the notification is posted
 (storage, queue, building, gate or the post), the SDK posts a minimal notification instead: the title and body (else
 the app name) on the configured channel, with the `rp_tid` tap extra, without your customizer. It logs WARN
-`sdk.internal_error` with the exception's class name only.
+`sdk.internal_error` with the exception's class name only. When the error came before `DELIVERED` was written, the SDK
+is configured and registered and the gate never answered "not shown" (it was not reached, or it threw itself),
+`DELIVERED` is written first: the minimal notification is shown, so no fallback should fire for it.
 
 `true` means the notification was posted. `handle` returns `false` only when:
 - the message is not the SDK's (no or malformed `rp_tid`);

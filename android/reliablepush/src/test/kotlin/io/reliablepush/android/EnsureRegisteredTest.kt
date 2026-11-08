@@ -85,7 +85,8 @@ class EnsureRegisteredTest {
         "POST /v1/events" ->
             if (req.headers["authorization"] == "Bearer $refreshedJwt" || req.headers["authorization"] == "Bearer $registeredJwt") {
                 val arr = JSONObject(req.body).getJSONArray("events")
-                val items = List(arr.length()) { """{"trackingId":"${arr.getJSONObject(it).getString("trackingId")}","outcome":"ACCEPTED"}""" }
+                // the real backend echoes ids in lower case (canonical UUID form)
+                val items = List(arr.length()) { """{"trackingId":"${arr.getJSONObject(it).getString("trackingId").lowercase()}","outcome":"ACCEPTED"}""" }
                 ScriptedResponse(200, """{"accepted":${items.size},"ignored":0,"items":[${items.joinToString(",")}]}""")
             } else {
                 ScriptedResponse(401)
