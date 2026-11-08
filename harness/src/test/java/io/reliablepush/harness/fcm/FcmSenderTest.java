@@ -5,7 +5,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import io.reliablepush.harness.fcm.FcmTestSupport.MutableClock;
 import io.reliablepush.harness.fcm.FcmTestSupport.Seen;
 import io.reliablepush.harness.fcm.FcmTestSupport.Stub;
-import io.reliablepush.harness.sender.PayloadPreview;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -59,8 +58,10 @@ class FcmSenderTest {
             assertThat(post.path()).isEqualTo("/v1/projects/example-project/messages:send");
             assertThat(post.authorization()).isEqualTo("Bearer " + ACCESS_TOKEN);
             assertThat(post.contentType()).startsWith("application/json");
-            assertThat(post.body()).isEqualTo(PayloadPreview.fcmV1(tid, "Hello \"you\"", "Body\nline", FCM_TOKEN));
-            assertThat(post.body()).contains("\"rp_tid\": \"" + tid + "\"").contains("\"priority\": \"HIGH\"")
+            // the payload jar's compact output, byte for byte
+            assertThat(post.body()).isEqualTo(io.reliablepush.payload.FcmPayloads.build(FCM_TOKEN, tid.toString(),
+                    "Hello \"you\"", "Body\nline", null));
+            assertThat(post.body()).contains("\"rp_tid\":\"" + tid + "\"").contains("\"priority\":\"HIGH\"")
                     .doesNotContain("\"notification\"");
         }
     }

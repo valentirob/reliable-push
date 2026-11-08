@@ -6,8 +6,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import io.reliablepush.client.FallbackPolicy;
-import io.reliablepush.client.Notification;
-import io.reliablepush.client.ReliablePushException;
 import io.reliablepush.harness.config.HarnessApp;
 import io.reliablepush.harness.config.HarnessProperties;
 import io.reliablepush.harness.devices.DeviceBehaviour;
@@ -61,8 +59,9 @@ class FakeSenderIT {
     void handle(HttpExchange ex) throws IOException {
         String raw = new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
         calls.add(new Call(ex.getRequestHeaders().getFirst("X-Api-Key"), json.readTree(raw)));
+        String tid = json.readTree(raw).path("trackingId").asString(TID.toString());
         String resp = status == 201
-                ? "{\"trackingId\":\"" + TID + "\",\"state\":\"PENDING\",\"userId\":\"u1\",\"policy\":\"NOT_DELIVERED\","
+                ? "{\"trackingId\":\"" + tid + "\",\"state\":\"PENDING\",\"userId\":\"u1\",\"policy\":\"NOT_DELIVERED\","
                         + "\"timeoutMinutes\":10,\"createdAt\":\"2026-11-04T10:00:00Z\",\"dueAt\":\"2026-11-04T10:10:00Z\"}"
                 : "{\"title\":\"Bad\",\"status\":" + status + "}";
         byte[] b = resp.getBytes(StandardCharsets.UTF_8);
@@ -73,23 +72,46 @@ class FakeSenderIT {
     }
 
     @Test
-    void sendRegistersThenSimulatesPush() {
+    void sendGeneratesTheIdRegistersWithItThenSimulatesPush() {
         UUID dev = UUID.randomUUID();
         Map<UUID, DeviceBehaviour> per = Map.of(dev, DeviceBehaviour.parse("never"));
 
-        Notification n = sender.send(new SendPushCommand("shop", "u1", "Title", "Hello body",
+        FakeSender.SendResult r = sender.send(new SendPushCommand("shop", "u1", "Title", "Hello body",
                 FallbackPolicy.NOT_READ, 7, null, per));
 
-        assertThat(n.trackingId()).isEqualTo(TID);
         assertThat(calls).hasSize(1);
         Call c = calls.get(0);
+        String sentId = c.body().get("trackingId").asString();
+        assertThat(io.reliablepush.payload.TrackingIds.isValid(sentId)).isTrue();
+        assertThat(sentId).isEqualTo(sentId.toLowerCase(java.util.Locale.ROOT));
+        assertThat(r.trackingId()).isEqualTo(UUID.fromString(sentId));
+        assertThat(r.registered()).isTrue();
+        assertThat(r.notification().trackingId()).isEqualTo(r.trackingId());
+        assertThat(r.failureStatus()).isNull();
         assertThat(c.apiKey()).isEqualTo("sender-key");
         assertThat(c.body().get("userId").asString()).isEqualTo("u1");
         assertThat(c.body().get("policy").asString()).isEqualTo("NOT_READ");
         assertThat(c.body().get("timeoutMinutes").asInt()).isEqualTo(7);
         assertThat(c.body().at("/fallback/channel").asString()).isEqualTo("sms");
         assertThat(c.body().at("/fallback/text").asString()).isEqualTo("Hello body");
-        assertThat(pushes).containsExactly(new Push(TID, "shop", "u1", per));
+        assertThat(pushes).containsExactly(new Push(r.trackingId(), "shop", "u1", per));
+    }
+
+    @Test
+    void everySendGetsANewId() {
+        FakeSender.SendResult a = sender.send(new SendPushCommand("shop", "u1", "T", "B", null, null, null, null));
+        FakeSender.SendResult b = sender.send(new SendPushCommand("shop", "u1", "T", "B", null, null, null, null));
+
+        assertThat(a.trackingId()).isNotEqualTo(b.trackingId());
+    }
+
+    @Test
+    void ownTrackingIdAndExternalIdAreSentAsGiven() {
+        sender.send(new SendPushCommand("shop", "u1", "T", "B", null, null, null, null, TID, "order-7", false));
+
+        assertThat(calls.get(0).body().get("trackingId").asString()).isEqualTo(TID.toString());
+        assertThat(calls.get(0).body().get("externalId").asString()).isEqualTo("order-7");
+        assertThat(pushes).extracting(Push::tid).containsExactly(TID);
     }
 
     @Test
@@ -103,12 +125,65 @@ class FakeSenderIT {
     }
 
     @Test
-    void registrationFailureSimulatesNoPush() {
+    void registrationFailureStillPushes() {
         status = 400;
 
-        assertThatThrownBy(() -> sender.send(new SendPushCommand("shop", "u1", "T", "B", null, null, null, null)))
-                .isInstanceOf(ReliablePushException.class)
-                .satisfies(e -> assertThat(((ReliablePushException) e).status()).isEqualTo(400));
+        FakeSender.SendResult r = sender.send(new SendPushCommand("shop", "u1", "T", "B", null, null, null, null));
+
+        assertThat(r.registered()).isFalse();
+        assertThat(r.skipped()).isFalse();
+        assertThat(r.failureStatus()).isEqualTo(400);
+        assertThat(pushes).extracting(Push::tid).containsExactly(r.trackingId());
+    }
+
+    @Test
+    void unreachableBackendStillPushes() {
+        server.stop(0);
+
+        FakeSender.SendResult r = sender.send(new SendPushCommand("shop", "u1", "T", "B", null, null, null, null));
+
+        assertThat(r.failureStatus()).isEqualTo(-1);
+        assertThat(pushes).extracting(Push::tid).containsExactly(r.trackingId());
+    }
+
+    @Test
+    void skippedRegistrationCallsNothingAndPushes() {
+        FakeSender.SendResult r = sender.send(
+                new SendPushCommand("shop", "u1", "T", "B", null, null, null, null, TID, null, true));
+
+        assertThat(calls).isEmpty();
+        assertThat(r).isEqualTo(new FakeSender.SendResult(TID, null, null, true));
+        assertThat(pushes).extracting(Push::tid).containsExactly(TID);
+    }
+
+    @Test
+    void listenerSeesTheResultBeforeThePush() {
+        List<FakeSender.Sent> seen = new CopyOnWriteArrayList<>();
+        sender.onSent(s -> {
+            assertThat(pushes).isEmpty();
+            seen.add(s);
+        });
+        sender.onSent(s -> {
+            throw new IllegalStateException("a listener never breaks sending");
+        });
+
+        FakeSender.SendResult r = sender.send(new SendPushCommand("shop", "u1", "T", "B", null, null, null,
+                Map.of(UUID.randomUUID(), DeviceBehaviour.parse("never"))));
+
+        assertThat(seen).singleElement().satisfies(s -> {
+            assertThat(s.appId()).isEqualTo("shop");
+            assertThat(s.trackingId()).isEqualTo(r.trackingId());
+            assertThat(s.notification()).isEqualTo(r.notification());
+            assertThat(s.deviceCount()).isEqualTo(1);
+        });
+        assertThat(pushes).hasSize(1);
+    }
+
+    @Test
+    void payloadTheJarRejectsIsNeitherRegisteredNorPushed() {
+        assertThatThrownBy(() -> sender.send(new SendPushCommand("shop", "u1", "", "", null, null, null, null)))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThat(calls).isEmpty();
         assertThat(pushes).isEmpty();
     }
 

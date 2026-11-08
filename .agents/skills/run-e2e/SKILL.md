@@ -10,7 +10,7 @@ Spec: `docs/specs/2026-11-03-reliable-push-design.md` §10.1.
 
 ## Prerequisites
 - Docker with the compose v2 plugin running (Docker Desktop, Colima or Podman); `curl`; ports 8080 and 8090 free
-  on 127.0.0.1. The images build inside Docker, but `console-smoke` (and so the full 19-entry run)
+  on 127.0.0.1. The images build inside Docker, but `console-smoke` (and so the full 23-entry run)
   runs through the host `./mvnw`: it needs JDK 21 and network access (Maven artifacts, Playwright's Chromium).
 - On a Mac with Colima: `export DOCKER_HOST=unix://$HOME/.colima/default/docker.sock`.
 - Mobile scenarios: the Android emulator suite is `./scripts/android-e2e.sh` (needs the Android SDK; it boots the AVD
@@ -27,19 +27,24 @@ Spec: `docs/specs/2026-11-03-reliable-push-design.md` §10.1.
 
 ## Run
 1. Full suite: `./scripts/e2e.sh` (Windows, PowerShell 7: `pwsh scripts/e2e.ps1`, optional `-Scenario <name> -Keep`; untested on
-   Windows). About 6 minutes including the image build (the crash scenarios alone take about 1.5 minutes).
-   One scenario: `./scripts/e2e.sh --scenario <name>`. The 19 entries: `delivered-before-timeout`,
+   Windows). About 8 minutes including the image build (the crash scenarios take about 1.5 minutes, `token-grace` about 90 s).
+   One scenario: `./scripts/e2e.sh --scenario <name>`. The 23 entries: `delivered-before-timeout`,
    `read-policy-delivered-only`, `read-policy-read`, `not-delivered-single-fallback`, `late-delivery-after-fallback`,
    `multi-device`, `cancellation`, `token-refresh-near-expiry`, `rate-limited`, `receiver-retries-then-succeeds`,
    `receiver-final-failure`, `retries-exhausted-fails`, `worker-crash-inside-window`, `worker-crash-outside-window`,
    `log-catalogue`, `log-hygiene`, `admin-dashboard` (the ops dashboard API; its receiver answers 500 once, then 200),
    `fallback-circuit` (app `circuit`: a burst opens its fallback circuit, confirmed notifications close it; about 1 minute),
+   `no-device-registered` (users without an active device: `NO_DEVICE_REGISTERED`, final, no webhook),
+   `client-tracking-id` (retries with the sender's own id return the same row; one fallback; `externalId` conflict `409`),
+   `registration-lost` (a push with an unregistered `rp_tid`: event `NOT_FOUND`, no fallback),
+   `token-grace` (app `grace`: an expired token inside the events grace delivers; past it `401`, the event stays queued until
+   `ensureRegistered`; about 90 s),
    `console-smoke` (the browser tests of the web console and of `/admin/`: `ConsoleSmokeE2E` and `AdminSmokeE2E`; the first run
    downloads Playwright's Chromium, about 150 MB).
    Keep the stack running afterwards for debugging or the console (http://127.0.0.1:8090): `--keep`; stop it with
    `docker compose -p reliable-push-e2e -f harness/compose/docker-compose.yml down -v`.
    `E2E_READY_TIMEOUT=<seconds>` changes the readiness wait (default 120).
-2. Read the exit code (`0` = all 19 entries PASSED), then `harness/build/e2e/summary.json`
+2. Read the exit code (`0` = all 23 entries PASSED), then `harness/build/e2e/summary.json`
    (`[{scenario, status, durationMs, failure: {expected, actual, hint} | null, logs}]`); JUnit XML in
    `harness/build/e2e/junit/e2e.xml`.
    Logs are collected and the stack is torn down even when scenarios fail (unless `--keep`).
@@ -72,4 +77,4 @@ Spec: `docs/specs/2026-11-03-reliable-push-design.md` §10.1.
 
 ## Report
 State the result in the merge commit / PR description, e.g.
-`E2E: 19/19 passed (./scripts/e2e.sh, 2026-11-08)`, and in `docs/STATUS.md`.
+`E2E: 23/23 passed (./scripts/e2e.sh, 2026-11-08)`, and in `docs/STATUS.md`.

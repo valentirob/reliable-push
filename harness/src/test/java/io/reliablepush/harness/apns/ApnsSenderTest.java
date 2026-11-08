@@ -7,7 +7,6 @@ import io.reliablepush.harness.apns.ApnsTestSupport.Seen;
 import io.reliablepush.harness.apns.ApnsTestSupport.Stub;
 import io.reliablepush.harness.devices.Platform;
 import io.reliablepush.harness.devices.RealDeviceRegistry;
-import io.reliablepush.harness.sender.PayloadPreview;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -55,8 +54,10 @@ class ApnsSenderTest {
             assertThat(post.headers()).containsEntry("apns-topic", ApnsTestSupport.TOPIC)
                     .containsEntry("apns-push-type", "alert").containsEntry("apns-priority", "10")
                     .containsEntry("apns-expiration", "0");
-            assertThat(post.body()).isEqualTo(PayloadPreview.apns(tid, "Hello \"you\"", "Body\nline"));
-            assertThat(post.body()).contains("\"mutable-content\": 1").contains("\"rp_tid\": \"" + tid + "\"");
+            // the payload jar's compact output, byte for byte
+            assertThat(post.body()).isEqualTo(io.reliablepush.payload.ApnsPayloads.build(tid.toString(),
+                    "Hello \"you\"", "Body\nline", null));
+            assertThat(post.body()).contains("\"mutable-content\":1").contains("\"rp_tid\":\"" + tid + "\"");
         }
     }
 

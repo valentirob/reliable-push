@@ -19,7 +19,6 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
-import java.util.function.Function;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -29,6 +28,11 @@ import org.springframework.stereotype.Component;
  * Simulated iOS/Android devices that talk to the real backend device API. Each device keeps its device JWT private
  * (inside this class only; no method returns it and nothing logs it), reacts to simulated pushes according to its
  * {@link DeviceBehaviour} and reports DELIVERED/READ events. Behaviour delays are wall-clock durations.
+ *
+ * <p>Like the SDKs (spec 3.1, D5), the event path never renews the token: each event is one {@code POST /v1/events}
+ * with the stored token. A {@code 401} keeps the event queued and sets {@code renewalNeeded}; only
+ * {@link #ensureRegistered} (the SDKs' {@code ensureRegistered}) or the console's explicit refresh renew the token,
+ * and then flush the queue.
  */
 @Component
 public class DeviceSimulator implements PushReceiver, AutoCloseable {
@@ -54,6 +58,20 @@ public class DeviceSimulator implements PushReceiver, AutoCloseable {
 
     private record Pending(UUID trackingId, String type, Instant occurredAt) {}
 
+    /** Result of {@link #ensureRegistered}, named like the SDKs' {@code RegisterResult}. */
+    public enum EnsureResult {
+        /** New token through the ID-token path ({@code POST /v1/devices} with a fresh signed grant). */
+        REGISTERED,
+        /** New token through {@code POST /v1/devices/token:refresh}. */
+        REFRESHED,
+        /** Token unexpired, no renewal flag and at least 20 % of its validity left: no call. */
+        ALREADY_REGISTERED,
+        /** The device is offline: nothing was done. */
+        OFFLINE,
+        /** The backend refused or did not answer; the old token (if any) is kept. */
+        FAILED
+    }
+
     /**
      * Mutable device state. Token fields and {@code online}/{@code removed} are volatile so {@link #view()} never
      * blocks; token changes are serialised by {@code authLock} (held across network calls, never by readers);
@@ -72,6 +90,7 @@ public class DeviceSimulator implements PushReceiver, AutoCloseable {
         volatile Instant expiresAt;
         volatile boolean online = true;
         volatile boolean removed;
+        volatile boolean renewalNeeded;
         final ArrayDeque<Pending> queue = new ArrayDeque<>();
         boolean draining;
 
@@ -90,7 +109,12 @@ public class DeviceSimulator implements PushReceiver, AutoCloseable {
         }
 
         SimulatedDevice view() {
-            return new SimulatedDevice(id, appId, userId, platform, androidMode, expiresAt, online);
+            int queued;
+            synchronized (gate) { // never held across I/O: a short wait at most
+                queued = queue.size();
+            }
+            return new SimulatedDevice(id, appId, userId, platform, androidMode, expiresAt, online, renewalNeeded,
+                    queued);
         }
 
         @Override
@@ -221,14 +245,48 @@ public class DeviceSimulator implements PushReceiver, AutoCloseable {
         }
     }
 
-    /** Refreshes the token when less than 20 % of its validity is left (spec 7.1). Offline devices do nothing. */
-    public void refreshIfNearExpiry(UUID deviceId) {
-        refreshIfNearExpiry(state(deviceId));
+    /**
+     * The SDKs' {@code ensureRegistered} (spec 3.2), synchronously: same decision order, no network unless needed.
+     * <ol>
+     *   <li>no token, or the token is expired: ID-token path (re-register the same device id with a fresh grant);</li>
+     *   <li>token unexpired and ({@code renewalNeeded}, or less than 20 % of its validity left): refresh; a 401 there
+     *       takes the ID-token path;</li>
+     *   <li>otherwise nothing ({@link EnsureResult#ALREADY_REGISTERED}).</li>
+     * </ol>
+     * On success the flag is cleared and the queued events are sent. An offline device does nothing.
+     */
+    public EnsureResult ensureRegistered(UUID deviceId) {
+        DeviceState s = state(deviceId);
+        if (!s.online || s.removed) {
+            return EnsureResult.OFFLINE;
+        }
+        EnsureResult result;
+        synchronized (s.authLock) {
+            Instant now = clock.instant();
+            if (s.token == null || !now.isBefore(s.expiresAt)) {
+                result = reRegister(s) ? EnsureResult.REGISTERED : EnsureResult.FAILED;
+            } else if (s.renewalNeeded || nearExpiry(s, now)) {
+                int status = refreshNow(s);
+                if (status == 200) {
+                    result = EnsureResult.REFRESHED;
+                } else if (status == 401) {
+                    result = reRegister(s) ? EnsureResult.REGISTERED : EnsureResult.FAILED;
+                } else {
+                    result = EnsureResult.FAILED;
+                }
+            } else {
+                result = EnsureResult.ALREADY_REGISTERED;
+            }
+        }
+        if (result == EnsureResult.REGISTERED || result == EnsureResult.REFRESHED) {
+            kick(s);
+        }
+        return result;
     }
 
     /**
      * Refreshes the token now, whatever its remaining validity (the console's "Refresh token"); a 401 re-registers
-     * the device. An offline device is not touched.
+     * the device. An offline device is not touched. A new token clears {@code renewalNeeded} and flushes the queue.
      *
      * @return the HTTP status of the refresh call (200 = new token), 0 when the device is offline or on timeout
      */
@@ -237,13 +295,17 @@ public class DeviceSimulator implements PushReceiver, AutoCloseable {
         if (!s.online || s.removed) {
             return 0;
         }
+        int status;
         synchronized (s.authLock) {
-            int status = refreshNow(s);
+            status = refreshNow(s);
             if (status == 401 && reRegister(s)) {
-                return 200;
+                status = 200;
             }
-            return status;
         }
+        if (status == 200) {
+            kick(s);
+        }
+        return status;
     }
 
     public void setOnline(UUID deviceId, boolean online) {
@@ -316,7 +378,11 @@ public class DeviceSimulator implements PushReceiver, AutoCloseable {
         }
     }
 
-    /** The only poster of a device's events: FIFO, stops (leaving the rest queued) as soon as the device is offline. */
+    /**
+     * The only poster of a device's events: FIFO, stops (leaving the rest queued) as soon as the device is offline, or
+     * after a 401 (the event goes back to the head of the queue; the next kick, for example after
+     * {@link #ensureRegistered}, tries again).
+     */
     private void drain(DeviceState s) {
         while (true) {
             Pending p;
@@ -327,32 +393,53 @@ public class DeviceSimulator implements PushReceiver, AutoCloseable {
                 }
                 p = s.queue.poll();
             }
+            boolean keep;
             try {
-                post(s, p);
+                keep = post(s, p);
             } catch (RuntimeException e) {
                 LOG.warn("device {} could not report {}: {}", s.id, p.type(), e.getClass().getSimpleName());
+                keep = false;
+            }
+            if (keep) {
+                synchronized (s.gate) {
+                    if (!s.removed) {
+                        s.queue.addFirst(p);
+                    }
+                    s.draining = false;
+                }
+                return;
             }
         }
     }
 
-    private void post(DeviceState s, Pending p) {
+    /**
+     * One {@code POST /v1/events} with the stored token, no refresh before or after (spec 3.1). Reports the outcome
+     * to the listeners. {@code 401} sets {@code renewalNeeded}.
+     *
+     * @return true when the event must stay queued (401)
+     */
+    private boolean post(DeviceState s, Pending p) {
         Instant sentAt = clock.instant();
-        refreshIfNearExpiry(s);
         if (s.removed) {
-            return;
+            return false;
         }
         String outcome;
         Integer retryAfter = null;
+        boolean keep = false;
         try {
-            var result = withAuth(s, token -> api.postEvents(token, List.of(
-                    new DeviceApiClient.EventItem(p.trackingId(), p.type(), p.occurredAt()))));
+            var result = api.postEvents(s.token, List.of(
+                    new DeviceApiClient.EventItem(p.trackingId(), p.type(), p.occurredAt())));
             outcome = switch (result.status()) {
                 case 200 -> result.value().outcomes().isEmpty() ? "UNKNOWN" : result.value().outcomes().get(0);
                 case 429 -> {
                     retryAfter = result.retryAfterSeconds();
                     yield "RATE_LIMITED";
                 }
-                case 401 -> "UNAUTHORIZED";
+                case 401 -> {
+                    s.renewalNeeded = true;
+                    keep = true;
+                    yield "UNAUTHORIZED";
+                }
                 case 503 -> {
                     retryAfter = result.retryAfterSeconds();
                     yield "UNAVAILABLE";
@@ -371,31 +458,7 @@ public class DeviceSimulator implements PushReceiver, AutoCloseable {
                 LOG.warn("device event listener failed: {}", e.getClass().getSimpleName());
             }
         }
-    }
-
-    /**
-     * Runs the call; on 401 tries one refresh and, if that succeeds but the retry is 401 again or the refresh itself
-     * was 401, one re-registration; then gives up with the last result.
-     */
-    private <T> DeviceApiClient.Result<T> withAuth(DeviceState s,
-            Function<String, DeviceApiClient.Result<T>> call) {
-        var result = call.apply(s.token);
-        if (result.status() != 401) {
-            return result;
-        }
-        int refreshStatus = refreshNow(s);
-        boolean reRegister = refreshStatus == 401;
-        if (refreshStatus == 200) {
-            result = call.apply(s.token);
-            if (result.status() != 401) {
-                return result;
-            }
-            reRegister = true;
-        }
-        if (reRegister && reRegister(s)) {
-            return call.apply(s.token);
-        }
-        return result;
+        return keep;
     }
 
     private void remember(String token) {
@@ -407,17 +470,11 @@ public class DeviceSimulator implements PushReceiver, AutoCloseable {
         }
     }
 
-    private void refreshIfNearExpiry(DeviceState s) {
-        if (!s.online || s.removed) {
-            return;
-        }
-        synchronized (s.authLock) {
-            long validity = Duration.between(s.issuedAt, s.expiresAt).toMillis();
-            long remaining = Duration.between(clock.instant(), s.expiresAt).toMillis();
-            if (remaining * 5 < validity && refreshNow(s) == 401) {
-                reRegister(s);
-            }
-        }
+    /** Less than 20 % of the token's validity left (spec 3.2). */
+    private static boolean nearExpiry(DeviceState s, Instant now) {
+        long validity = Duration.between(s.issuedAt, s.expiresAt).toMillis();
+        long remaining = Duration.between(now, s.expiresAt).toMillis();
+        return remaining * 5 < validity;
     }
 
     /** @return the HTTP status of the refresh call (200 = new token stored), 0 on timeout / I/O failure */
@@ -429,6 +486,7 @@ public class DeviceSimulator implements PushReceiver, AutoCloseable {
             var r = api.refresh(s.token);
             if (r.ok()) {
                 s.setToken(r.value().token(), clock.instant(), r.value().expiresAt());
+                s.renewalNeeded = false;
                 remember(r.value().token());
             }
             return r.status();
@@ -449,6 +507,7 @@ public class DeviceSimulator implements PushReceiver, AutoCloseable {
                 return false;
             }
             s.setToken(r.value().token(), clock.instant(), r.value().expiresAt());
+            s.renewalNeeded = false;
             remember(r.value().token());
             return true;
         }

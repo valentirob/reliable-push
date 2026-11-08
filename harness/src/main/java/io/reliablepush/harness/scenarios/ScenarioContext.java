@@ -92,7 +92,7 @@ public final class ScenarioContext {
 
     private static final Set<NotificationState> FINAL = EnumSet.of(NotificationState.READ,
             NotificationState.FALLBACK_TRIGGERED, NotificationState.FALLBACK_FAILED, NotificationState.FALLBACK_EXPIRED,
-            NotificationState.CANCELLED);
+            NotificationState.CANCELLED, NotificationState.NO_DEVICE_REGISTERED);
 
     private final Components c;
     private final Run run;
@@ -221,23 +221,51 @@ public final class ScenarioContext {
      * Registers a notification through the sender API and simulates the push; {@code behaviours} maps device ids to
      * behaviour strings such as {@code deliver:1s}. The fallback is {@code {channel: sms, text: <unique text>}}; the
      * text is message content the backend must never log, so the hygiene scan looks for it. Returns the trackingId
-     * (remembered for {@link #awaitState}).
+     * (remembered for {@link #awaitState}). A failed registration fails the scenario (the push still went out).
      */
     public UUID send(String appId, String userId, FallbackPolicy policy, Integer timeoutMinutes,
                      Map<UUID, String> behaviours) {
+        FakeSender.SendResult r = send(appId, userId, policy, timeoutMinutes, behaviours, null, null, false);
+        if (!r.registered()) {
+            fail("registration of " + r.trackingId() + " answered 201",
+                    "registration failed (sender API status " + r.failureStatus() + ")",
+                    "the api container log has the request; " + hint(r.trackingId()));
+        }
+        return r.trackingId();
+    }
+
+    /**
+     * The full sender flow with the options of {@link SendPushCommand}: an own {@code trackingId} (null = new),
+     * an {@code externalId} (nullable), and {@code skipRegistration} (the push goes out unregistered). Never fails on
+     * the registration outcome: the result says what happened. The trackingId is remembered for {@link #awaitState}.
+     */
+    public FakeSender.SendResult send(String appId, String userId, FallbackPolicy policy, Integer timeoutMinutes,
+                                      Map<UUID, String> behaviours, UUID trackingId, String externalId,
+                                      boolean skipRegistration) {
         Map<UUID, DeviceBehaviour> parsed = new LinkedHashMap<>();
         behaviours.forEach((device, text) -> parsed.put(device, DeviceBehaviour.parse(text)));
+        Map<String, Object> fallback = newFallback();
+        FakeSender.SendResult r = c.sender().send(new SendPushCommand(appId, userId, "Scenario " + scenario,
+                (String) fallback.get("text"), policy, timeoutMinutes, fallback, parsed, trackingId, externalId,
+                skipRegistration));
+        track(r.trackingId(), appId);
+        log("sent " + r.trackingId() + " app=" + appId + " policy=" + policy + " timeoutMinutes=" + timeoutMinutes
+                + " behaviours=" + behaviours.values() + " registration="
+                + (r.registered() ? r.notification().state() : r.skipped() ? "skipped" : "failed/" + r.failureStatus()));
+        return r;
+    }
+
+    /**
+     * A new fallback payload {@code {channel: sms, text: <unique text>}}; the text is remembered for the log-hygiene
+     * scan. For scenarios that call the sender API directly.
+     */
+    public Map<String, Object> newFallback() {
         String text = "Fallback text " + run.prefix + " " + scenario + " #" + run.texts.incrementAndGet();
         history.add(text);
         Map<String, Object> fallback = new LinkedHashMap<>();
         fallback.put("channel", "sms");
         fallback.put("text", text);
-        Notification n = c.sender().send(new SendPushCommand(appId, userId, "Scenario " + scenario, text, policy,
-                timeoutMinutes, fallback, parsed));
-        track(n.trackingId(), appId);
-        log("sent " + n.trackingId() + " app=" + appId + " policy=" + policy + " timeoutMinutes=" + timeoutMinutes
-                + " behaviours=" + behaviours.values());
-        return n.trackingId();
+        return fallback;
     }
 
     /** Remembers the app of a trackingId created outside {@link #send} (e.g. in an external scenario's prepare). */

@@ -85,7 +85,11 @@ public class ConsoleApiController {
 
     public record OnlineRequest(Boolean online) {}
 
-    /** {@code perDevice}: deviceId to behaviour string such as {@code deliver:3s}. */
+    /**
+     * {@code perDevice}: deviceId to behaviour string such as {@code deliver:3s}. The answer is always 200 once the
+     * push went out: {@code {trackingId, registered, state, registrationStatus}} ({@code state} null and
+     * {@code registrationStatus} the sender API's status, -1 = no answer, when the registration failed).
+     */
     public record PushRequest(String appId, String userId, String title, String body, FallbackPolicy policy,
                               Integer timeoutMinutes, Map<String, Object> fallback, Map<String, String> perDevice) {}
 
@@ -258,6 +262,26 @@ public class ConsoleApiController {
         return deviceJson(device(id));
     }
 
+    /**
+     * The SDKs' {@code ensureRegistered} on a simulated device: register, refresh or nothing, by the same rules
+     * (spec 3.2). Body: {@code {}}. Answers {@code {result, device}}; an offline device is 409.
+     */
+    @PostMapping("/devices/{id}/ensure-registered")
+    public Map<String, Object> ensureRegistered(@PathVariable String id, @RequestBody Map<String, Object> empty) {
+        SimulatedDevice d = device(id);
+        if (!d.online()) {
+            throw new ConflictException("device is offline");
+        }
+        DeviceSimulator.EnsureResult result = simulator.ensureRegistered(d.deviceId());
+        if (result == DeviceSimulator.EnsureResult.FAILED) {
+            throw new BackendCallException("ensureRegistered failed", 0, null);
+        }
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("result", result.name());
+        m.put("device", deviceJson(device(id)));
+        return m;
+    }
+
     @PostMapping("/devices/{id}/online")
     public Map<String, Object> online(@PathVariable String id, @RequestBody OnlineRequest r) {
         if (r.online() == null) {
@@ -298,14 +322,16 @@ public class ConsoleApiController {
                 perDevice.put(uuid(e.getKey(), "device id"), DeviceBehaviour.parse(e.getValue()));
             }
         }
-        Notification n = sender.send(new SendPushCommand(r.appId(), r.userId(), title, body, r.policy(),
+        // the sender flow (spec 1): the push goes out whatever the registration outcome
+        FakeSender.SendResult sent = sender.send(new SendPushCommand(r.appId(), r.userId(), title, body, r.policy(),
                 r.timeoutMinutes(), r.fallback(), perDevice));
-        for (FcmPusher.DevicePush p : fcm.push(r.appId(), r.userId(), n.trackingId(), title, body)) {
-            timeline.append(n.trackingId(), r.appId(), new TimelineEntry(Instant.now(), "fcm_push", Map.of(
+        UUID tid = sent.trackingId();
+        for (FcmPusher.DevicePush p : fcm.push(r.appId(), r.userId(), tid, title, body)) {
+            timeline.append(tid, r.appId(), new TimelineEntry(Instant.now(), "fcm_push", Map.of(
                     "deviceId", p.deviceId().toString(), "result", p.result().outcome().name(),
                     "status", p.result().status())));
         }
-        for (ApnsPusher.DevicePush p : apns.push(r.appId(), r.userId(), n.trackingId(), title, body)) {
+        for (ApnsPusher.DevicePush p : apns.push(r.appId(), r.userId(), tid, title, body)) {
             Map<String, Object> details = new LinkedHashMap<>();
             details.put("deviceId", p.deviceId().toString());
             details.put("result", p.result().outcome().name());
@@ -313,9 +339,9 @@ public class ConsoleApiController {
             if (p.result().reason() != null) {
                 details.put("reason", p.result().reason());
             }
-            timeline.append(n.trackingId(), r.appId(), new TimelineEntry(Instant.now(), "apns_push", details));
+            timeline.append(tid, r.appId(), new TimelineEntry(Instant.now(), "apns_push", details));
         }
-        return Map.of("trackingId", n.trackingId().toString());
+        return pushJson(sent);
     }
 
     @GetMapping("/notifications")
@@ -559,6 +585,17 @@ public class ConsoleApiController {
         m.put("androidMode", d.androidMode() == null ? null : d.androidMode().name());
         m.put("tokenExpiresAt", iso(d.tokenExpiresAt()));
         m.put("online", d.online());
+        m.put("renewalNeeded", d.renewalNeeded());
+        m.put("queuedEvents", d.queuedEvents());
+        return m;
+    }
+
+    static Map<String, Object> pushJson(FakeSender.SendResult sent) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("trackingId", sent.trackingId().toString());
+        m.put("registered", sent.registered());
+        m.put("state", sent.registered() ? sent.notification().state().name() : null);
+        m.put("registrationStatus", sent.registered() ? 201 : sent.failureStatus());
         return m;
     }
 

@@ -70,6 +70,12 @@
             <artifactId>reliable-push-client</artifactId>
             <version>${project.version}</version>
         </dependency>
+        <dependency>
+            <!-- tracking ids and the tracked APNs / FCM payloads, exactly as a customer backend builds them -->
+            <groupId>io.reliablepush</groupId>
+            <artifactId>reliable-push-payload</artifactId>
+            <version>${project.version}</version>
+        </dependency>
 
         <!-- test (Playwright is added by the console-smoke profile only) -->
         <dependency>

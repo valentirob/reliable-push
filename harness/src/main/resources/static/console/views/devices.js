@@ -44,8 +44,9 @@ export function mount(root, ctx) {
         el('td', { text: d.userId }), el('td', { text: (d.kind === 'REAL' ? 'REAL ' : '') + d.platform + (d.androidMode ? ' ' + d.androidMode : '') + (d.label ? ' (' + d.label + ')' : '') }),
         el('td', {}, el('code', { text: d.deviceId })),
         el('td', { text: d.tokenExpiresAt ? new Date(d.tokenExpiresAt).toLocaleString() : '' }),
-        el('td', { text: d.online ? 'online' : 'offline' }),
+        el('td', { text: (d.online ? 'online' : 'offline') + (d.renewalNeeded ? ', renewal needed' : '') + (d.queuedEvents ? ', ' + d.queuedEvents + ' queued' : '') }),
         el('td', {}, d.kind === 'REAL' ? el('span', { class: 'muted', text: 'registered by the app' }) : [
+          el('button', { type: 'button', text: 'Ensure registered', title: 'What the SDKs\' ensureRegistered does: register, refresh or nothing', onclick: () => act(() => api('/devices/' + d.deviceId + '/ensure-registered', { method: 'POST', body: {} })) }), ' ',
           el('button', { type: 'button', text: 'Refresh token', onclick: () => act(() => api('/devices/' + d.deviceId + '/refresh', { method: 'POST', body: {} })) }), ' ',
           el('button', { type: 'button', text: d.online ? 'Go offline' : 'Go online', onclick: () => act(() => api('/devices/' + d.deviceId + '/online', { method: 'POST', body: { online: !d.online } })) })]))));
       if (!list.length) body.replaceChildren(el('tr', {}, el('td', { colspan: '6', class: 'muted', text: 'No devices yet.' })));

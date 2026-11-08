@@ -58,7 +58,7 @@ class ConsoleApiIT {
     static void handle(HttpExchange ex) throws IOException {
         String m = ex.getRequestMethod();
         String p = ex.getRequestURI().getPath();
-        ex.getRequestBody().readAllBytes();
+        String raw = new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
         if (m.equals("POST") && p.equals("/v1/devices") && deviceStatus != 201) {
             if (deviceStatus == 429) {
                 ex.getResponseHeaders().add("Retry-After", "7");
@@ -81,7 +81,10 @@ class ConsoleApiIT {
                 reply(ex, registerStatus, "{\"title\":\"Conflict\",\"status\":" + registerStatus + "}");
                 return;
             }
-            UUID id = UUID.randomUUID();
+            // the backend echoes the sender's trackingId (lower case)
+            java.util.regex.Matcher tid = java.util.regex.Pattern.compile("\"trackingId\":\"([0-9a-f-]{36})\"")
+                    .matcher(raw);
+            UUID id = tid.find() ? UUID.fromString(tid.group(1)) : UUID.randomUUID();
             synchronized (registered) {
                 registered.add(id);
             }
@@ -210,6 +213,17 @@ class ConsoleApiIT {
         assertThat(json.readTree(off.body()).get("online").asBoolean()).isFalse();
         assertThat(post("/console/api/devices/" + id + "/refresh", "{}").statusCode()).isEqualTo(409);
         assertThat(post("/console/api/devices/" + UUID.randomUUID() + "/refresh", "{}").statusCode()).isEqualTo(404);
+        assertThat(post("/console/api/devices/" + id + "/ensure-registered", "{}").statusCode()).isEqualTo(409);
+        post("/console/api/devices/" + id + "/online", "{\"online\":true}");
+        HttpResponse<String> ensured = post("/console/api/devices/" + id + "/ensure-registered", "{}");
+        assertThat(ensured.statusCode()).as(ensured.body()).isEqualTo(200);
+        assertThat(json.readTree(ensured.body()).get("result").asString()).isEqualTo("ALREADY_REGISTERED");
+        JsonNode device = json.readTree(ensured.body()).get("device");
+        assertThat(device.get("renewalNeeded").asBoolean()).isFalse();
+        assertThat(device.get("queuedEvents").asInt()).isZero();
+        assertThat(ensured.body()).doesNotContain("zzsecretzz");
+        assertThat(post("/console/api/devices/" + UUID.randomUUID() + "/ensure-registered", "{}").statusCode())
+                .isEqualTo(404);
     }
 
     JsonNode deviceById(String id) throws Exception {
@@ -225,25 +239,43 @@ class ConsoleApiIT {
     void pushReturnsTrackingId() throws Exception {
         String dev = createDevice("push-user");
 
-        String tid = push("push-user", "{\"" + dev + "\":\"never\"}");
+        HttpResponse<String> r = post("/console/api/push", "{\"appId\":\"shop\",\"userId\":\"push-user\","
+                + "\"title\":\"Hi\",\"body\":\"Hello\",\"perDevice\":{\"" + dev + "\":\"never\"}}");
 
+        assertThat(r.statusCode()).isEqualTo(200);
+        JsonNode answer = json.readTree(r.body());
+        String tid = answer.get("trackingId").asString();
         assertThat(UUID.fromString(tid)).isNotNull();
+        assertThat(answer.get("registered").asBoolean()).isTrue();
+        assertThat(answer.get("state").asString()).isEqualTo("PENDING");
+        assertThat(answer.get("registrationStatus").asInt()).isEqualTo(201);
         JsonNode list = json.readTree(get("/console/api/notifications?appId=shop").body());
         assertThat(list.toString()).contains(tid);
     }
 
     @Test
-    void pushRejectsBadBehaviourAndMapsBackendFailureTo502() throws Exception {
+    void pushRejectsBadBehaviourAndStillPushesWhenTheRegistrationFails() throws Exception {
         HttpResponse<String> bad = post("/console/api/push", "{\"appId\":\"shop\",\"userId\":\"u\",\"title\":\"t\","
                 + "\"body\":\"b\",\"perDevice\":{\"" + UUID.randomUUID() + "\":\"sometimes\"}}");
         assertThat(bad.statusCode()).isEqualTo(400);
 
+        HttpResponse<String> empty = post("/console/api/push", "{\"appId\":\"shop\",\"userId\":\"u\",\"title\":\"\","
+                + "\"body\":\"\"}");
+        assertThat(empty.statusCode()).as("the payload jar needs a title or a body").isEqualTo(400);
+
+        // spec 1: the push goes out whatever the registration outcome; the answer says it is not tracked
         registerStatus = 409;
         HttpResponse<String> down = post("/console/api/push",
                 "{\"appId\":\"shop\",\"userId\":\"u\",\"title\":\"t\",\"body\":\"b\"}");
-        assertThat(down.statusCode()).isEqualTo(502);
-        assertThat(down.headers().firstValue("Content-Type").orElse("")).contains("application/problem+json");
-        assertThat(down.body()).contains("409").doesNotContain("test-sender-key");
+        assertThat(down.statusCode()).isEqualTo(200);
+        JsonNode answer = json.readTree(down.body());
+        assertThat(answer.get("registered").asBoolean()).isFalse();
+        assertThat(answer.get("state").isNull()).isTrue();
+        assertThat(answer.get("registrationStatus").asInt()).isEqualTo(409);
+        assertThat(down.body()).doesNotContain("test-sender-key");
+        String tid = answer.get("trackingId").asString();
+        JsonNode detail = json.readTree(get("/console/api/notifications/" + tid).body());
+        assertThat(detail.get("timeline").toString()).contains("registration_missing").contains("push_simulated");
     }
 
     @Test
@@ -256,11 +288,12 @@ class ConsoleApiIT {
         assertThat(device.headers().firstValue("Content-Type").orElse("")).contains("application/problem+json");
         assertThat(json.readTree(device.body()).get("backendStatus").asInt()).isEqualTo(429);
 
+        // a rate-limited registration does not stop the push (spec 1): it is reported, not passed on as 429
         registerStatus = 429;
         HttpResponse<String> push = post("/console/api/push",
                 "{\"appId\":\"shop\",\"userId\":\"u\",\"title\":\"t\",\"body\":\"b\"}");
-        assertThat(push.statusCode()).as(push.body()).isEqualTo(429);
-        assertThat(push.headers().firstValue("Retry-After")).hasValue("9");
+        assertThat(push.statusCode()).as(push.body()).isEqualTo(200);
+        assertThat(json.readTree(push.body()).get("registrationStatus").asInt()).isEqualTo(429);
     }
 
     @Test
