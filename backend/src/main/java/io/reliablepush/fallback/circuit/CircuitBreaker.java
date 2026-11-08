@@ -51,10 +51,11 @@ public class CircuitBreaker {
     private final Clock clock;
     private final Duration retention;
 
-    /** Database time of the last prune on this instance; {@code null} until the first one. */
+    /** Application-clock time of the last prune on this instance; {@code null} until the first one. */
     private volatile Instant lastPrune;
 
-    private record Applied(Circuit current, Transition transition, CircuitEvent event) {}
+    /** A written transition: the event as stored, and the detector's raw ratio (logged unrounded) for an open. */
+    private record Applied(Circuit current, Transition transition, CircuitEvent event, Double ratio) {}
 
     private record Evaluation(Map<String, Circuit> circuits, List<Applied> applied, Instant prunedAt) {}
 
@@ -198,10 +199,10 @@ public class CircuitBreaker {
                 t.reason(),
                 opened ? obs.due() : null,
                 opened ? BigDecimal.valueOf(obs.ratio()).setScale(4, RoundingMode.HALF_UP) : null,
-                opened ? null : current.suppressed(),
+                opened ? null : current.suppressed(), // replaced by the stored count inside the write
                 adminKeyId);
-        circuits.transition(t.next(), event);
-        return new Applied(current, t, event);
+        CircuitEvent written = circuits.transition(t.next(), event);
+        return new Applied(current, t, written, opened ? obs.ratio() : null);
     }
 
     private boolean pruneDue(Instant now) {
@@ -236,7 +237,7 @@ public class CircuitBreaker {
         switch (e.transition()) {
             case CircuitTransitions.OPENED -> {
                 fields.put("due", e.due());
-                fields.put("ratio", e.ratio().doubleValue());
+                fields.put("ratio", applied.ratio()); // the event column keeps 4 decimals
                 EventLog.warn("fallback.circuit_opened", fields);
             }
             case CircuitTransitions.FORCED -> {

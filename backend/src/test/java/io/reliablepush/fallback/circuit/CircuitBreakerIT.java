@@ -209,6 +209,20 @@ class CircuitBreakerIT extends PostgresTestBase {
     }
 
     @Test
+    void openedLogsTheRawRatioAndStoresFourDecimals() {
+        // exactly min-due due rows (all read) and 3 delivered sends created inside their creation range: 3 / 53
+        unmetDue(app, 50, Duration.ofMinutes(10));
+        delivered(app, 3, Duration.ofMinutes(10).plusMillis(20));
+
+        assertThat(breaker.evaluate(List.of(app)).get(app).state()).isEqualTo(CircuitState.OPEN);
+
+        assertThat(events(app)).singleElement()
+                .satisfies(e -> assertThat(e.ratio()).isEqualByComparingTo("0.0566"));
+        assertThat(logged("fallback.circuit_opened")).singleElement()
+                .satisfies(e -> assertThat(EventCapture.data(e)).containsEntry("ratio", 3.0 / 53));
+    }
+
+    @Test
     void campaignThenSilenceStaysClosed() {
         // 200 sends ten minutes ago, 70 % delivered; the 60 offline users' fallbacks come due now, no new traffic
         campaign("NOT_DELIVERED", 200);
@@ -279,7 +293,7 @@ class CircuitBreakerIT extends PostgresTestBase {
         Instant since = now.minus(Duration.ofMinutes(2));
         circuits.transition(new Circuit(app, CircuitState.OPEN, since, null, null, 0),
                 new CircuitEvent(0, app, since, "OPENED", "tracking_missing", 50L, null, null, null));
-        circuits.addSuppressed(app, 7);
+        circuits.addSuppressed(app, 7, now);
         // sends before the open do not count, nor do undelivered ones
         delivered(app, 20, Duration.ofMinutes(3));
         unmetDue(app, 5, Duration.ofSeconds(50));

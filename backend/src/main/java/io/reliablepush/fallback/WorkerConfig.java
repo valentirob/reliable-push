@@ -3,6 +3,9 @@ package io.reliablepush.fallback;
 import io.reliablepush.apps.AppConfig;
 import io.reliablepush.apps.AppRegistry;
 import io.reliablepush.apps.ReliablePushProperties;
+import io.reliablepush.fallback.circuit.CircuitBreaker;
+import io.reliablepush.fallback.circuit.CircuitBreakerProperties;
+import io.reliablepush.fallback.circuit.Suppressor;
 import io.reliablepush.notifications.NotificationRepository;
 import io.reliablepush.shared.metrics.RpMetrics;
 import io.reliablepush.shared.time.TimeScale;
@@ -48,7 +51,10 @@ class WorkerConfig {
             JsonMapper json,
             RpMetrics metrics,
             FallbackAttemptRepository attempts,
-            TransactionTemplate transactions) {
+            TransactionTemplate transactions,
+            CircuitBreaker breaker,
+            Suppressor suppressor,
+            CircuitBreakerProperties circuitProperties) {
         // the lease is a product duration (2 "minutes"): scaled by the fast clock like backoff and trigger window
         Duration lease = timeScale.scale(properties.worker().lease());
         boolean fastClock = !timeScale.minuteDuration().equals(Duration.ofMinutes(1));
@@ -57,7 +63,10 @@ class WorkerConfig {
         FallbackDispatcher dispatcher =
                 new FallbackDispatcher(notifications, apps, timeScale, clock, webhookClient, json, metrics, lease,
                         attempts, transactions);
-        return new FallbackScheduler(notifications, dispatcher, clock, lease, properties.worker().batchSize(),
+        // the circuit of every configured app is evaluated, and suppressed apps are skipped, before each tick's claims
+        List<String> appIds = apps.all().stream().map(AppConfig::appId).toList();
+        return new FallbackScheduler(notifications, dispatcher, breaker, suppressor, appIds,
+                circuitProperties.suspended(), clock, lease, properties.worker().batchSize(),
                 properties.worker().maxConcurrency());
     }
 

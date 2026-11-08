@@ -1,12 +1,19 @@
 package io.reliablepush.fallback;
 
+import io.reliablepush.fallback.circuit.Circuit;
+import io.reliablepush.fallback.circuit.CircuitBreaker;
+import io.reliablepush.fallback.circuit.Suppressor;
 import io.reliablepush.notifications.ClaimedNotification;
 import io.reliablepush.notifications.NotificationRepository;
+import io.reliablepush.shared.logging.EventLog;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Semaphore;
@@ -16,8 +23,10 @@ import java.util.concurrent.locks.ReentrantLock;
 import org.springframework.scheduling.annotation.Scheduled;
 
 /**
- * The fallback worker loop (spec 2). Every poll interval one tick claims due rows (atomically, {@code SKIP LOCKED}:
- * replicas never claim the same row) with a lease, and dispatches them.
+ * The fallback worker loop (spec 2). Every poll interval one tick first evaluates the fallback circuit of every
+ * configured app and suppresses the apps that must not fire ({@link CircuitBreaker}, {@link Suppressor}; circuit
+ * breaker spec 4 and 5), then claims due rows of the other apps (atomically, {@code SKIP LOCKED}:
+ * replicas never claim the same row) with a lease, and dispatches them. If the circuit check fails, the tick logs WARN {@code fallback.circuit_check_failed} and claims nothing (fail closed).
  *
  * <p>Throughput: a tick does not stop after one claim. It keeps claiming while the previous claim came back full (more
  * rows are probably due), for at most half the lease, so a large backlog drains at the speed of the receivers instead
@@ -37,6 +46,10 @@ public class FallbackScheduler {
 
     private final NotificationRepository notifications;
     private final FallbackDispatcher dispatcher;
+    private final CircuitBreaker breaker;
+    private final Suppressor suppressor;
+    private final List<String> appIds;
+    private final boolean suspended;
     private final Clock clock;
     private final Duration lease;
     private final int batchSize;
@@ -51,6 +64,10 @@ public class FallbackScheduler {
     FallbackScheduler(
             NotificationRepository notifications,
             FallbackDispatcher dispatcher,
+            CircuitBreaker breaker,
+            Suppressor suppressor,
+            List<String> appIds,
+            boolean suspended,
             Clock clock,
             Duration lease,
             int batchSize,
@@ -60,6 +77,10 @@ public class FallbackScheduler {
         }
         this.notifications = notifications;
         this.dispatcher = dispatcher;
+        this.breaker = breaker;
+        this.suppressor = suppressor;
+        this.appIds = List.copyOf(appIds);
+        this.suspended = suspended;
         this.clock = clock;
         this.lease = lease;
         this.batchSize = batchSize;
@@ -138,7 +159,32 @@ public class FallbackScheduler {
         }
     }
 
+    /**
+     * Evaluates the circuits of the configured apps and suppresses the ones that must not fire (circuit breaker spec 4
+     * and 5).
+     *
+     * @return the apps the claims of this tick skip, or empty when the check failed: then nothing is claimed (fail
+     *     closed: a missed fallback is preferred to an unwanted one; the rows are claimed by a later tick)
+     */
+    private Optional<Set<String>> suppressedApps() {
+        try {
+            Map<String, Circuit> circuits = breaker.evaluate(appIds);
+            return Optional.of(suppressor.suppress(circuits, suspended, now()));
+        } catch (RuntimeException e) {
+            EventLog.warn("fallback.circuit_check_failed", Map.of("reason", e.getClass().getSimpleName()));
+            return Optional.empty();
+        }
+    }
+
     private int claimAndDispatch() {
+        if (stopRequested) {
+            return 0;
+        }
+        Optional<Set<String>> check = suppressedApps();
+        if (check.isEmpty()) {
+            return 0;
+        }
+        Set<String> excluded = check.get();
         Instant claimUntil = now().plus(lease.dividedBy(2));
         Semaphore slots = new Semaphore(maxConcurrency);
         int total = 0;
@@ -161,7 +207,7 @@ public class FallbackScheduler {
                 first = false;
                 List<ClaimedNotification> claimed;
                 try {
-                    claimed = notifications.claimDue(now, now.plus(lease), capacity);
+                    claimed = notifications.claimDue(now, now.plus(lease), capacity, excluded);
                 } catch (RuntimeException e) {
                     slots.release(capacity);
                     throw e;

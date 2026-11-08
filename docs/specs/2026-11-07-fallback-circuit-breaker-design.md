@@ -149,6 +149,10 @@ Per tick and app: one WARN `fallback.suppressed` (`rp.app_id`, `count`, `reason`
 follows skips suppressed apps. Suppressed notifications are never re-opened: events that arrive later are stored as
 `late`, as today (FR-11).
 
+Fail closed: when `evaluate()` or the suppression of a tick throws (database error), the tick logs one WARN
+`fallback.circuit_check_failed` (`reason` = exception class name) and claims nothing; the next tick tries again. A
+missed fallback is preferred to an unwanted one.
+
 ## 6. Admin console and API
 
 - New admin key permission `fallback-control` (next to `payload`; unknown permissions still fail startup).

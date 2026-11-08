@@ -5,6 +5,7 @@ import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import io.reliablepush.tracking.EventType;
+import java.util.Collection;
 import java.util.EnumMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -18,11 +19,14 @@ import org.springframework.stereotype.Component;
  *   <li>{@code rp_notifications_registered_total}: notifications really inserted (replays of an {@code externalId} are not);</li>
  *   <li>{@code rp_events_total{type,late}}: event rows stored ({@code late=true} when the state transition no longer applied);</li>
  *   <li>{@code rp_fallback_total{outcome=triggered|failed|expired}}: fallback outcomes that were persisted;</li>
+ *   <li>{@code rp_fallback_suppressed_total{app,reason=circuit_open|fallback_suspended}}: fallbacks the circuit breaker
+ *       closed without a call (worker role only, see {@link #registerFallbackSuppressed});</li>
  *   <li>{@code rp_webhook_latency_seconds}: duration of every webhook call;</li>
  *   <li>{@code rp_due_backlog}: rows the fallback worker could claim now (worker role only, see {@link #registerDueBacklogGauge()}).</li>
  * </ul>
- * Tags are fixed enumerations, never ids: no appId, userId or trackingId. Every known tag combination is registered at
- * startup, so the series exist (at 0) before the first event.
+ * Tags are fixed enumerations, never ids: no userId or trackingId, and an app id only as the {@code app} tag of
+ * {@code rp_fallback_suppressed_total} (the configured apps, a bounded set). Every known tag combination is registered
+ * at startup, so the series exist (at 0) before the first event.
  */
 @Component
 public class RpMetrics {
@@ -32,9 +36,13 @@ public class RpMetrics {
     static final String FALLBACK = "rp.fallback";
     static final String WEBHOOK_LATENCY = "rp.webhook.latency";
     static final String DUE_BACKLOG = "rp.due.backlog";
+    static final String FALLBACK_SUPPRESSED = "rp.fallback.suppressed";
 
     /** The values of the {@code outcome} tag of {@code rp_fallback_total}. */
     public static final List<String> FALLBACK_OUTCOMES = List.of("triggered", "failed", "expired");
+
+    /** The values of the {@code reason} tag of {@code rp_fallback_suppressed_total}. */
+    public static final List<String> SUPPRESSION_REASONS = List.of("circuit_open", "fallback_suspended");
 
     private final MeterRegistry registry;
     private final Counter registered;
@@ -94,6 +102,38 @@ public class RpMetrics {
             throw new IllegalArgumentException("unknown fallback outcome: " + outcome);
         }
         counter.increment();
+    }
+
+    /**
+     * Registers {@code rp_fallback_suppressed_total} at 0 for every configured app and reason. Called by the worker
+     * role only (the suppressor), so an api-only replica does not expose it.
+     */
+    public void registerFallbackSuppressed(Collection<String> appIds) {
+        appIds.forEach(app -> SUPPRESSION_REASONS.forEach(reason -> suppressedCounter(app, reason)));
+    }
+
+    /**
+     * {@code count} fallbacks of {@code appId} were closed as {@code FALLBACK_EXPIRED} without a call by the circuit
+     * breaker: counted in {@code rp_fallback_suppressed_total{app,reason}} and in
+     * {@code rp_fallback_total{outcome="expired"}}.
+     *
+     * @param reason {@code circuit_open} or {@code fallback_suspended}
+     * @throws IllegalArgumentException for any other reason (tags stay a closed set)
+     */
+    public void fallbackSuppressed(String appId, String reason, long count) {
+        if (!SUPPRESSION_REASONS.contains(reason)) {
+            throw new IllegalArgumentException("unknown suppression reason: " + reason);
+        }
+        suppressedCounter(appId, reason).increment(count);
+        fallback.get("expired").increment(count);
+    }
+
+    private Counter suppressedCounter(String appId, String reason) {
+        return Counter.builder(FALLBACK_SUPPRESSED)
+                .description("Fallbacks closed as expired without a call by the circuit breaker")
+                .tag("app", appId)
+                .tag("reason", reason)
+                .register(registry);
     }
 
     /** The timer of webhook calls (untagged). */
