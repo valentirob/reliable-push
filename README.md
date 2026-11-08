@@ -137,7 +137,8 @@ EOF
 docker network create rp-net
 docker run -d --name rp-db --network rp-net -e POSTGRES_DB=reliablepush -e POSTGRES_USER=rp \
   -e POSTGRES_PASSWORD="$RP_DB_PASSWORD" postgres:16
-until docker exec rp-db pg_isready -U rp -d reliablepush >/dev/null 2>&1; do sleep 1; done   # wait for PostgreSQL (--restart covers its init restart)
+# wait for PostgreSQL (--restart below covers its init restart)
+until docker exec rp-db pg_isready -U rp -d reliablepush >/dev/null 2>&1; do sleep 1; done
 docker run -d --name rp-app --network rp-net --restart on-failure -p 8080:8080 \
   -v "$PWD/rp.yml:/config/application.yml:ro" -e SPRING_CONFIG_ADDITIONAL_LOCATION=optional:file:/config/ \
   -e SPRING_DATASOURCE_URL=jdbc:postgresql://rp-db:5432/reliablepush \
@@ -150,7 +151,8 @@ curl -s http://localhost:8080/actuator/health/readiness
 TID=$(uuidgen | tr 'A-Z' 'a-z')
 curl -s -X POST http://localhost:8080/v1/notifications \
   -H "X-Api-Key: $RP_SENDER_KEY" -H 'Content-Type: application/json' \
-  -d '{"trackingId":"'"$TID"'","userId":"user-42","policy":"NOT_READ","timeoutMinutes":10,"fallback":{"sms":"Your order has shipped."}}'
+  -d '{"trackingId":"'"$TID"'","userId":"user-42","policy":"NOT_READ","timeoutMinutes":10,
+       "fallback":{"sms":"Your order has shipped."}}'
 # => 201 {"trackingId":"...","state":"NO_DEVICE_REGISTERED", ...}   (user-42 has no registered device yet)
 ```
 
@@ -159,12 +161,14 @@ fallback. Once an app with the SDK registers a device for the user, registration
 fallback receiver when the policy is still unmet at `dueAt` (with the placeholder URL above the call fails and is
 retried, which you can watch in the JSON logs with `docker logs rp-app`). Send the push with `rp_tid` = the tracking id
 (the payload jar builds it) and implement the receiver that verifies the `X-RP-Signature`: see the
-[integration guide](docs/integration-guide.md); to see the whole flow without a phone, run the demo console above. Cleanup: `docker rm -f rp-app rp-db && docker network rm rp-net`.
+[integration guide](docs/integration-guide.md); to see the whole flow without a phone, run the demo console above.
+Cleanup: `docker rm -f rp-app rp-db && docker network rm rp-net`.
 
 Building from source needs JDK 21 and Docker: `cd backend && ./mvnw -B verify` (tests) and
-`./mvnw -B verify -Pimage` (image tests); `client-java`, `payload-java` and `harness` build from the repo root with `./mvnw -B -pl client-java verify`,
-`./mvnw -B -pl payload-java verify` and `./mvnw -B -pl harness -am verify`. See [docs/testing.md](docs/testing.md). All configuration keys, the log format and
-the metrics are in [docs/operations.md](docs/operations.md).
+`./mvnw -B verify -Pimage` (image tests); `client-java`, `payload-java` and `harness` build from the repo root with
+`./mvnw -B -pl client-java verify`, `./mvnw -B -pl payload-java verify` and `./mvnw -B -pl harness -am verify`. See
+[docs/testing.md](docs/testing.md). All configuration keys, the log format and the metrics are in
+[docs/operations.md](docs/operations.md).
 
 ## Documentation
 

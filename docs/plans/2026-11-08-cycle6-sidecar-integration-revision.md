@@ -62,7 +62,7 @@
 - Modify: root `pom.xml` (module `payload-java` first); `.github/workflows/harness-ci.yml` (job: `payload-java` verify on Temurin 8 and 21, path filter `payload-java/**`)
 
 **Interfaces:**
-- Produces: exactly the API of §4.2 (signatures verbatim), `PayloadException.Code` = the eight codes of §4.3.
+- Produces: exactly the API of §4.2 (signatures verbatim), `PayloadException.Code` = the eight codes of §4.3 (nine since the final review added `FCM_NO_NOTIFICATION`).
 
 - [ ] **Step 1: Write the failing tests**
   - `TrackingIdsTest`: `newId` is a lower-case v4 UUID; `isValid` rejects upper-case-free garbage, accepts any UUID.
@@ -190,6 +190,11 @@
 - [ ] **Step 3: Implement.**
 - [ ] **Step 4: Run** the tests and `ios/scripts/size.sh` (under 307,200 bytes) — PASS. Then run `./scripts/ios-e2e.sh` and expect `iOS E2E: 8/8 passed, 1 skipped`; update the E2E test if its refresh case moved.
 - [ ] **Step 5: Commit** `feat(ios): no token renewal on receive, ensureRegistered, robust extension`.
+
+**Deviation (final review, 2026-11-08):** spec §7 also asks for the extension timing (handed back within the timeout) in
+the device E2E. It is covered by unit tests only (`ReliablePushExtensionTests`: default 2 s timeout, hanging backend,
+hanging settings read, each fault-injection case within `timeout + 0.5 s`); the Simulator E2E does not measure it,
+because the time to the system's display is not observable from an XCUITest without flakiness.
 
 ### Task 6: Android SDK
 

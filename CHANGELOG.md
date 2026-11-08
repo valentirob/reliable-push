@@ -62,7 +62,7 @@ All notable changes to this project are documented here. Versions follow [Semant
   FR-20 to FR-24):
   - Payload jar `payload-java/` (`io.reliablepush:reliable-push-payload`, Java 8 bytecode, zero runtime dependencies):
     `TrackingIds.newId()`, `ApnsPayloads.build/decorate`, `FcmPayloads.build/data/decorate`, `PayloadException` with
-    eight codes; golden vectors in `payload-java/src/test/resources/vectors/` for other languages. CI runs its tests on
+    nine codes; golden vectors in `payload-java/src/test/resources/vectors/` for other languages. CI runs its tests on
     Java 8 and 21.
   - Sender-generated `trackingId` on `POST /v1/notifications`, idempotent per app (`insert ... on conflict do
     nothing`), stored and returned in lower case; `client-java` `RegisterRequest.trackingId(...)` (required).
@@ -114,6 +114,23 @@ All notable changes to this project are documented here. Versions follow [Semant
 
 ### Fixed
 
+- Upper-case `rp_tid` is acknowledged: the backend echoes tracking ids in lower case, and both SDKs matched the
+  response by exact string, so an upper-case id was sent, never acknowledged and dropped as `unacknowledged` after two
+  flushes. iOS (`TrackingId.parse`) and Android (`handle`, `trackOpen`) now normalize the id to lower case before it is
+  queued (also the `customize` argument and the Android tap extra), and both `EventSender`s match outcomes
+  case-insensitively. The payload jar embeds `rp_tid` lower-cased (`ApnsPayloads`, `FcmPayloads`; new
+  `*-uppercase-tracking-id` vectors).
+- Payload jar: `FcmPayloads.build`, `data` and `decorate` refuse a message with no visible title or body (new code
+  `FCM_NO_NOTIFICATION`, like `APNS_NO_ALERT`). A silent data-only message stays untracked instead of becoming a blank
+  notification posted by the SDK. The `fcm-decorate-no-notification` vector is now this error.
+- iOS extension: a notification settings read that does not answer in time counts as shown and records `DELIVERED`
+  (iOS shows the content it gets back); only an actual "not shown" answer records nothing.
+- Android `handle`: when something throws before `DELIVERED` was persisted, the SDK is registered and the gate never
+  answered "not shown", `DELIVERED` is persisted before the minimal notification is posted.
+- Backend: the active-device check includes the token verifier's 60 s clock skew, so a device counts as active exactly
+  as long as its token is accepted on the grace routes. The V7 backfill of `device.token_expires_at` is
+  `last_seen_at` + 10 years (a conservative upper bound) instead of + 90 days, so no existing device is wrongly treated
+  as inactive.
 - iOS: `ReliablePushExtension` reads the stored configuration (App Group, Keychain access group) only in `didReceive`,
   after it has found a valid `rp_tid`. Before, every push the host's Notification Service Extension received, the
   host's own included, opened the App Group and, when it was misconfigured, logged WARN `sdk.app_group_unavailable`.
