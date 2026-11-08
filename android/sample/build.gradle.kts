@@ -33,7 +33,7 @@ android {
         buildConfigField("String", "RP_APP_ID", quoted(rpAppId))
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        // with the orchestrator: every test in its own process (one refresh per process) and with empty storage
+        // with the orchestrator: every test in its own process and with empty storage
         testInstrumentationRunnerArguments["clearPackageData"] = "true"
     }
 

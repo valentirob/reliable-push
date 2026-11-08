@@ -5,8 +5,8 @@ import androidx.test.core.app.ApplicationProvider
 import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
@@ -40,23 +40,21 @@ class EventSenderTest {
     private lateinit var queue: EventQueue
     private lateinit var sender: EventSender
 
-    // token valid 0..100000 s; "now" = 50000 s, so no proactive refresh by default
-    private var now = 50_000_000L
-    private val freshJwt = fakeJwt(0, 100_000)
+    private val nowSec = System.currentTimeMillis() / 1000
+    private val freshJwt = fakeJwt(nowSec - 50_000, nowSec + 50_000)
 
     @Before
     fun setUp() {
         context.getSharedPreferences("io.reliablepush.store", Context.MODE_PRIVATE).edit().clear().commit()
-        RefreshGate.reset()
         ShadowLog.clear()
         store = TokenStore(context, cipher)
-        store.save(Registration("dev-1", freshJwt, 100_000_000L))
+        store.save(Registration("dev-1", freshJwt, 0))
         queue = EventQueue(tmp.newFolder())
         sender = newSender()
     }
 
     private fun newSender() = EventSender(
-        DeviceApi(backend.baseUrl, "news", "reliable-push-android/test"), store, queue, { now },
+        DeviceApi(backend.baseUrl, "news", "reliable-push-android/test"), store, queue,
     )
 
     @After
@@ -119,7 +117,7 @@ class EventSenderTest {
     }
 
     private fun newSenderOn(url: String) =
-        EventSender(DeviceApi(url, "news", "reliable-push-android/test"), store, queue, { now })
+        EventSender(DeviceApi(url, "news", "reliable-push-android/test"), store, queue)
 
     @Test
     fun flushDropsBatchOnOther4xx() {
@@ -154,116 +152,48 @@ class EventSenderTest {
     }
 
     @Test
-    fun on401RefreshesOnceAndRetries() {
-        fill(2)
-        val newJwt = fakeJwt(0, 200_000)
-        backend.handler = { req ->
-            when {
-                req.path == "/v1/devices/token:refresh" ->
-                    ScriptedResponse(200, """{"deviceToken":"$newJwt","expiresAt":"1970-01-03T07:33:20Z"}""")
-                req.headers["authorization"] == "Bearer $newJwt" -> ScriptedResponse(200, items(sentIds(req)))
-                else -> ScriptedResponse(401)
-            }
-        }
+    fun on401KeepsEventsSetsRenewalNeededAndNeverRefreshes() {
+        fill(120)
+        backend.handler = { ScriptedResponse(401) }
+        assertFalse(store.renewalNeeded())
+        assertEquals(FlushResult.NotRegistered, sender.flush())
+        assertEquals(listOf("/v1/events"), backend.requests.map { it.path }) // one batch, no refresh, no further batches
+        assertEquals(120, queue.size())
+        assertTrue(store.renewalNeeded())
+        assertNotNull(store.load()) // the registration stays: ensureRegistered renews it
+        assertTrue(ShadowLog.getLogs().any { it.msg == "event=auth.failed status=401 call=events" && it.type == android.util.Log.WARN })
+    }
+
+    @Test
+    fun tokenInItsLastTwentyPercentIsUsedAsIs() {
+        fill(1)
+        val nearExpiry = fakeJwt(nowSec - 95, nowSec + 5) // 5 % left: earlier versions refreshed here
+        store.save(Registration("dev-1", nearExpiry, 0))
+        echoAll()
         assertEquals(FlushResult.Done, sender.flush())
-        assertEquals(listOf("/v1/events", "/v1/devices/token:refresh", "/v1/events"), backend.requests.map { it.path })
-        assertEquals(newJwt, store.load()!!.token.raw)
-        assertEquals("dev-1", store.load()!!.deviceId)
-        val prefs = context.getSharedPreferences("io.reliablepush.store", Context.MODE_PRIVATE)
-        assertEquals(200_000_000L, prefs.getLong("expires_at", -1))
-    }
-
-    private fun refreshFailsOn401Path(refresh: ScriptedResponse) {
-        fill(2)
-        backend.handler = { req -> if (req.path.endsWith("refresh")) refresh else ScriptedResponse(401) }
-        assertEquals(FlushResult.RetryLater(null), sender.flush())
-        assertEquals(2, queue.size())
-        assertNotNull(store.load())
-    }
-
-    @Test
-    fun refreshIoErrorOn401PathKeepsEvents() = refreshFailsOn401Path(ScriptedResponse(200, "garbage"))
-
-    @Test
-    fun refresh5xxOn401PathKeepsEvents() = refreshFailsOn401Path(ScriptedResponse(503))
-
-    @Test
-    fun earlyRefreshAnswered401ClearsRegistration() {
-        fill(1)
-        now = 95_000_000L
-        backend.handler = { ScriptedResponse(401) }
-        assertEquals(FlushResult.NotRegistered, sender.flush())
-        assertNull(store.load())
-        assertEquals(listOf("/v1/devices/token:refresh"), backend.requests.map { it.path })
-    }
-
-    @Test
-    fun saveFailingAfterRefreshMeansNotRegistered() {
-        fill(1)
-        now = 95_000_000L
-        val newJwt = fakeJwt(90_000, 190_000)
-        backend.handler = { ScriptedResponse(200, """{"deviceToken":"$newJwt","expiresAt":"1970-01-03T04:46:40Z"}""") }
-        cipher.failEncrypt = true
-        assertEquals(FlushResult.NotRegistered, sender.flush())
-        assertNull(store.load())
-        assertEquals(1, backend.requests.size)
-    }
-
-    @Test
-    fun secondRefreshStillFailing401KeepsEventsWithoutLooping() {
-        fill(1)
-        val newJwt = fakeJwt(0, 200_000)
-        backend.handler = { req ->
-            if (req.path.endsWith("refresh")) ScriptedResponse(200, """{"deviceToken":"$newJwt","expiresAt":"1970-01-03T07:33:20Z"}""")
-            else ScriptedResponse(401)
-        }
-        assertEquals(FlushResult.RetryLater(null), sender.flush())
-        assertEquals(3, backend.requests.size)
-        assertEquals(1, queue.size())
-    }
-
-    @Test
-    fun refreshAnswered401ClearsRegistration() {
-        fill(2)
-        backend.handler = { req -> ScriptedResponse(401) }
-        assertEquals(FlushResult.NotRegistered, sender.flush())
-        assertNull(store.load())
-        assertEquals(2, queue.size())
-    }
-
-    @Test
-    fun secondRefreshInSameProcessIsNotAttempted() {
-        fill(2)
-        assertTrue(RefreshGate.tryAcquire()) // an earlier refresh in this process
-        backend.handler = { ScriptedResponse(401) }
-        assertEquals(FlushResult.RetryLater(null), sender.flush())
         assertEquals(listOf("/v1/events"), backend.requests.map { it.path })
-        assertNotNull(store.load())
+        assertEquals("Bearer $nearExpiry", backend.requests.single().headers["authorization"])
     }
 
     @Test
-    fun refreshesFirstWhenTokenNearExpiry() {
+    fun expiredTokenIsStillSentForTheBackendsGracePeriod() {
         fill(1)
-        now = 95_000_000L // 5 % left
-        val newJwt = fakeJwt(90_000, 190_000)
-        backend.handler = { req ->
-            if (req.path.endsWith("refresh")) ScriptedResponse(200, """{"deviceToken":"$newJwt","expiresAt":"1970-01-03T04:46:40Z"}""")
-            else ScriptedResponse(200, items(sentIds(req)))
-        }
+        val expired = fakeJwt(nowSec - 100, nowSec - 10) // the backend accepts it on /v1/events for its grace period
+        store.save(Registration("dev-1", expired, 0))
+        echoAll()
         assertEquals(FlushResult.Done, sender.flush())
-        assertEquals(listOf("/v1/devices/token:refresh", "/v1/events"), backend.requests.map { it.path })
-        assertEquals("Bearer $newJwt", backend.requests[1].headers["authorization"])
+        assertEquals("Bearer $expired", backend.requests.single().headers["authorization"])
+        assertFalse(store.renewalNeeded())
     }
 
     @Test
-    fun failedEarlyRefreshStillTriesCurrentToken() {
+    fun noRefreshOnAnyStatus() {
         fill(1)
-        now = 95_000_000L
-        backend.handler = { req ->
-            if (req.path.endsWith("refresh")) ScriptedResponse(503) else ScriptedResponse(200, items(sentIds(req)))
+        for (status in listOf(401, 408, 429, 500, 503, 403)) {
+            backend.enqueue(ScriptedResponse(status))
+            sender.flush()
         }
-        assertEquals(FlushResult.Done, sender.flush())
-        assertEquals(0, queue.size())
+        assertTrue(backend.requests.none { it.path.contains("refresh") })
     }
 
     @Test
@@ -294,7 +224,7 @@ class EventSenderTest {
         fill(120)
         echoAll()
         var calls = 0
-        val s = EventSender(DeviceApi(backend.baseUrl, "news", "ua"), store, queue, { now }) { calls++ >= 1 }
+        val s = EventSender(DeviceApi(backend.baseUrl, "news", "ua"), store, queue) { calls++ >= 1 }
         assertEquals(FlushResult.RetryLater(null), s.flush())
         assertEquals(1, eventRequests().size)
         assertEquals(70, queue.size())

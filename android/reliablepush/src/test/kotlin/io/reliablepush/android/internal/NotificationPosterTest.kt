@@ -155,45 +155,78 @@ class NotificationPosterTest {
         )
     }
 
+    // ---- the gate (canShow): checked before DELIVERED is persisted ----
+
     @Test
-    fun appNotificationsDisabledPostsNothing() {
+    fun canShowCreatesTheSdkChannelAndIsTrueByDefault() {
+        assertTrue(NotificationPoster(context, ReliablePushOptions()).canShow())
+        assertEquals(NotificationManager.IMPORTANCE_DEFAULT, nm.getNotificationChannel("reliablepush_default").importance)
+        assertNull(posted()) // the gate posts nothing
+    }
+
+    @Test
+    fun appNotificationsDisabledClosesTheGate() {
         shadowOf(nm).setNotificationsEnabled(false)
-        assertFalse(NotificationPoster(context, ReliablePushOptions()).post(tid, "t", "b"))
-        assertNull(posted())
+        assertFalse(NotificationPoster(context, ReliablePushOptions()).canShow())
     }
 
     @Test
-    fun channelSetToNonePostsNothing() {
+    fun channelSetToNoneClosesTheGate() {
         nm.createNotificationChannel(NotificationChannel("reliablepush_default", "Off", NotificationManager.IMPORTANCE_NONE))
-        assertFalse(NotificationPoster(context, ReliablePushOptions()).post(tid, "t", "b"))
-        assertNull(posted())
+        assertFalse(NotificationPoster(context, ReliablePushOptions()).canShow())
     }
 
     @Test
-    fun blockedChannelGroupPostsNothing() {
+    fun blockedChannelGroupClosesTheGate() {
         val group = NotificationChannelGroup("g", "Group")
         NotificationChannelGroup::class.java.getMethod("setBlocked", Boolean::class.javaPrimitiveType).invoke(group, true)
         nm.createNotificationChannelGroup(group)
         val channel = NotificationChannel("reliablepush_default", "Notifications", NotificationManager.IMPORTANCE_DEFAULT)
         channel.group = "g"
         nm.createNotificationChannel(channel)
-        assertFalse(NotificationPoster(context, ReliablePushOptions()).post(tid, "t", "b"))
-        assertNull(posted())
+        assertFalse(NotificationPoster(context, ReliablePushOptions()).canShow())
     }
 
     @Test
-    fun unblockedChannelGroupStillPosts() {
+    fun unblockedChannelGroupKeepsTheGateOpen() {
         nm.createNotificationChannelGroup(NotificationChannelGroup("g", "Group"))
         val channel = NotificationChannel("reliablepush_default", "Notifications", NotificationManager.IMPORTANCE_DEFAULT)
         channel.group = "g"
         nm.createNotificationChannel(channel)
-        assertTrue(NotificationPoster(context, ReliablePushOptions()).post(tid, "t", "b"))
+        assertTrue(NotificationPoster(context, ReliablePushOptions()).canShow())
     }
 
     @Test
-    fun pausedNotificationsPostNothing() {
-        assertFalse(NotificationPoster(context, ReliablePushOptions(), paused = { true }).post(tid, "t", "b"))
-        assertNull(posted())
-        assertTrue(NotificationPoster(context, ReliablePushOptions(), paused = { false }).post(tid, "t", "b"))
+    fun pausedNotificationsCloseTheGate() {
+        assertFalse(NotificationPoster(context, ReliablePushOptions(), paused = { true }).canShow())
+        assertTrue(NotificationPoster(context, ReliablePushOptions(), paused = { false }).canShow())
+    }
+
+    @Test
+    fun gateErrorsPropagateSoHandleCanPostTheMinimalNotification() {
+        val poster = NotificationPoster(context, ReliablePushOptions(), paused = { throw SecurityException("x") })
+        org.junit.Assert.assertThrows(SecurityException::class.java) { poster.canShow() }
+    }
+
+    // ---- the minimal notification (handle's last resort) ----
+
+    @Test
+    fun minimalNotificationHasTitleBodyChannelAndTapExtra() {
+        var customized = false
+        val options = ReliablePushOptions(
+            channelId = "custom_channel",
+            launchActivity = TestLaunchActivity::class.java,
+            customizer = { _, _ -> customized = true },
+        )
+        NotificationPoster(context, options).postMinimal(tid, "Hello", "World")
+
+        val n = posted()!!
+        assertEquals("custom_channel", n.channelId)
+        assertNotNull(nm.getNotificationChannel("custom_channel")) // created when missing, or the system drops it
+        assertEquals("Hello", n.extras.getString(Notification.EXTRA_TITLE))
+        assertEquals("World", n.extras.getCharSequence(Notification.EXTRA_TEXT).toString())
+        assertTrue(n.flags and Notification.FLAG_AUTO_CANCEL != 0)
+        assertEquals(tid, contentIntentOf(n).getStringExtra("rp_tid"))
+        assertFalse("the minimal notification skips the host's customizer", customized)
     }
 }

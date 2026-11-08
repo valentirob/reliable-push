@@ -8,15 +8,21 @@ internal sealed interface FlushResult {
     /** Events remain; try again later (the job's backoff paces it). [delaySeconds] is the server's `Retry-After`. */
     data class RetryLater(val delaySeconds: Long?) : FlushResult
 
-    /** No usable registration (never registered, unreadable token, or the refresh was answered 401). */
+    /**
+     * Nothing can be sent until the app acts: never registered, unreadable token, or the events endpoint answered `401`
+     * (the token is past the backend's grace period or revoked; `renewalNeeded` is then set and the events stay queued
+     * for the flush that follows a successful `ensureRegistered` or `register`).
+     */
     data object NotRegistered : FlushResult
 }
 
 /**
  * Sends queued events in batches of [BATCH_SIZE] to `POST /v1/events`.
  *
- * Token: refreshed first when [DeviceToken.needsRefresh] and the process-wide [RefreshGate] allows; on a 401 it is
- * refreshed once more (gate permitting) and the batch retried once. A refresh answered 401 clears the registration.
+ * Token: the stored one, as it is. A flush **never renews it** (spec §3.1, D5): the backend accepts an expired token on
+ * this endpoint for its grace period, and renewal is the job of `ReliablePush.ensureRegistered`. A `401` keeps the
+ * events, sets the stored flag `renewalNeeded` (WARN `auth.failed`) and ends the flush with [FlushResult.NotRegistered],
+ * so the retry job stops instead of resending a rejected token.
  *
  * Per-batch status handling: 200 removes events the server acknowledged (outcome ACCEPTED, DUPLICATE, LATE, NOT_FOUND
  * and FORBIDDEN; the last two with a WARN). Only a 4xx other than 401, 408 and 429 drops the batch (WARN
@@ -36,22 +42,13 @@ internal class EventSender(
     private val api: DeviceApi,
     private val store: TokenStore,
     private val queue: EventQueue,
-    private val clock: () -> Long,
     private val shouldStop: () -> Boolean = { false },
 ) {
     fun flush(): FlushResult {
         val stored = store.load() ?: return FlushResult.NotRegistered
         if (queue.size() == 0) return FlushResult.Done
 
-        var token = stored.token.raw
-        if (stored.token.needsRefresh(clock()) && RefreshGate.tryAcquire()) {
-            when (val r = refresh(stored.deviceId, token)) {
-                is Refreshed -> token = r.token
-                // A transient failure of the early refresh is not fatal: the current token may still be accepted.
-                is RefreshFailed -> if (r.result == FlushResult.NotRegistered) return r.result
-            }
-        }
-
+        val token = stored.token.raw
         val attempted = HashSet<String>()
         while (true) {
             if (shouldStop()) return FlushResult.RetryLater(null)
@@ -59,21 +56,11 @@ internal class EventSender(
             if (batch.isEmpty()) break
             batch.forEach { attempted.add(EventQueue.keyOf(it.trackingId, it.type)) }
 
-            var result = api.sendEvents(token, batch)
+            val result = api.sendEvents(token, batch)
             if (result is ApiResult.Http && result.status == 401) {
-                if (!RefreshGate.tryAcquire()) {
-                    SdkLog.warn("auth.failed", "status" to 401, "refresh" to "exhausted")
-                    return FlushResult.RetryLater(null)
-                }
-                when (val r = refresh(stored.deviceId, token)) {
-                    is Refreshed -> token = r.token
-                    is RefreshFailed -> return r.result
-                }
-                result = api.sendEvents(token, batch)
-                if (result is ApiResult.Http && result.status == 401) {
-                    SdkLog.warn("auth.failed", "status" to 401, "refresh" to "done")
-                    return FlushResult.RetryLater(null)
-                }
+                store.setRenewalNeeded()
+                SdkLog.warn("auth.failed", "status" to 401, "call" to "events")
+                return FlushResult.NotRegistered
             }
 
             when (result) {
@@ -119,33 +106,6 @@ internal class EventSender(
             if (gone.isNotEmpty()) {
                 SdkLog.warn("tracking.event_dropped", "count" to gone.size, "reason" to "unacknowledged")
             }
-        }
-    }
-
-    private sealed interface RefreshOutcome
-    private class Refreshed(val token: String) : RefreshOutcome
-    private class RefreshFailed(val result: FlushResult) : RefreshOutcome
-
-    private fun refresh(deviceId: String, token: String): RefreshOutcome {
-        return when (val r = api.refresh(token)) {
-            is ApiResult.Ok -> {
-                val issued = r.value
-                if (store.save(Registration(deviceId, issued.deviceToken, issued.expiresAt))) {
-                    SdkLog.info("token.refreshed", "device_id" to deviceId)
-                    Refreshed(issued.deviceToken)
-                } else {
-                    RefreshFailed(FlushResult.NotRegistered)
-                }
-            }
-            is ApiResult.Http ->
-                if (r.status == 401) {
-                    store.clear()
-                    SdkLog.warn("auth.failed", "status" to 401, "refresh" to "rejected")
-                    RefreshFailed(FlushResult.NotRegistered)
-                } else {
-                    RefreshFailed(FlushResult.RetryLater(r.retryAfterSeconds))
-                }
-            is ApiResult.NetworkError -> RefreshFailed(FlushResult.RetryLater(null))
         }
     }
 

@@ -146,19 +146,28 @@ class AndroidE2ETest {
 
     @Test
     fun tokenRefreshNearExpiry() {
-        // app news: device tokens valid 20 s; the SDK refreshes when less than 20 % (4 s) is left
+        // app news: device tokens valid 20 s; ensureRegistered renews when less than 20 % (4 s) is left. The receive
+        // path never renews: the push's DELIVERED goes out with the old token, then ensureRegistered refreshes it.
         ReliablePush.configure(context, baseUrl, NEWS, SampleApp.options())
         val user = register(NEWS)
         val deviceId = checkNotNull(ReliablePush.deviceId)
-        // 17 s after the token was issued (its iat): 3 s of the 20 s left
-        Thread.sleep((registeredAt + 17_000 - System.currentTimeMillis()).coerceAtLeast(0))
+        // 16.5 s after the token was issued (its iat): 3.5 s of the 20 s left
+        Thread.sleep((registeredAt + 16_500 - System.currentTimeMillis()).coerceAtLeast(0))
 
         val tid = harness.push(NEWS, user, "Refresh", "E2E refresh", "NOT_DELIVERED", 30)
         assertTrue(deliver(tid, "Refresh"))
+        // queued on the SDK thread after the push's send: the refresh cannot come from the event path
+        assertEquals("refreshed, no ID token needed", RegisterResult.Success(deviceId), ensureRegistered { it(null) })
         awaitState(tid, "DELIVERED", 20)
         awaitUntil(15, "backend log device.token_refreshed for device $deviceId") {
             harness.logs("device.token_refreshed").any { it.optString("rp.device_id") == deviceId }
         }
+        Thread.sleep(2_000)
+        assertEquals(
+            "exactly one refresh (ensureRegistered's)",
+            1,
+            harness.logs("device.token_refreshed").count { it.optString("rp.device_id") == deviceId },
+        )
     }
 
     @Test
@@ -201,6 +210,15 @@ class AndroidE2ETest {
         }
         harness.deviceRegistered(appId, user, success.deviceId)
         return user
+    }
+
+    /** [ReliablePush.ensureRegistered] with [provider], waited for (at most 40 s: the provider timeout is 30 s). */
+    private fun ensureRegistered(provider: (deliver: (String?) -> Unit) -> Unit): RegisterResult? {
+        val result = AtomicReference<RegisterResult>()
+        val done = CountDownLatch(1)
+        ReliablePush.ensureRegistered(provider) { result.set(it); done.countDown() }
+        assertTrue("ensureRegistered callback within 40 s", done.await(40, TimeUnit.SECONDS))
+        return result.get()
     }
 
     /** What [DebugPushReceiver] does with the broadcast extras (off the main thread, like the FCM entry point). */

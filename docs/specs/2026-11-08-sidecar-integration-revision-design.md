@@ -159,8 +159,13 @@ public static func ensureRegistered(idTokenProvider: @escaping @Sendable () asyn
 
 ```kotlin
 // Android
-public fun ensureRegistered(idTokenProvider: suspend () -> String?, callback: ((RegisterResult) -> Unit)? = null)
+public fun ensureRegistered(idTokenProvider: (deliver: (String?) -> Unit) -> Unit, callback: ((RegisterResult) -> Unit)? = null)
 ```
+
+Android ruling (plan, Task 6): the SDK has no coroutines dependency and NFR-10 forbids adding one, so the provider is a
+callback instead of a `suspend` function. It calls `deliver` exactly once, from any thread; extra calls are ignored.
+If `deliver` is not called within 30 s, the run ends `NotLoggedIn`. `callback` runs on the main thread, as for
+`register`.
 
 - Returns at once. The work runs on the SDK's background queue/thread and never blocks app start-up. Only one run at a
   time: a call while one is in progress joins it.

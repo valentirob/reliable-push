@@ -45,7 +45,8 @@ internal fun runJob(flush: () -> FlushResult, isStopped: () -> Boolean, finish: 
 /**
  * Thin glue: runs the flush for the one-off retry job on the SDK thread (so it never overlaps a flush started by
  * `handle`, `trackOpen` or `register`), composed by [Sdk.fromStoredConfig] with the job id of [JobParameters]. Without
- * config or registration it ends without reschedule. [onStopJob] (runtime limit, constraints lost) flips the stop flag
+ * config or registration (or once the token was rejected with `401`) it ends without reschedule. It never renews the
+ * device token: only `ensureRegistered` does (spec §3.1). [onStopJob] (runtime limit, constraints lost) flips the stop flag
  * of that very start, so the sender stops after the current batch, and returns true to have the job rescheduled.
  */
 internal class RetryJobService : JobService() {
