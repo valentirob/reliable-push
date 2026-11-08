@@ -44,10 +44,11 @@ A `401` from any call returns to the sign-in form. Closing the tab forgets the k
 
 | View | Route | What it shows |
 |---|---|---|
-| Overview | `#/overview` | Per app (or all visible apps) and window (1 h, 24 h, 7 d): registered, delivery rate, read rate, fallbacks triggered, failed and expired. A "Backlog now" block: pending, due and not yet claimed, dispatching, age of the oldest due notification (amber above 60 s). Refreshes every 30 s; "Pause refresh" stops it |
+| Overview | `#/overview` | Per app (or all visible apps) and window (1 h, 24 h, 7 d): registered, delivery rate, read rate, fallbacks triggered, failed and expired. A fallback circuit badge per app (`CLOSED`, `OPEN since <time> — <n> suppressed`, `FORCED until <time>`) linking to the circuit view, a banner "Fallbacks suspended by configuration" when the config suspends all fallbacks and a note "Circuit breaker disabled" when the breaker is off. A "Backlog now" block: pending, due and not yet claimed, dispatching, age of the oldest due notification (amber above 60 s). Refreshes every 30 s; "Pause refresh" stops it |
 | Trends | `#/trends` | Daily volumes and the three rates as inline SVG charts, for 30, 90 or 400 days, with the same numbers in a table. Days still changing are marked `live` |
 | Search | `#/search` | One app plus any of user id, external id, tracking id (opens the detail directly), state and a created-time range. Newest first, 50 per page, "next page" |
 | Notification | `#/n/<trackingId>` | Timeline: created, due, each `DELIVERED` and `READ` event (device, platform, late or not), each webhook attempt (outcome, HTTP status, reason, duration), closed with the final state. "Show payload" for keys with `payload`. A link to the user's devices |
+| Fallback circuit | `#/circuit/<app>` | Reached from the badge on the overview. The app's circuit state and its history (when, transition `OPENED` / `CLOSED` / `FORCED` / `FORCE_ENDED`, reason, due count, ratio, suppressed count, admin key), newest first, "Next page" for more. For keys with `fallback-control` and an `OPEN` circuit, a "Resume fallbacks" button asks for confirmation (`window.confirm`) and then shows the `FORCED` state; a `409` (suspended or disabled) or `503` (a detector run holds the lock) shows the server's message |
 | Devices | `#/devices/<app>/<userId>` | The user's devices, revoked ones included, newest first, at most 50 |
 
 Rates are `count / (registered - cancelled)`; with a zero denominator the page shows "–".
@@ -74,7 +75,7 @@ Field details: [`operations.md`](operations.md#event-catalogue).
 
 ## What it does not do
 
-- It is **read-only**. It cannot cancel a notification, re-fire a fallback or change a configuration.
+- It is **read-only**, except "Resume fallbacks" for keys with `fallback-control`. It cannot cancel a notification, re-fire a fallback or change a configuration.
 - There are no user accounts, SSO or per-user permissions: the admin key is the identity. Rotate it as in
   [`security.md`](security.md#admin-keys).
 - No CSV export and no alerting; use the Prometheus metrics for alerts.

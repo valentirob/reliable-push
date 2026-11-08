@@ -57,7 +57,7 @@ export async function request(path, params, opts = {}) {
   for (let attempt = 0; ; attempt++) {
     let res;
     try {
-      res = await fetch(url, { headers: { 'X-Admin-Key': getKey() || '', Accept: 'application/json' }, cache: 'no-store' });
+      res = await fetch(url, { method: opts.method || 'GET', headers: { 'X-Admin-Key': getKey() || '', Accept: 'application/json' }, cache: 'no-store' });
     } catch (e) {
       if (attempt >= MAX_RETRIES) throw new ApiError(0, 'Cannot reach the server');
       banner('Cannot reach the server, retrying…');
@@ -75,7 +75,7 @@ export async function request(path, params, opts = {}) {
       await sleep(wait * 1000);
       continue;
     }
-    if (res.status === 503 && attempt < MAX_RETRIES) {
+    if (res.status === 503 && attempt < MAX_RETRIES && !opts.noRetry503) {
       banner('Service unavailable, retrying…');
       await sleep(1000 * 2 ** attempt);
       continue;
@@ -105,3 +105,8 @@ export const searchNotifications = (params) => request('/notifications', params)
 export const notification = (id) => request('/notifications/' + encodeURIComponent(id));
 export const payload = (id) => request('/notifications/' + encodeURIComponent(id) + '/payload');
 export const devices = (app, userId) => request('/devices', { app, userId });
+export const fallbackCircuits = () => request('/fallback-circuits');
+export const circuitEvents = (app, cursor) => request('/fallback-circuits/' + encodeURIComponent(app) + '/events', { cursor });
+// A resume answers 503 + Retry-After while a detector run holds the lock: the page shows it instead of retrying.
+export const resumeFallbacks = (app) =>
+  request('/fallback-circuits/' + encodeURIComponent(app) + ':resume', null, { method: 'POST', noRetry503: true });

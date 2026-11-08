@@ -18,7 +18,7 @@ class StaticAdminPageTest {
     private static final String BASE = "admin-ui/";
     private static final List<String> JS = List.of("js/main.js", "js/api.js", "js/dom.js", "js/views/signin.js",
             "js/views/overview.js", "js/views/trends.js", "js/views/search.js", "js/views/notification.js",
-            "js/views/devices.js");
+            "js/views/devices.js", "js/views/circuit.js");
     private static final List<String> ALL =
             Stream.concat(Stream.of("index.html", "admin.css"), JS.stream()).collect(Collectors.toList());
 
@@ -90,12 +90,21 @@ class StaticAdminPageTest {
         String main = read("js/main.js");
         Map<String, String> routes = Map.of(
                 "overview", "views/overview.js", "trends", "views/trends.js", "search", "views/search.js",
-                "n", "views/notification.js", "devices", "views/devices.js");
+                "n", "views/notification.js", "devices", "views/devices.js", "circuit", "views/circuit.js");
         routes.forEach((route, view) -> {
             assertThat(main).as("route " + route).contains("'" + route + "'");
             assertThat(main).as("import " + view).contains(view);
         });
         assertThat(main).contains("signin");
+    }
+
+    @Test
+    void circuitViewIsServedAndWiredToTheApi() {
+        String circuit = read("js/views/circuit.js");
+        assertThat(circuit).contains("Resume fallbacks").contains("fallback-control").contains("confirm(");
+        String api = read("js/api.js");
+        assertThat(api).contains("/fallback-circuits").contains(":resume").contains("/events");
+        assertThat(read("js/views/overview.js")).contains("#/circuit/").contains("Fallbacks suspended by configuration");
     }
 
     @Test
