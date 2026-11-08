@@ -24,7 +24,7 @@ import org.springframework.stereotype.Component;
  * <p>App {@code grace} of the E2E stack: {@code device-token-validity PT5S}, {@code device-token-events-grace PT15S}.
  * The backend's verifier allows 60 s of clock skew past {@code exp} before a token counts as expired, so the grace
  * window runs from {@code exp + 60 s} to {@code exp + 75 s}. Both notifications are registered at once, while the
- * device is still active for the device check ({@code token_expires_at + grace > now}); the device answers them late,
+ * device is still active for the device check ({@code token_expires_at + skew + grace >= now}); the device answers them late,
  * one inside the window and one past it. Takes about 90 s (real time: none of these durations is scaled).
  */
 @Component
@@ -57,7 +57,7 @@ class TokenGrace extends CatalogScenario {
                 "a grace device token valid for about 5 s", () -> "valid for " + validity.toSeconds() + " s",
                 "backend.env.template must set RELIABLEPUSH_APPS_GRACE_DEVICETOKENVALIDITY=PT5S");
 
-        Instant insideGrace = expires.plus(SKEW).plusSeconds(3);
+        Instant insideGrace = expires.plus(SKEW).plusSeconds(5); // 5 s into the 15 s window: margin for clock and send delays
         Instant pastGrace = expires.plus(SKEW).plus(EVENTS_GRACE).plusSeconds(7);
         Instant now = Instant.now();
         UUID inside = ctx.send(GRACE, user, FallbackPolicy.NOT_DELIVERED, LONG_TIMEOUT_MINUTES,
@@ -68,7 +68,7 @@ class TokenGrace extends CatalogScenario {
             Notification n = ctx.notification(id).orElseThrow();
             ctx.check(n.state() == NotificationState.PENDING, "registered PENDING (the device is still active)",
                     () -> String.valueOf(n.state()),
-                    "registered within token_expires_at + grace; NO_DEVICE_REGISTERED means the send came too late");
+                    "registered within token_expires_at + skew + grace; NO_DEVICE_REGISTERED means the send came too late");
         }
 
         // 1. inside the grace period: accepted with the expired token, no renewal by the device

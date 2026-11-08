@@ -33,6 +33,10 @@ import org.springframework.stereotype.Component;
  * with the stored token. A {@code 401} keeps the event queued and sets {@code renewalNeeded}; only
  * {@link #ensureRegistered} (the SDKs' {@code ensureRegistered}) or the console's explicit refresh renew the token,
  * and then flush the queue.
+ *
+ * <p>Unlike the SDKs, only {@code 401} events stay queued: an event answered {@code 429} or {@code 503} (or any other
+ * failure) is dropped, not retried, so scenarios see each send's outcome once. The SDKs keep those events queued and
+ * retry them later.
  */
 @Component
 public class DeviceSimulator implements PushReceiver, AutoCloseable {
