@@ -48,7 +48,8 @@ Database connection (Spring Boot): `SPRING_DATASOURCE_URL` (`jdbc:postgresql://h
 ### Configuration reference (`reliable-push.*`)
 
 Durations take a unit (`500ms`, `30s`, `2m`, `1h`, `90d`). A bare number is read in the key's own unit where the table
-says so (minutes for `worker.lease` and `fallback.backoff`, days for `device-token-validity`), otherwise as milliseconds
+says so (minutes for `worker.lease`, `fallback.backoff` and the `fallback.circuit-breaker` durations, days for
+`device-token-validity`), otherwise as milliseconds
 (Spring's default), so always write the unit for `poll-interval`, `revocation-cache-ttl` and `http-timeout`.
 
 | Key | Default | Validation / notes |
@@ -68,6 +69,14 @@ says so (minutes for `worker.lease` and `fallback.backoff`, days for `device-tok
 | `admin.rate-limit-per-minute` | `600` | At least 1. Admin requests per minute per admin key and instance |
 | `admin.rollup-retention-days` | `400` | At least 1. `daily_stats` rows older than this are deleted by the rollup; fallback circuit events (`fallback_circuit_event`) older than this are deleted by the circuit detector once a day per worker, also while admin or the circuit breaker is disabled |
 | `admin.rollup.cron` | `0 7 3 * * *` | Spring cron expression (UTC) of `DailyRollupJob` (worker role, runs only when admin is enabled); `-` disables the schedule and the retention guard |
+| `fallback.suspended` | `false` | `true`: no fallback for any app, whatever its circuit (also `FORCED`); due fallbacks end `FALLBACK_EXPIRED` without a call. Wins over everything (see "Fallback circuit breaker" below) |
+| `fallback.circuit-breaker.enabled` | `true` | `false`: no detection, every circuit reads as `CLOSED` (the behaviour before 0.2.0) |
+| `fallback.circuit-breaker.window` | `5m` | Positive; detection window. A bare number means minutes. Never scaled by the fast clock |
+| `fallback.circuit-breaker.min-due` | `50` | At least 1; a circuit opens only when at least this many fallbacks of the app came due in the window |
+| `fallback.circuit-breaker.max-delivered-ratio` | `0.10` | Greater than 0 and at most 1; opens when less than this share of those notifications' cohort was delivered |
+| `fallback.circuit-breaker.close-min-delivered` | `10` | At least 1; closes when this many notifications created after the open were delivered |
+| `fallback.circuit-breaker.min-open` | `1m` | Positive; an open circuit stays open at least this long. A bare number means minutes |
+| `fallback.circuit-breaker.force-hold` | `60m` | Positive; how long an operator resume keeps detection off for the app. A bare number means minutes |
 | `testing.minute-duration` | unset (1 minute = 60 s) | Fast clock, e.g. `1s`. Accepted only with the `e2e` or `demo` profile, must be positive |
 
 Per app, under `apps.<appId>` (the app id matches `[A-Za-z0-9][A-Za-z0-9_-]{0,63}`; at least one app is required, a
@@ -229,6 +238,52 @@ fails (logging never breaks a request).
 Regenerate the list from the code with
 `grep -rhoE '(EventLog\.(info|warn)\(|logEvent\(|logDevice\()"[a-z_.]+"' backend/src/main/java | sort -u`.
 
+## Fallback circuit breaker
+
+Every fallback costs money (SMS). When `DELIVERED` events stop reaching the backend for a systemic reason (API or
+ingress down, an SDK bug, a bad app release), every notification of that period would come due unmet and fire a
+fallback nobody needed. The circuit breaker stops that storm **per app**: a missed fallback is preferred to a storm of
+needless ones. Design: [spec](specs/2026-11-07-fallback-circuit-breaker-design.md); keys in the configuration reference
+above (Helm: `config.fallback`); changes take effect on restart.
+
+- **Detection** (worker role, every tick before any claim, and again during a drain longer than one poll interval): one
+  worker at a time (advisory lock `4242002`, waited for at most 2 s) reads, per app, the fallbacks of the last `window`
+  (rows due and not yet fired, calls in progress, and rows closed `FALLBACK_TRIGGERED`/`FALLBACK_FAILED` in the window).
+  With at least `min-due` of them, it reads their cohort (the app's notifications created in the same time range, at most
+  1,000) and opens the circuit when less than `max-delivered-ratio` of the cohort has `delivered_at` set. A campaign
+  whose users are partly offline does not trip it (most of the cohort was delivered); `READ` plays no part.
+- **While `OPEN`:** the app's claimable fallbacks are closed as `FALLBACK_EXPIRED` in chunks of 1,000, without a webhook
+  call, and are **never resumed** (no queue to restore); events that arrive later are stored as `late`. One WARN
+  `fallback.suppressed` per tick and app; `rp_fallback_suppressed_total{app,reason}` and
+  `rp_fallback_total{outcome="expired"}` grow. Other apps are not affected.
+- **Closing:** by itself, once `min-open` has passed and at least `close-min-delivered` notifications created after the
+  open were delivered (`fallback.circuit_closed`, `reason=delivered_resumed`). An operator with the admin permission
+  `fallback-control` can force it (`FORCED`, detection off for `force-hold`) from the circuit view of the ops dashboard
+  ([admin.md](admin.md)); `FORCED` ends after `force-hold` or as soon as deliveries resume.
+- **Fail closed:** if the check fails (database error, lock not obtained in 2 s) the tick claims nothing
+  (`fallback.circuit_check_failed`); the next tick tries again.
+- **History:** every transition is stored in `fallback_circuit_event` (kept `admin.rollup-retention-days`) with what the
+  detector saw (`due`, `ratio`) and, on a close, how many fallbacks the open period suppressed.
+
+### Runbook: circuit open
+
+Signals: WARN `fallback.circuit_opened` (`rp.app_id`), `rp_fallback_suppressed_total{reason="circuit_open"}` rising, the
+`OPEN` badge on the dashboard overview.
+
+1. **Check tracking ingestion for that app.** Does `POST /v1/events` still answer 2xx (ingress, API pods, `api.request`
+   log lines with status 4xx/5xx on `/v1/events`)? Do `tracking.event_accepted` lines with that `rp.app_id` still
+   appear? The overview's delivery rate of the app tells the same story. Typical causes: API or ingress down, expired or
+   revoked device tokens (`401`), an app release or SDK change that stopped reporting.
+2. **Tracking is broken:** fix it and wait. The circuit closes by itself once deliveries are reported again (after
+   `min-open`). The fallbacks of the open period stay `FALLBACK_EXPIRED`; senders that must reach those users can find
+   them by state ([integration-guide.md](integration-guide.md)).
+3. **Tracking works but users really were not reached** (for example the push provider itself failed, so nothing was
+   delivered and the fallbacks are wanted): resume with "Resume fallbacks" (needs `fallback-control`, audit-logged as
+   `admin.fallback_resumed`). Detection stays off for that app for `force-hold`; fallbacks already suppressed are not
+   re-sent. Without the permission, wait: the circuit closes when deliveries come back.
+4. **Stop every fallback deliberately** (receiver incident, cost emergency): set `fallback.suspended: true` and restart;
+   set it back to `false` to resume. Resume is refused (`409`) while it is set.
+
 ## Retention
 
 `RetentionJob` (worker role) runs daily at 03:17 UTC (`reliable-push.retention.cron`, always UTC; `-` disables it) and deletes closed notifications whose `closed_at` is older than
@@ -306,8 +361,12 @@ admin disabled, or the rollup schedule `-`, retention behaves as before.
   replicas with a stop-then-start (`Recreate`) rollout across that boundary.
 - **Config skew during rollouts:** a worker without an app's configuration leaves that app's due rows alone (retried
   after one lease) and expires them 20 minutes after `due_at`; add new apps to all replicas before sending traffic.
+- **Circuit detection cost:** per tick, every configured app costs two small reads of the due-set indexes (and a
+  bounded cohort read of at most 1,000 rows when `min-due` rows are due). Those partial indexes have no `app_id`, so each
+  app's read scans the window's rows of all apps; fine for a few apps, revisit with many apps or very large due windows
+  ([TODO.md](TODO.md)). The breaker is untested under load: the load test runs with it disabled.
 - **Fast clock:** only for local tests: `testing.minute-duration` scales the notification timeout, trigger window, webhook
-  backoff and lease alike.
+  backoff and lease alike. The circuit-breaker durations are never scaled.
 
 ### Measured capacity
 

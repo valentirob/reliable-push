@@ -20,7 +20,9 @@ here and record the result in [STATUS.md](STATUS.md).
 | 4.5 | Oldest live trend day undercounts with `retention-days` of 7 or less | Agent | Action: a spec line for the stored-or-live rule, or an install with `retention-days <= 7` |
 | 4.6 | No backfill of pre-upgrade history into `daily_stats` | Agent | Action: a maintainer or user asking for trends before the 0.2.0 upgrade |
 | 4.7 | Live-query cost of the 7-day overview and the trends on large tables | Agent | Action: a load run or install with tens of millions of notifications showing slow admin queries |
-| 5.1 | 0.2.0 release | Maintainer | Action: maintainer decision to release (the ops dashboard is built on `feature/ops-dashboard`) |
+| 4.8 | Due-set indexes of the circuit detector have no `app_id` | Agent | Action: an install with many apps (tens or more) or a measurement showing slow circuit checks |
+| 4.9 | Circuit breaker untested under load | Agent | Action: a load run with the breaker on (a mixed burst: one app delivered, one not) |
+| 5.1 | 0.2.0 release | Maintainer | Action: maintainer decision to release (ops dashboard and fallback circuit breaker) |
 
 ## 1. Maintainer-only: needs personal accounts and credentials
 
@@ -146,12 +148,33 @@ Agents never create accounts or keys, sign in, or enter credentials. These steps
 - **Unblocked by:** a load run or an install with tens of millions of notifications in 7 days showing slow admin
   queries. Then serve the closed days of the 7-day window from `daily_stats` (only today live) and measure again.
 
+### 4.8 Due-set indexes of the circuit detector have no `app_id` (fallback circuit breaker)
+
+- **What:** every tick the detector counts each app's due set through the partial indexes `notification_due` (`due_at`)
+  and `notification_closed` (`closed_at`), filtering `app_id` row by row. Each app's read therefore scans the window's
+  rows of all apps (bounded by `min-due` only for the matching rows), so the cost per tick grows with apps x rows in the
+  window ([operations.md](operations.md#scaling-and-capacity)).
+- **Why deferred:** fine for a few apps; an extra index (`(app_id, due_at)` / `(app_id, closed_at)`, partial) costs
+  writes on the hottest table, and no measurement shows a problem yet.
+- **Unblocked by:** an install with many apps or a measurement of slow circuit checks (`fallback.circuit_check_failed`
+  with a lock timeout, or a long tick). Then add the two partial indexes online (`create index concurrently`) and measure.
+
+### 4.9 Circuit breaker untested under load (fallback circuit breaker)
+
+- **What:** the load test runs with `fallback.circuit-breaker.enabled: false` (its burst is never delivered, exactly the
+  pattern the breaker stops), so the detection and suppression cost at burst scale is not measured.
+- **Why deferred:** the integration tests and the E2E scenario cover the behaviour; cost matters only at scale.
+- **Unblocked by:** a load run with the breaker on, for example a burst split across a delivered and an undelivered app,
+  measuring the drain rate of the delivered app and the suppression rate of the other.
+
 ## 5. Next scope
 
-### 5.1 Release 0.2.0 (the ops dashboard)
+### 5.1 Release 0.2.0 (the ops dashboard and the fallback circuit breaker)
 
-- **What:** 0.2.0 is the read-only ops dashboard ([admin.md](admin.md), FR-16 and FR-17), in progress on
-  `feature/ops-dashboard` (cycle 4). Anything beyond it needs a new scope: items 1.3 and 2.1, or new requirements from
+- **What:** 0.2.0 is the ops dashboard ([admin.md](admin.md), FR-16 and FR-17, cycle 4) and the fallback circuit breaker
+  ([operations.md](operations.md#fallback-circuit-breaker), FR-18 and FR-19, cycle 5). Anything beyond it needs a new
+  scope, for example the iOS extension sending `DELIVERED` without waiting for the result (out of scope of the circuit
+  breaker spec), items 1.3 and 2.1, or new requirements from
   [requirements.md](requirements.md) "Out of scope (for now)", for example web push.
 - **Why deferred:** releasing is a maintainer decision; the 0.2.0 release comes after the merge to `develop`.
 - **Unblocked by:** the maintainer deciding to release.

@@ -1,6 +1,6 @@
 # reliable-push — Fallback circuit breaker design spec (0.2.0)
 
-- **Status:** design approved in conversation 2026-11-07; written spec pending maintainer review.
+- **Status:** design approved in conversation 2026-11-07, written spec approved 2026-11-08; implemented in cycle 5 ([plan](../plans/2026-11-08-cycle5-fallback-circuit-breaker.md)).
 - **Requirements:** [`../requirements.md`](../requirements.md), new FR-18 and FR-19, and a change to FR-16/FR-17
   (section 9 below).
 - **Base specs:** [`2026-11-03-reliable-push-design.md`](2026-11-03-reliable-push-design.md) and
@@ -188,6 +188,10 @@ A missed fallback is preferred to an unwanted one.
 - **E2E (local):** new scenario `fallback-circuit`: registers a burst of notifications whose devices never confirm,
   checks that the circuit opens and the receiver gets no call, then lets devices confirm new notifications and checks
   that the circuit closes and later fallbacks fire again. `./scripts/e2e.sh` expects `E2E: 19/19 passed`.
+  As built: a dedicated app `circuit`; the stack sets window 30 s, `min-due` 10, `close-min-delivered` 3, `min-open`
+  5 s. The burst's due times are a few milliseconds apart, so a tick could see fewer than `min-due` of them due and fire
+  those (section 4); the burst step therefore allows at most `min-due - 1` calls, and a second batch sent while the
+  circuit is open must get no call at all.
 - **Coverage:** the backend's 80 % line gate stays.
 
 ## 8. Documentation (docs-sync rule)

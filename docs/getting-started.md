@@ -145,7 +145,7 @@ Every endpoint is in [api.md](api.md), and every setting in [operations.md](oper
 ./scripts/e2e.sh
 ```
 
-✅ Ends with `[e2e] summary: 18/18 passed`. It runs in about 5 minutes and covers the 17 scenarios plus the single `console-smoke`
+✅ Ends with `[e2e] summary: 19/19 passed`. It runs in about 6 minutes and covers the 18 scenarios plus the single `console-smoke`
 entry, which runs both Playwright classes (the web console and the dashboard). It includes worker crashes inside and outside the trigger window. Results are in
 `harness/build/e2e/summary.json`. Run one scenario with `--scenario <name>`, and keep the stack for inspection with
 `--keep`.

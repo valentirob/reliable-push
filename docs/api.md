@@ -64,7 +64,8 @@ curl -sS http://localhost:8080/v1/notifications/6f1c2b9e-5d1a-4c55-9a38-0c1f3a7d
 
 `state` is one of `PENDING`, `DELIVERED`, `READ`, `FALLBACK_PENDING` (fallback claimed, webhook in progress or awaiting a
 retry), `FALLBACK_TRIGGERED`, `FALLBACK_FAILED`, `FALLBACK_EXPIRED`, `CANCELLED`. `dueAt` is `null` once the policy is
-satisfied or the notification is closed.
+satisfied or the notification is closed. `FALLBACK_EXPIRED` means the fallback was not sent: its trigger window had
+passed, or the app's fallback circuit was open ([integration-guide.md](integration-guide.md#3-receive-fallbacks)).
 
 ### `GET /v1/notifications` — list
 
@@ -154,14 +155,14 @@ curl -sS -X POST http://localhost:8080/v1/events -H "Authorization: Bearer $DEVI
 `occurredAt` is clamped by the server to `[received - 7 days, received]`. Retrying a whole batch is safe: processed items come
 back as `DUPLICATE`.
 
-## Admin API (read-only)
+## Admin API
 
-The API of the [ops dashboard](admin.md). Only `GET`. It exists only when at least one admin key is configured; without
+The API of the [ops dashboard](admin.md). Read-only (`GET`), except the fallback resume (`POST ...:resume`, FR-19). It exists only when at least one admin key is configured; without
 one, `/v1/admin/**` answers `404` like any unknown path.
 
 - Credential: `X-Admin-Key: <key>` (the backend stores only its SHA-256). A missing and a wrong key get the same `401`.
 - Every response carries `Cache-Control: no-store`. Timestamps are ISO-8601 UTC; time ranges are half-open `[from, to)`.
-- `app` must be an app the key may see, otherwise `404` (never `403`).
+- `app` must be an app the key may see, otherwise `404` (never `403`; `403` only means a missing permission on the resume).
 - Invalid parameters answer `400` (a malformed value, a span or `limit` out of range, `from` not before `to`). The sender
   and device APIs keep their `422` for invalid requests; the admin API does not use `422`.
 - Rate limit per admin key and instance (`admin.rate-limit-per-minute`, 600): `429` with `Retry-After`.

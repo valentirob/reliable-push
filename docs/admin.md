@@ -1,11 +1,12 @@
 # Ops dashboard
 
-A read-only web page and API served by the backend for support, ops and product. It answers: did user X get
-notification Y, which device confirmed it, did the fallback fire and how did the webhook answer; how healthy are
-delivery and read rates now; how do volumes and rates trend over months.
+A web page and API served by the backend for support, ops and product, read-only except the fallback resume. It answers:
+did user X get notification Y, which device confirmed it, did the fallback fire and how did the webhook answer; how
+healthy are delivery and read rates now; how do volumes and rates trend over months; is an app's fallback circuit open.
 
-Requirements: FR-16, FR-17 ([`requirements.md`](requirements.md)). Design: [`specs/2026-11-06-ops-dashboard-design.md`](specs/2026-11-06-ops-dashboard-design.md).
-API contract: [`api.md`](api.md#admin-api-read-only) and `openapi.yaml`.
+Requirements: FR-16, FR-17, FR-19 ([`requirements.md`](requirements.md)). Design: [`specs/2026-11-06-ops-dashboard-design.md`](specs/2026-11-06-ops-dashboard-design.md),
+circuit view and resume: [`specs/2026-11-07-fallback-circuit-breaker-design.md`](specs/2026-11-07-fallback-circuit-breaker-design.md).
+API contract: [`api.md`](api.md#admin-api) and `openapi.yaml`.
 
 ## Turning it on
 
@@ -44,11 +45,11 @@ A `401` from any call returns to the sign-in form. Closing the tab forgets the k
 
 | View | Route | What it shows |
 |---|---|---|
-| Overview | `#/overview` | Per app (or all visible apps) and window (1 h, 24 h, 7 d): registered, delivery rate, read rate, fallbacks triggered, failed and expired. A fallback circuit badge per app (`CLOSED`, `OPEN since <time> — <n> suppressed`, `FORCED until <time>`) linking to the circuit view, a banner "Fallbacks suspended by configuration" when the config suspends all fallbacks and a note "Circuit breaker disabled" when the breaker is off. A "Backlog now" block: pending, due and not yet claimed, dispatching, age of the oldest due notification (amber above 60 s). Refreshes every 30 s; "Pause refresh" stops it |
+| Overview | `#/overview` | Per app (or all visible apps) and window (1 h, 24 h, 7 d): registered, delivery rate, read rate, fallbacks triggered, failed and expired. A fallback circuit badge per app (`CLOSED`, `OPEN since <time> — <n> suppressed`, `FORCED until <time>`) linking to the circuit view, a banner "Fallbacks suspended by configuration" when the config suspends all fallbacks and a note "Circuit breaker disabled" when the breaker is off (the badges are left out, without delaying the tiles, when the circuit route fails). A "Backlog now" block: pending, due and not yet claimed, dispatching, age of the oldest due notification (amber above 60 s). Refreshes every 30 s; "Pause refresh" stops it |
 | Trends | `#/trends` | Daily volumes and the three rates as inline SVG charts, for 30, 90 or 400 days, with the same numbers in a table. Days still changing are marked `live` |
 | Search | `#/search` | One app plus any of user id, external id, tracking id (opens the detail directly), state and a created-time range. Newest first, 50 per page, "next page" |
 | Notification | `#/n/<trackingId>` | Timeline: created, due, each `DELIVERED` and `READ` event (device, platform, late or not), each webhook attempt (outcome, HTTP status, reason, duration), closed with the final state. "Show payload" for keys with `payload`. A link to the user's devices |
-| Fallback circuit | `#/circuit/<app>` | Reached from the badge on the overview. The app's circuit state and its history (when, transition `OPENED` / `CLOSED` / `FORCED` / `FORCE_ENDED`, reason, due count, ratio, suppressed count, admin key), newest first, "Next page" for more. For keys with `fallback-control` and an `OPEN` circuit, a "Resume fallbacks" button asks for confirmation (`window.confirm`) and then shows the `FORCED` state; a `409` (suspended or disabled) or `503` (a detector run holds the lock) shows the server's message |
+| Fallback circuit | `#/circuit/<app>` | Reached from the badge on the overview. The app's circuit state and its history (when, transition `OPENED` / `CLOSED` / `FORCED` / `FORCE_ENDED`, reason, due count, ratio, suppressed count, admin key), newest first, "Next page" for more. For keys with `fallback-control` and an `OPEN` circuit, a "Resume fallbacks" button asks for confirmation (`window.confirm`) and then shows the `FORCED` state; a `409` (suspended or disabled) or `503` (a detector run holds the lock) shows the server's message, and after a `409` or `404` the circuit is read again. What to check before resuming: [runbook](operations.md#runbook-circuit-open) |
 | Devices | `#/devices/<app>/<userId>` | The user's devices, revoked ones included, newest first, at most 50 |
 
 Rates are `count / (registered - cancelled)`; with a zero denominator the page shows "–".

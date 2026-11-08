@@ -419,6 +419,31 @@ X-RP-Signature: v1=…   Idempotency-Key: 6f1c…
   </div>
 </section>
 
+<!-- 7b -->
+<section class="slide" data-title="Circuit breaker">
+  <p class="kicker">How it works</p>
+  <h2>Fallback circuit breaker: no SMS storm</h2>
+  <div class="grow">
+    <div class="cols c2">
+      <div class="vflow">
+        <div class="row" style="border-color:var(--fall);background:var(--fall-soft)">⏱️ <span>Worker tick: fallbacks of app X come due</span></div>
+        <div class="down">↓</div>
+        <div class="row side">🔎 <span>Circuit check per app, <b>before the claim</b>: at least 50 due in 5 min, and under 10 % of their cohort delivered?</span></div>
+        <div class="down">↓</div>
+        <div class="row" style="border-color:var(--bad);background:var(--bad-soft)">⛔ <span><b>OPEN</b>: due fallbacks end <code>FALLBACK_EXPIRED</code>, no webhook call, never re-sent</span></div>
+        <div class="row ok">✅ <span><b>CLOSED</b>: claim → decide → signed webhook, as always</span></div>
+        <div class="down">↑</div>
+        <div class="row side">📬 <span><code>DELIVERED</code> events come back → closes by itself (after 1 min)</span></div>
+      </div>
+      <div class="cols">
+        <div class="card fall"><h3>Why</h3><p class="small">If tracking breaks (API or ingress down, SDK bug, bad app release), every push of that period would come due unmet. A missed fallback is cheaper than thousands of needless SMS.</p></div>
+        <div class="card side"><h3>Per app, by itself</h3><p class="small">One app's outage never stops another app's fallbacks. A campaign with offline users does not trip it: most of its cohort was delivered.</p></div>
+        <div class="card"><h3>Operator control</h3><p class="small">Dashboard badge and history per app. "Resume fallbacks" (permission <code>fallback-control</code>, audited) forces it closed for 60 min. Config: <code>fallback.suspended</code> stops all fallbacks, <code>circuit-breaker.enabled</code> turns it off.</p></div>
+      </div>
+    </div>
+  </div>
+</section>
+
 <!-- 8 -->
 <section class="slide" data-title="States">
   <p class="kicker">How it works</p>
@@ -458,8 +483,9 @@ X-RP-Signature: v1=…   Idempotency-Key: 6f1c…
       <text class="t-muted" x="116" y="252">sender DELETE</text>
       <text class="t-muted" x="620" y="182">2xx</text>
       <text class="t-muted" x="606" y="268">too late</text>
+      <text class="t-muted" x="606" y="302">or circuit open</text>
     </svg>
-    <p class="small muted">Late events (after a fallback was claimed) are stored as <code>LATE</code> and change nothing. Duplicates are no-ops.</p>
+    <p class="small muted">Late events (after a fallback was claimed) are stored as <code>LATE</code> and change nothing. Duplicates are no-ops. While an app's fallback circuit is open, its due notifications go straight to <code>FALLBACK_EXPIRED</code>.</p>
   </div>
 </section>
 
@@ -478,7 +504,7 @@ X-RP-Signature: v1=…   Idempotency-Key: 6f1c…
         <div class="down">↓</div>
         <div class="row side">🗄️ PostgreSQL (plain SQL, Flyway migrations)</div>
         <div class="down">↑</div>
-        <div class="row" style="border-color:var(--fall);background:var(--fall-soft)">⚙️ Worker: claim due rows → decide → signed webhook</div>
+        <div class="row" style="border-color:var(--fall);background:var(--fall-soft)">⚙️ Worker: circuit check → claim due rows → decide → signed webhook</div>
       </div>
       <div class="cols">
         <div class="card side"><h3>Scales out safely</h3><p class="small">Run any number of API and worker replicas. Workers claim rows with <code>FOR NO KEY UPDATE SKIP LOCKED</code>, so no fallback is sent twice by two replicas.</p></div>
@@ -498,16 +524,16 @@ X-RP-Signature: v1=…   Idempotency-Key: 6f1c…
       <div class="vflow">
         <div class="row main">🌐 Browser: <code>/admin/</code> page, admin key kept in the tab only</div>
         <div class="down">↓</div>
-        <div class="row side">🔒 <code>/v1/admin</code> API: <code>X-Admin-Key</code>, read-only, audit-logged</div>
+        <div class="row side">🔒 <span><code>/v1/admin</code> API: <code>X-Admin-Key</code>, read-only except the fallback resume, audit-logged</span></div>
         <div class="down">↓</div>
-        <div class="row side">🗄️ PostgreSQL: <code>notification</code> · <code>fallback_attempt</code> · <code>daily_stats</code></div>
+        <div class="row side">🗄️ <span>PostgreSQL: <code>notification</code> · <code>fallback_attempt</code> · <code>daily_stats</code> · <code>fallback_circuit</code></span></div>
         <div class="down">↑</div>
         <div class="row" style="border-color:var(--fall);background:var(--fall-soft)">⚙️ Worker: writes each webhook attempt, nightly rollup</div>
       </div>
       <div class="cols">
         <div class="card side"><h3>Three questions</h3><p class="small">Support: did user X get notification Y, and did the fallback fire? Ops: delivery, read and fallback rates, and the due backlog now. Product: daily trends for up to 400 days.</p></div>
-        <div class="card"><h3>Views</h3><p class="small">Overview · Trends · Search by user, external id, tracking id, state and time · Notification timeline with events and webhook attempts · Devices.</p></div>
-        <div class="card"><h3>Safe by default</h3><p class="small">Off until an admin key is configured. Keys are stored hashed and scoped to apps. The fallback payload needs the <code>payload</code> permission. No script from outside, no write actions.</p></div>
+        <div class="card"><h3>Views</h3><p class="small">Overview · Trends · Search by user, external id, tracking id, state and time · Notification timeline with events and webhook attempts · Devices · Fallback circuit per app, with its history.</p></div>
+        <div class="card"><h3>Safe by default</h3><p class="small">Off until an admin key is configured. Keys are stored hashed and scoped to apps. The fallback payload needs the <code>payload</code> permission. No script from outside. The only write action, "Resume fallbacks", needs <code>fallback-control</code>.</p></div>
       </div>
     </div>
   </div>
@@ -691,7 +717,7 @@ answer 2xx</code></pre>
         <p class="small muted" style="margin-top:10px">Fast clock: 1 product minute = 1 second. The same harness drives the Android emulator and iOS Simulator sample apps.</p>
       </div>
       <div class="cols">
-        <div class="card ok"><div class="big">17 / 17</div><p class="small">backend end-to-end scenarios, including worker crashes and retries</p></div>
+        <div class="card ok"><div class="big">19 / 19</div><p class="small">backend end-to-end entries, including worker crashes, retries, the fallback circuit and the browser smoke tests</p></div>
         <div class="cols c2">
           <div class="card ok"><div class="big">8 / 8</div><p class="small">Android emulator suite</p></div>
           <div class="card ok"><div class="big">8 / 8</div><p class="small">iOS Simulator suite</p></div>
@@ -743,7 +769,8 @@ answer 2xx</code></pre>
         <ul class="clean small">
           <li>Ops dashboard: <code>/admin/</code> page and read-only admin API</li>
           <li>Per-attempt webhook history and daily rollups</li>
-          <li>E2E 18/18 with the new <code>admin-dashboard</code> scenario</li>
+          <li>Fallback circuit breaker per app: no SMS storm when tracking is missing; resume from the dashboard</li>
+          <li>E2E 19/19 with the new <code>admin-dashboard</code> and <code>fallback-circuit</code> scenarios</li>
         </ul>
       </div>
       <div class="card fall">

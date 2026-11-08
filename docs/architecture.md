@@ -43,7 +43,8 @@ repositories.
 | `devices` | Device registration, device-token issue / refresh / revoke, signing keys, identity verification | `DeviceController`, `DeviceService`, `DeviceTokenService`, `SigningKeys`, `identity/*` |
 | `tracking` | Device events to state transitions, per-item outcomes | `EventsController`, `TrackingService` |
 | `fallback` | Claiming loop, trigger-window decision, signed webhook client | `FallbackScheduler`, `FallbackDispatcher`, `FallbackDecision`, `HttpWebhookClient`, `WebhookSigner` |
-| `admin` | Ops dashboard ([admin.md](admin.md)): admin keys, read-only `/v1/admin/**` API, the static page `/admin/**`, queries, nightly rollup. Active only when an admin key is configured | `AdminKeys`, `AdminKeyFilter`, `AdminPageFilter`, `AdminController`, `AdminQueries`, `DailyRollupJob`, `DailyStatsRepository` |
+| `fallback.circuit` | Per-app fallback circuit breaker (FR-18/19): configuration, detection, suppression of open apps, operator resume, stored history ([operations.md](operations.md#fallback-circuit-breaker)) | `CircuitBreaker`, `DetectionQueries`, `CircuitTransitions`, `Suppressor`, `CircuitRepository`, `CircuitBreakerProperties` |
+| `admin` | Ops dashboard ([admin.md](admin.md)): admin keys, `/v1/admin/**` API (read-only except the fallback resume), the static page `/admin/**`, queries, nightly rollup. Active only when an admin key is configured | `AdminKeys`, `AdminKeyFilter`, `AdminPageFilter`, `AdminController`, `AdminQueries`, `DailyRollupJob`, `DailyStatsRepository` |
 | `shared` | Servlet filter chain (trace id, access log, body limit, sender key auth, device auth, rate limit), problem+json errors, logging (`EventLog`), metrics (`RpMetrics`), clock and `TimeScale`, secret references | `shared/*` |
 
 There is no ORM and no Spring Security: persistence is plain SQL through `JdbcClient`, authentication is a pair of small
@@ -127,6 +128,16 @@ update notification n set state = 'DISPATCHING', next_attempt_at = :leaseUntil, 
   call); a new claim starts as soon as a slot is free, and the tick returns when all its rows are done (ticks of one
   instance never overlap). Each row gets a fresh `trace.id` and `rp.tracking_id`.
 
+### Circuit check (before the claim)
+
+Each tick starts with `CircuitBreaker.evaluate()`: in one transaction holding `pg_advisory_xact_lock(4242002)` (waited for
+at most 2 s, so the workers evaluate one after the other, each from the state the previous one committed) it updates
+every app's circuit from the due set and the delivered share of its cohort (spec
+[2026-11-07](specs/2026-11-07-fallback-circuit-breaker-design.md), section 4). `Suppressor` then closes the claimable
+rows of every `OPEN` app (all apps with `fallback.suspended`) as `FALLBACK_EXPIRED` without a call, and the claim above
+skips those apps (`not (app_id = any(:excluded))`). A drain that outlasts one poll interval repeats both before its next
+claim. If the check throws, the tick claims nothing (fail closed). The admin resume (`force`) takes the same lock.
+
 ### Lease
 
 A claim sets `lease_until = next_attempt_at = now + lease` (default 2 min). If the worker dies, the row becomes claimable
@@ -181,20 +192,25 @@ verified credential. Every device-authenticated request verifies the token stric
 
 ## Data model
 
-`notification`, `notification_event`, `device`, `fallback_attempt` and `daily_stats`, created by Flyway migrations `V1__init.sql`,
-`V2__event_unique_and_close_invariant.sql`, `V3__lease_until.sql`, `V4__admin.sql` and `V5__admin_index.sql` (applied automatically at startup;
+`notification`, `notification_event`, `device`, `fallback_attempt`, `daily_stats`, `fallback_circuit` and
+`fallback_circuit_event`, created by Flyway migrations `V1__init.sql`, `V2__event_unique_and_close_invariant.sql`,
+`V3__lease_until.sql`, `V4__admin.sql`, `V5__admin_index.sql` and `V6__fallback_circuit.sql` (applied automatically at startup;
 `V5` builds the index `notification_app_created` with `create index concurrently`, so writes continue while it builds).
 `fallback_attempt` holds one row per webhook call, written by the worker in the same transaction as the fenced outcome update;
 `daily_stats` holds one row per app and UTC day, recomputed nightly by `DailyRollupJob` (advisory lock, so one worker runs it)
 and kept for `admin.rollup-retention-days`. `RetentionJob` runs after the rollup and skips its purge when the rollup is missing. The columns, constraints and indexes are listed in spec
 section 3; `notification_event.notification_id` cascades on delete and `device_id` is set to null when a device is purged,
-so event history outlives devices. Applied migrations are never edited.
+so event history outlives devices. `fallback_circuit` holds one row per app whose circuit ever left `CLOSED` (state,
+`since`, forced hold, suppressed count); `fallback_circuit_event` the history of transitions, kept for
+`admin.rollup-retention-days` (spec [2026-11-07](specs/2026-11-07-fallback-circuit-breaker-design.md), section 3).
+Applied migrations are never edited.
 
 ## Time
 
 All "minutes" of the product (notification timeout, trigger window) and the minute-based durations (webhook backoff, lease)
 go through `TimeScale`. It is 60 s per minute unless `reliable-push.testing.minute-duration` is set, which is only accepted
-in the `e2e` and `demo` profiles. `fallback.http-timeout` is a literal duration and is never scaled.
+in the `e2e` and `demo` profiles. `fallback.http-timeout` is a literal duration and is never scaled, nor are the
+`fallback.circuit-breaker` durations; the circuit detector reads the same application `Clock` as the claim.
 
 ## Metrics, logs
 

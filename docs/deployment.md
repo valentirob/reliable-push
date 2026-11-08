@@ -220,6 +220,9 @@ kubectl -n reliable-push rollout status deploy/rp-reliable-push --timeout=180s
   'notification_app_created'::regclass;` (`f` means invalid): drop it (`drop index concurrently notification_app_created;`),
   delete the failed V5 row from `flyway_schema_history` if there is one (`delete from flyway_schema_history where version =
   '5' and not success;`), and restart.
+- **V6 (fallback circuit breaker, 0.2.0):** `V6__fallback_circuit.sql` adds two small tables (`fallback_circuit`,
+  `fallback_circuit_event`); quick on any table size. From 0.2.0 the circuit breaker is **on by default**
+  ([Fallback circuit breaker](#fallback-circuit-breaker) below).
 - Add a new app to `config.apps` on all replicas before sending its traffic (one `helm upgrade` does that).
 
 ## Graceful shutdown
@@ -260,7 +263,7 @@ config:
       - id: support
         key-sha256: "<64 lowercase hex characters>"
         apps: ["shop"]            # or ["*"]
-        permissions: [payload]    # optional: lets this key read the stored fallback payload
+        permissions: [payload]    # optional: payload reads the stored fallback payload; fallback-control may resume fallbacks
 ```
 
 Nothing else changes: no new pod, port or Service. Every pod that serves the API also serves `/admin/` and `/v1/admin/`.
@@ -289,6 +292,30 @@ With admin keys set, the chart routes the page too:
   `http://127.0.0.1:8080/admin/`.
 
 The admin key still protects the API when the page is reachable; without any key both paths answer `404`.
+
+## Fallback circuit breaker
+
+On by default: an app whose fallbacks come due while almost none of its notifications are delivered (tracking is
+missing) stops firing fallbacks until deliveries are reported again ([operations.md](operations.md#fallback-circuit-breaker),
+runbook included). Tune or switch it in `config.fallback` (the defaults, shown, suit most apps; an app with little
+traffic never reaches `min-due`):
+
+```yaml
+config:
+  fallback:
+    suspended: false            # true: no fallback for any app until set back to false
+    circuit-breaker:
+      enabled: true             # false: the behaviour before 0.2.0
+      window: 5m
+      min-due: 50
+      max-delivered-ratio: 0.10
+      close-min-delivered: 10
+      min-open: 1m
+      force-hold: 60m
+```
+
+A change rolls the pods (`checksum/config`). Operators resume an open circuit from the [ops dashboard](#ops-dashboard)
+with a key that has the `fallback-control` permission.
 
 ## Per-IP limits at the ingress
 
