@@ -31,7 +31,10 @@ import java.util.Map;
 import java.util.Queue;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.core.LogEvent;
@@ -58,6 +61,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 @ActiveProfiles({"api", "worker", "test"})
 @TestPropertySource(properties = {
     "reliable-push.worker.poll-interval=1d",
+    "reliable-push.fallback.circuit-breaker.enabled=true", // off in the test profile
     "reliable-push.apps.supa.sender-api-key-sha256=4f33fd6c3f941f7f293575fef17ee38112950e87155c322dbea56d9765721ad5",
     "reliable-push.apps.supa.identity.type=oidc",
     "reliable-push.apps.supa.identity.issuer=https://idp.test.example",
@@ -312,6 +316,41 @@ class SuppressorIT extends PostgresTestBase {
         assertThat(row(healthy.get(0)).state()).isEqualTo("FALLBACK_TRIGGERED");
         assertThat(count(A, "FALLBACK_EXPIRED")).isEqualTo(60);
         assertThat(suppressedLogs(B)).isEmpty();
+    }
+
+    @Test
+    void lockTimeoutClaimsNothing() throws Exception {
+        List<UUID> healthy = due(B, 1);
+        CountDownLatch locked = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        // another replica holds the detector lock longer than the lock timeout
+        CompletableFuture<Void> holder = CompletableFuture.runAsync(() -> transactions.executeWithoutResult(s -> {
+            jdbc.sql("select pg_advisory_xact_lock(:key)").param("key", CircuitBreaker.LOCK_KEY).query().listOfRows();
+            locked.countDown();
+            try {
+                release.await(30, TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }));
+        assertThat(locked.await(10, TimeUnit.SECONDS)).isTrue();
+        int claimed;
+        try {
+            claimed = scheduler.tick();
+        } finally {
+            release.countDown();
+            holder.get(10, TimeUnit.SECONDS);
+        }
+
+        assertThat(claimed).isZero();
+        assertThat(webhook.count(healthy)).isZero();
+        assertThat(row(healthy.get(0)).state()).isEqualTo("PENDING");
+        assertThat(capture.events()).filteredOn(e -> "fallback.circuit_check_failed"
+                        .equals(EventCapture.data(e).get("event.action")))
+                .singleElement().satisfies(e -> assertThat(e.getLevel()).isEqualTo(Level.WARN));
+
+        scheduler.tick(); // the lock is free again: the next tick fires it
+        assertThat(webhook.count(healthy)).isEqualTo(1);
     }
 
     @Test

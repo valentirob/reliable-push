@@ -22,11 +22,13 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionTemplate;
 
 /**
- * The per-app fallback circuit detector (spec 4). {@link #evaluate} runs at the start of every worker tick, in one
- * transaction holding {@code pg_try_advisory_xact_lock(4242002)}: the worker that gets the lock observes every app and
- * writes its transitions; the others only read the stored states. The lock holder also deletes, once a day per
- * instance, the circuit events older than {@code admin.rollup-retention-days} (spec 3), also while the breaker is
- * disabled.
+ * The per-app fallback circuit detector (spec 4). {@link #evaluate} runs at the start of every worker tick (and again
+ * during a long drain), in one transaction holding {@code pg_advisory_xact_lock(4242002)}, waited for at most
+ * {@link #LOCK_TIMEOUT} ({@code SET LOCAL lock_timeout}): the workers evaluate one after the other, each from the
+ * committed state of the one before, so a transition is written once and no worker claims from a stale state. A lock
+ * that cannot be taken in time throws, and the tick claims nothing (fail closed). The evaluation also deletes, once a day
+ * per instance, the circuit events older than {@code admin.rollup-retention-days} (spec 3); while the breaker is
+ * disabled only that prune runs, under a non-blocking try-lock.
  *
  * <p>Time comes from the application {@link Clock}, the one the claim and the tracking writes use, so detection and
  * claim agree on {@code now} (also with the fast clock of the demo and E2E).
@@ -39,6 +41,9 @@ public class CircuitBreaker {
 
     /** Same constant on every instance: the transaction-scoped advisory lock of the detector. */
     static final long LOCK_KEY = 4_242_002L;
+
+    /** How long an evaluation waits for the lock held by another worker before the check fails. */
+    static final Duration LOCK_TIMEOUT = Duration.ofSeconds(2);
 
     /** How often (per instance) the lock holder deletes old circuit events. */
     static final Duration PRUNE_INTERVAL = Duration.ofDays(1);
@@ -82,7 +87,10 @@ public class CircuitBreaker {
     /**
      * Evaluates the circuits of {@code appIds} and returns every one of them (an app without a stored row as CLOSED
      * since the epoch). With {@code circuit-breaker.enabled: false} every app is CLOSED and no circuit is read or
-     * written; only the daily prune of old events runs (under the same lock).
+     * written; only the daily prune of old events runs (under the same lock, without waiting for it).
+     *
+     * @throws org.springframework.dao.DataAccessException when the lock is not free within {@link #LOCK_TIMEOUT}, or
+     *     on any database error
      */
     public Map<String, Circuit> evaluate(Collection<String> appIds) {
         Set<String> apps = new LinkedHashSet<>(appIds);
@@ -92,10 +100,11 @@ public class CircuitBreaker {
             apps.forEach(app -> closed.put(app, Circuit.closed(app, Instant.EPOCH)));
             return closed;
         }
-        Evaluation evaluation = transactions.execute(status -> tryLock() ? evaluateLocked(apps) : null);
-        if (evaluation == null) {
-            return stored(apps);
-        }
+        Evaluation evaluation = transactions.execute(status -> {
+            jdbc.sql("set local lock_timeout = '" + LOCK_TIMEOUT.toMillis() + "ms'").update();
+            jdbc.sql("select 1 from pg_advisory_xact_lock(:key)").param("key", LOCK_KEY).query(Integer.class).single();
+            return evaluateLocked(apps);
+        });
         if (evaluation.prunedAt() != null) {
             lastPrune = evaluation.prunedAt();
         }
@@ -216,13 +225,6 @@ public class CircuitBreaker {
         }
         circuits.deleteEventsBefore(now.minus(retention));
         return true;
-    }
-
-    private Map<String, Circuit> stored(Set<String> apps) {
-        Map<String, Circuit> stored = circuits.findAll(apps);
-        Map<String, Circuit> result = new LinkedHashMap<>();
-        apps.forEach(app -> result.put(app, stored.getOrDefault(app, Circuit.closed(app, Instant.EPOCH))));
-        return result;
     }
 
     /** Microseconds, the precision PostgreSQL stores (as the claim does). */

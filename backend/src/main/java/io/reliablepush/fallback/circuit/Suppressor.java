@@ -85,7 +85,7 @@ public class Suppressor {
                     metrics.fallbackSuppressed(app, reason, closed);
                 }
                 total += closed;
-            } while (closed == CHUNK);
+            } while (closed == CHUNK); // a short chunk ends it (SKIP LOCKED may skip rows: the next tick takes them)
         } finally {
             if (total > 0) {
                 Map<String, Object> fields = new LinkedHashMap<>();

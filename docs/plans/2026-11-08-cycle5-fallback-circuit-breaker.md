@@ -23,7 +23,7 @@ AssertJ + Testcontainers + `OpenApiAssert`, plain HTML/CSS/JS ES modules, Playwr
 - Backend check at the end of every backend task: `cd backend && ./mvnw -B verify` (unit + IT + 80 % line coverage gate).
 - No new runtime dependency; no ORM; `JdbcClient` only.
 - Config prefix `reliable-push.fallback`: `suspended: false`; `circuit-breaker`: `enabled: true`, `window: 5m`, `min-due: 50`, `max-delivered-ratio: 0.10`, `close-min-delivered: 10`, `min-open: 1m`, `force-hold: 60m` (§2). Bare numbers are minutes.
-- Advisory lock key `4242002` (`pg_try_advisory_xact_lock`). Cohort and resumed reads cap at 1,000 rows; suppression chunks of 1,000 rows (§4, §5).
+- Advisory lock key `4242002` (blocking `pg_advisory_xact_lock` under `lock_timeout` 2 s; a timeout fails the check, fail closed). Cohort and resumed reads cap at 1,000 rows; suppression chunks of 1,000 rows (§4, §5).
 - Log events (exact names): `fallback.circuit_opened` (WARN), `fallback.circuit_closed` (INFO), `fallback.circuit_forced` (WARN), `fallback.suppressed` (WARN, one per tick and app), `admin.fallback_resumed` (audit). Every new event goes into the event table of `docs/operations.md` in the task that introduces it (harness `log-catalogue` scenario).
 - Metric `rp_fallback_suppressed_total{app,reason}` with `reason` = `circuit_open` | `fallback_suspended`; suppressed rows also count in `rp_fallback_total{outcome="expired"}`.
 - No backward compatibility is needed (nothing is deployed): change existing code freely.

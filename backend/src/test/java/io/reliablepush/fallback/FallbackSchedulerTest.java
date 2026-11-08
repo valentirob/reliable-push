@@ -22,6 +22,7 @@ import io.reliablepush.notifications.FallbackPolicy;
 import io.reliablepush.notifications.NotificationRepository;
 import io.reliablepush.notifications.NotificationState;
 import io.reliablepush.shared.logging.EventCapture;
+import io.reliablepush.support.MutableClock;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -48,6 +49,7 @@ class FallbackSchedulerTest {
     private static final Duration LONG = Duration.ofSeconds(30);
 
     private static final List<String> APPS = List.of("shop", "other");
+    private static final Duration POLL = Duration.ofSeconds(5);
 
     private final NotificationRepository notifications = mock(NotificationRepository.class);
     private final FallbackDispatcher dispatcher = mock(FallbackDispatcher.class);
@@ -60,8 +62,12 @@ class FallbackSchedulerTest {
 
     private FallbackScheduler scheduler(boolean suspended) {
         // batch 1 / concurrency 1: a claim that returns its row comes back "full", so the loop would claim again
-        return new FallbackScheduler(notifications, dispatcher, breaker, suppressor, APPS, suspended,
-                Clock.fixed(NOW, java.time.ZoneOffset.UTC), Duration.ofMinutes(2), 1, 1);
+        return scheduler(suspended, Clock.fixed(NOW, java.time.ZoneOffset.UTC));
+    }
+
+    private FallbackScheduler scheduler(boolean suspended, Clock clock) {
+        return new FallbackScheduler(notifications, dispatcher, breaker, suppressor, APPS, suspended, clock,
+                Duration.ofMinutes(2), POLL, 1, 1);
     }
 
     private static Map<String, Circuit> circuits() {
@@ -178,7 +184,8 @@ class FallbackSchedulerTest {
     void failedCircuitCheckClaimsNothing() {
         when(breaker.evaluate(APPS)).thenThrow(new CannotGetJdbcConnectionException("down"));
 
-        try (EventCapture capture = new EventCapture()) {
+        try (EventCapture capture = new EventCapture();
+                EventCapture classLog = new EventCapture(FallbackScheduler.class.getName())) {
             assertThat(scheduler().tick()).isZero();
 
             assertThat(capture.events()).singleElement().satisfies(e -> {
@@ -186,6 +193,11 @@ class FallbackSchedulerTest {
                 assertThat(EventCapture.data(e))
                         .containsEntry("event.action", "fallback.circuit_check_failed")
                         .containsEntry("reason", "CannotGetJdbcConnectionException");
+            });
+            // the stack trace follows at ERROR from the class logger
+            assertThat(classLog.events()).singleElement().satisfies(e -> {
+                assertThat(e.getLevel()).isEqualTo(Level.ERROR);
+                assertThat(e.getThrown()).isInstanceOf(CannotGetJdbcConnectionException.class);
             });
         }
         verify(suppressor, never()).suppress(any(), anyBoolean(), any());
@@ -197,7 +209,8 @@ class FallbackSchedulerTest {
         when(breaker.evaluate(APPS)).thenReturn(circuits());
         when(suppressor.suppress(any(), anyBoolean(), any())).thenThrow(new IllegalStateException("boom"));
 
-        try (EventCapture capture = new EventCapture()) {
+        try (EventCapture capture = new EventCapture();
+                EventCapture errors = new EventCapture(FallbackScheduler.class.getName())) {
             assertThat(scheduler().tick()).isZero();
 
             assertThat(capture.events()).singleElement().satisfies(e -> assertThat(EventCapture.data(e))
@@ -205,6 +218,51 @@ class FallbackSchedulerTest {
                     .containsEntry("reason", "IllegalStateException"));
         }
         verify(notifications, never()).claimDue(any(), any(), anyInt(), any());
+    }
+
+    @Test
+    void longDrainChecksTheCircuitsAgainAfterOnePollInterval() {
+        MutableClock clock = new MutableClock(NOW);
+        when(breaker.evaluate(APPS)).thenReturn(circuits());
+        when(suppressor.suppress(eq(circuits()), eq(false), any())).thenReturn(Set.of(), Set.of("shop"));
+        when(notifications.claimDue(any(), any(), anyInt(), any()))
+                .thenReturn(List.of(row()), List.of(row()), List.of());
+        doAnswer(invocation -> {
+            clock.advance(Duration.ofSeconds(3)); // each webhook call takes 3 s
+            return null;
+        }).when(dispatcher).process(any());
+
+        assertThat(scheduler(false, clock).tick()).isEqualTo(2);
+
+        // claims at 0 s (checked), 3 s (last check 3 s ago: none), 6 s (6 s >= poll interval: checked again)
+        verify(breaker, times(2)).evaluate(APPS);
+        verify(suppressor).suppress(circuits(), false, NOW);
+        verify(suppressor).suppress(circuits(), false, NOW.plusSeconds(6));
+        InOrder claims = inOrder(notifications);
+        claims.verify(notifications).claimDue(eq(NOW), any(), anyInt(), eq(Set.of()));
+        claims.verify(notifications).claimDue(eq(NOW.plusSeconds(3)), any(), anyInt(), eq(Set.of()));
+        claims.verify(notifications).claimDue(eq(NOW.plusSeconds(6)), any(), anyInt(), eq(Set.of("shop")));
+    }
+
+    @Test
+    void failedCheckDuringADrainStopsClaiming() {
+        MutableClock clock = new MutableClock(NOW);
+        when(breaker.evaluate(APPS)).thenReturn(circuits()).thenThrow(new CannotGetJdbcConnectionException("down"));
+        when(notifications.claimDue(any(), any(), anyInt(), any())).thenReturn(List.of(row()));
+        doAnswer(invocation -> {
+            clock.advance(Duration.ofSeconds(6));
+            return null;
+        }).when(dispatcher).process(any());
+
+        try (EventCapture capture = new EventCapture();
+                EventCapture errors = new EventCapture(FallbackScheduler.class.getName())) {
+            assertThat(scheduler(false, clock).tick()).isEqualTo(1); // the row claimed before still ran
+
+            assertThat(capture.events()).singleElement().satisfies(e -> assertThat(EventCapture.data(e))
+                    .containsEntry("event.action", "fallback.circuit_check_failed"));
+        }
+        verify(notifications, times(1)).claimDue(any(), any(), anyInt(), any());
+        verify(dispatcher, times(1)).process(any());
     }
 
     @Test

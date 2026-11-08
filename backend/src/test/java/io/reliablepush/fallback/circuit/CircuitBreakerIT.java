@@ -1,6 +1,7 @@
 package io.reliablepush.fallback.circuit;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import io.reliablepush.shared.logging.EventCapture;
 import io.reliablepush.support.MutableClock;
@@ -26,6 +27,7 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
+import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
@@ -39,7 +41,10 @@ import org.springframework.transaction.support.TransactionTemplate;
  * without sleeping. Each test uses its own app id and every row is deleted after the test.
  */
 @ActiveProfiles({"api", "worker", "test"})
-@TestPropertySource(properties = "reliable-push.worker.poll-interval=1d")
+@TestPropertySource(properties = {
+    "reliable-push.worker.poll-interval=1d",
+    "reliable-push.fallback.circuit-breaker.enabled=true" // off in the test profile
+})
 @Import(CircuitBreakerIT.Fakes.class)
 // the context's clock sits in 2101: close it after the class so no worker with that clock outlives these tests
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
@@ -352,36 +357,65 @@ class CircuitBreakerIT extends PostgresTestBase {
     }
 
     @Test
-    void withoutTheLockOnlyReadsStoredStates() throws Exception {
+    void waitsForTheLockAndSeesTheCommittedState() throws Exception {
         unmetDue(app, 60, Duration.ofMinutes(10));
-        String stored = app + "-s";
-        circuits.transition(new Circuit(stored, CircuitState.OPEN, now, null, null, 3),
-                new CircuitEvent(0, stored, now, "OPENED", "tracking_missing", 50L, null, null, null));
+        CountDownLatch locked = new CountDownLatch(1);
+        // another replica holds the lock and opens the circuit; it commits after 500 ms
+        CompletableFuture<Void> holder = CompletableFuture.runAsync(() -> transactions.executeWithoutResult(s -> {
+            jdbc.sql("select pg_advisory_xact_lock(:key)").param("key", CircuitBreaker.LOCK_KEY).query().listOfRows();
+            circuits.transition(new Circuit(app, CircuitState.OPEN, now, null, null, 0),
+                    new CircuitEvent(0, app, now, "OPENED", "tracking_missing", 50L, null, null, null));
+            locked.countDown();
+            sleep(500);
+        }));
+        assertThat(locked.await(10, TimeUnit.SECONDS)).isTrue();
+
+        Map<String, Circuit> result = breaker.evaluate(List.of(app));
+        holder.get(10, TimeUnit.SECONDS);
+
+        // evaluated after the other replica committed: OPEN, and no second OPENED event
+        assertThat(result.get(app).state()).isEqualTo(CircuitState.OPEN);
+        assertThat(events(app)).hasSize(1);
+        assertThat(logged("fallback.circuit_opened")).isEmpty();
+    }
+
+    @Test
+    void lockTimeoutFailsTheCheck() throws Exception {
+        unmetDue(app, 60, Duration.ofMinutes(10));
         CountDownLatch locked = new CountDownLatch(1);
         CountDownLatch release = new CountDownLatch(1);
         CompletableFuture<Void> holder = CompletableFuture.runAsync(() -> transactions.executeWithoutResult(s -> {
             jdbc.sql("select pg_advisory_xact_lock(:key)").param("key", CircuitBreaker.LOCK_KEY).query().listOfRows();
             locked.countDown();
             try {
-                release.await(20, TimeUnit.SECONDS);
+                release.await(30, TimeUnit.SECONDS);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             }
         }));
         assertThat(locked.await(10, TimeUnit.SECONDS)).isTrue();
-        Map<String, Circuit> result;
+        long started = System.nanoTime();
         try {
-            result = CompletableFuture.supplyAsync(() -> breaker.evaluate(List.of(app, stored)))
-                    .get(20, TimeUnit.SECONDS);
+            assertThatThrownBy(() -> breaker.evaluate(List.of(app))).isInstanceOf(DataAccessException.class);
         } finally {
             release.countDown();
             holder.get(10, TimeUnit.SECONDS);
         }
 
-        assertThat(result.get(app)).isEqualTo(Circuit.closed(app, Instant.EPOCH));
-        assertThat(result.get(stored).state()).isEqualTo(CircuitState.OPEN);
-        assertThat(result.get(stored).suppressed()).isEqualTo(3);
+        Duration waited = Duration.ofNanos(System.nanoTime() - started);
+        // it waited for the lock (the server's timer starts slightly before ours), then gave up
+        assertThat(waited).isBetween(CircuitBreaker.LOCK_TIMEOUT.minusMillis(500),
+                CircuitBreaker.LOCK_TIMEOUT.plusSeconds(5));
+        assertThat(circuits.find(app)).isEmpty();
         assertThat(events(app)).isEmpty();
+    }
+
+    private static void sleep(long millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     // ---- configuration and operator ----------------------------------------------------------------------------

@@ -12,6 +12,9 @@ x-worker-env: &worker-env
   RELIABLEPUSH_WORKER_LEASE: 2m
   RELIABLEPUSH_WORKER_MAXCONCURRENCY: "${LOAD_WORKER_CONCURRENCY:-100}"
   SPRING_DATASOURCE_HIKARI_MAXIMUMPOOLSIZE: "${LOAD_WORKER_POOL:-10}"
+  # The fallback burst registers 30,000 notifications that are never delivered: exactly the "tracking is missing" pattern
+  # the circuit breaker stops. It is off here so the burst measures webhook throughput instead of suppression.
+  RELIABLEPUSH_FALLBACK_CIRCUITBREAKER_ENABLED: "false"
 
 services:
   secrets:

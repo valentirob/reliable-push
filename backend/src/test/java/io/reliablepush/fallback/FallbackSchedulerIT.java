@@ -69,9 +69,6 @@ import org.springframework.test.context.TestPropertySource;
     "reliable-push.worker.poll-interval=1d",
     // small claims, fewer webhook calls in flight than one claim: the drain loop and its bound are exercised
     "reliable-push.worker.batch-size=" + FallbackSchedulerIT.BATCH,
-    // these tests exercise claim and dispatch: the 200-row backlog of the race test would trip the circuit breaker
-    // (tested with the scheduler in SuppressorIT)
-    "reliable-push.fallback.circuit-breaker.enabled=false",
     "reliable-push.worker.max-concurrency=" + FallbackSchedulerIT.MAX_CONCURRENCY,
     "reliable-push.apps.fbit.sender-api-key-sha256=a2cd39316c98ea096773f14854fd45f790f78b9df744dc4be3555cd2f662ba99",
     "reliable-push.apps.fbit.identity.type=oidc",

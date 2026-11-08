@@ -99,11 +99,16 @@ create index fallback_circuit_event_app_at on fallback_circuit_event (app_id, at
 
 ## 4. Detection and transitions
 
-`CircuitBreaker.evaluate()` runs at the start of every `FallbackScheduler.tick()` (default every 5 s), inside a
-transaction holding `pg_try_advisory_xact_lock(4242002)`: the worker that gets the lock evaluates, the others skip it
-and read the stored states. With `circuit-breaker.enabled: false` it does nothing and every app is `CLOSED`.
+`CircuitBreaker.evaluate()` runs at the start of every `FallbackScheduler.tick()` (default every 5 s) and again
+during a long drain (section 5), inside a transaction holding the blocking `pg_advisory_xact_lock(4242002)` under
+`SET LOCAL lock_timeout = '2s'`: the workers evaluate one after the other, each from the state the previous one
+committed, so a transition is written once (it no longer applies to the next worker) and no worker suppresses or claims
+from a stale state (a worker that skipped the lock could fire part of a storm another worker just stopped). A lock not
+obtained within 2 s fails the check (section 5, fail closed). The prune of old events still runs once per 24 h per
+instance. With `circuit-breaker.enabled: false` it does nothing and every app is `CLOSED` (only the prune runs, under
+a non-blocking `pg_try_advisory_xact_lock`).
 
-For each configured app, with `now` the database clock:
+For each configured app, with `now` the application clock (the one the claim uses):
 
 - **due set**: the app's fallbacks of the window, that is rows with `state in ('PENDING', 'DELIVERED', 'DISPATCHING')`
   and `due_at in (now - window, now]` (the backlog about to fire plus calls in progress; partial index
@@ -143,15 +148,18 @@ Suppressing an app closes its claimable rows (the claim query's own condition, r
 `state in ('PENDING','DELIVERED') and due_at <= now` or `state = 'DISPATCHING' and next_attempt_at <= now`) as
 `FALLBACK_EXPIRED` (`closed_at = now`, `due_at`, `next_attempt_at`, `lease_until` cleared) in chunks of 1,000 rows,
 each its own transaction, without calling the webhook. Rows a worker holds under a live lease are left to that worker.
-Per tick and app: one WARN `fallback.suppressed` (`rp.app_id`, `count`, `reason` = `circuit_open` or
-`fallback_suspended`), never one line per notification; `fallback_circuit.suppressed` grows by the count; the metric
+Per tick and app with at least one row closed: one WARN `fallback.suppressed` (`rp.app_id`, `count`, `reason` =
+`circuit_open` or `fallback_suspended`), never one line per notification, and none for an app with nothing to close; `fallback_circuit.suppressed` grows by the count; the metric
 `rp_fallback_total{outcome="expired"}` and the new `rp_fallback_suppressed_total{app,reason}` grow. The claim that
-follows skips suppressed apps. Suppressed notifications are never re-opened: events that arrive later are stored as
+follows skips suppressed apps. A tick whose drain (repeated claims) outlasts one poll interval runs `evaluate()` and
+the suppression again before its next claim, so a storm that comes due during a long drain is checked within one poll
+interval. Suppressed notifications are never re-opened: events that arrive later are stored as
 `late`, as today (FR-11).
 
-Fail closed: when `evaluate()` or the suppression of a tick throws (database error), the tick logs one WARN
-`fallback.circuit_check_failed` (`reason` = exception class name) and claims nothing; the next tick tries again. A
-missed fallback is preferred to an unwanted one.
+Fail closed: when `evaluate()` or the suppression throws (database error, or the detector lock not obtained within
+2 s), the tick logs one WARN `fallback.circuit_check_failed` (`reason` = exception class name; the stack trace follows
+at ERROR from the scheduler's logger) and claims nothing more (rows already claimed finish); the next tick tries again.
+A missed fallback is preferred to an unwanted one.
 
 ## 6. Admin console and API
 

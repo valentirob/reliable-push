@@ -153,7 +153,8 @@ Tags are fixed enumerations (never user or tracking ids; an app id only as `app`
 series per configured app and reason); all series exist at 0 from startup. Useful alerts:
 `rp_due_backlog` staying above a few `batch-size` values (the worker cannot keep up), `rate(rp_fallback_total{outcome="failed"})`
 or `expired` rising (receiver down, window too tight), `rp_fallback_suppressed_total` rising (a circuit is open: tracking
-is missing for that app), and `up` of the worker role.
+is missing for that app), any sustained `fallback.circuit_check_failed` in the logs (no fallback fires while the circuit
+check fails), and `up` of the worker role.
 
 ## Logs
 
@@ -209,7 +210,7 @@ below, all top-level. ThreadContext entries `trace.id` and `rp.*` are top-level;
 | `fallback.circuit_closed` | An app's circuit closed again: `DELIVERED` events resumed (from OPEN after `min-open`, or from FORCED), or the forced hold ended | `rp.app_id`, `reason` = `delivered_resumed` or `force_expired`, `suppressed` (fallbacks the finished period suppressed) |
 | `fallback.circuit_forced` (WARN) | An operator forced an app's fallbacks back on for `force-hold` (detection off for that app) | `rp.app_id`, `rp.admin_key` (key id, never the key), `suppressed` |
 | `fallback.suppressed` (WARN) | The worker closed an app's claimable fallbacks as `FALLBACK_EXPIRED` without calling the webhook, because its circuit is open or `fallback.suspended` is `true`. One line per tick and app (only when rows were closed), never one per notification | `rp.app_id`, `count` (rows closed this tick), `reason` = `circuit_open` or `fallback_suspended` |
-| `fallback.circuit_check_failed` (WARN) | The circuit evaluation or the suppression of a tick failed (database error): the tick claims nothing, so no fallback fires unchecked; the next tick tries again | `reason` = exception class name |
+| `fallback.circuit_check_failed` (WARN) | The circuit evaluation or the suppression failed (database error, or the detector lock `4242002` held by another worker for more than 2 s): the tick claims nothing more, so no fallback fires unchecked; the next tick tries again. The stack trace follows at ERROR from logger `io.reliablepush.fallback.FallbackScheduler`. **Sustained, it means no fallback fires at all** | `reason` = exception class name |
 | `retention.purged` | Retention job finished | `count` (also 0) |
 | `retention.skipped` (WARN) | Retention did not run: admin is enabled, the rollup schedule is on and either `daily_stats` has no row computed in the last 20 hours, or a rollup was still running after the 30-minute wait | `reason` = `rollup_missing` or `rollup_running` |
 | `rollup.completed` | `DailyRollupJob` wrote the daily statistics | `count` = days written (not logged when another worker held the lock) |
