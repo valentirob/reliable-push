@@ -92,6 +92,7 @@ configuration without any app fails the start):
 | `identity.jwks-uri` | discovery | Optional; otherwise `<issuer>/.well-known/openid-configuration` is used. https (http only for a local issuer) |
 | `identity.grant-secret-ref` | none | Required for `signed-grant` (`env:NAME`, at least 32 bytes), rejected for other types |
 | `device-token-validity` | `90d` | Positive duration (a bare number means days); lifetime of issued device tokens |
+| `device-token-events-grace` | `90d` | Duration, not negative (a bare number means days; `0` = no grace). A device whose newest token expired less than this ago still counts as active, so the user's notifications are tracked; without an active device a registration is stored as `NO_DEVICE_REGISTERED` |
 | `default-policy` | `NOT_DELIVERED` | `NOT_DELIVERED` or `NOT_READ`; used when a registration omits `policy` |
 | `default-timeout-minutes` | `10` | At least 1; used when a registration omits `timeoutMinutes` |
 | `rate-limits.device-per-minute` | `60` | At least 1; per device, and per user for registration |
@@ -151,7 +152,8 @@ The ops dashboard ([admin.md](admin.md)) is served by every instance that serves
 
 | Metric | Type | Meaning |
 |---|---|---|
-| `rp_notifications_registered_total` | counter | Notifications inserted (replays of an `externalId` are not counted) |
+| `rp_notifications_registered_total{outcome}` | counter | Notifications inserted (replays of a `trackingId` are not counted); `outcome` = `pending` (tracked) or `no_device_registered` (the user had no active device: stored closed, never falls back) |
+| `rp_notification_registration_seconds` | histogram | Server time of `POST /v1/notifications` (`_bucket` with `le` = 5 ms … 5 s, `_count`, `_sum`, `_max`). Compare it with the sender's registration timeout (1 s recommended): a registration slower than the timeout and the whole push delivery can cause one needless fallback |
 | `rp_events_total{type,late}` | counter | Event rows stored; `type` = `DELIVERED`/`READ`, `late` = `true` when the transition no longer applied |
 | `rp_fallback_total{outcome}` | counter | Fallback outcomes persisted by the worker: `triggered`, `failed`, `expired` (`expired` includes the fallbacks suppressed by the circuit breaker) |
 | `rp_fallback_suppressed_total{app,reason}` | counter | Fallbacks closed as `FALLBACK_EXPIRED` without a call by the circuit breaker; `reason` = `circuit_open` or `fallback_suspended`. **Worker role only** |
@@ -200,8 +202,9 @@ below, all top-level. ThreadContext entries `trace.id` and `rp.*` are top-level;
 | Event | Emitted when | Main fields |
 |---|---|---|
 | `api.request` | Every HTTP request completes | `http.request.method`, `url.path` (route template), `http.response.status_code`, `event.duration` (ns), `event.outcome` (`success` below 400), `rp.app_id`, `rp.device_id` when authenticated |
-| `notification.registered` | A notification was inserted | `rp.app_id`, `rp.tracking_id`, `rp.user_hash` |
-| `notification.duplicate` | A registration repeated an existing `externalId` | same |
+| `notification.registered` | A notification was inserted and is tracked (`PENDING`) | `rp.app_id`, `rp.tracking_id`, `rp.user_hash` |
+| `notification.no_device_registered` | A notification was inserted for a user without an active device: stored as `NO_DEVICE_REGISTERED`, no fallback | same |
+| `notification.duplicate` | A registration repeated an existing `trackingId` (nothing inserted) | same |
 | `notification.cancelled` | Sender cancelled a notification | `rp.app_id`, `rp.tracking_id` |
 | `device.registered` | Device registered or re-registered | `rp.app_id`, `rp.device_id`, `rp.user_hash` |
 | `device.token_refreshed` | Device token refreshed | same |

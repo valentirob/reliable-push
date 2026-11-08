@@ -120,7 +120,8 @@ The policy decides what "confirmed" means. With `NOT_DELIVERED`, a `DELIVERED` (
 
 ```mermaid
 stateDiagram-v2
-  [*] --> PENDING: registered
+  [*] --> PENDING: registered, user has an active device
+  [*] --> NO_DEVICE_REGISTERED: registered, no active device
   PENDING --> DELIVERED: DELIVERED event
   PENDING --> READ: READ event
   DELIVERED --> READ: READ event
@@ -139,6 +140,7 @@ stateDiagram-v2
   FALLBACK_TRIGGERED --> [*]
   FALLBACK_FAILED --> [*]
   FALLBACK_EXPIRED --> [*]
+  NO_DEVICE_REGISTERED --> [*]
 ```
 
 `DISPATCHING` is reported as `FALLBACK_PENDING` by the API. Events that arrive after a fallback was claimed are stored

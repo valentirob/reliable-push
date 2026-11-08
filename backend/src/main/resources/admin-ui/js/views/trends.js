@@ -53,11 +53,11 @@ function legend(items) {
 }
 
 function dataTable(days) {
-  const head = ['Day', 'Registered', 'Cancelled', 'Delivered', 'Read', 'iOS', 'Android', 'FB trig.', 'FB failed', 'FB expired',
+  const head = ['Day', 'Registered', 'Cancelled', 'No device', 'Delivered', 'Read', 'iOS', 'Android', 'FB trig.', 'FB failed', 'FB expired',
     'p50', 'p95', 'Delivery', 'Read rate', 'FB rate'];
   const rows = days.slice().reverse().map((d) => el('tr', { class: d.live ? 'live-day' : null },
     el('td', { text: d.day + (d.live ? ' (live)' : '') }),
-    [d.registered, d.cancelled, d.delivered, d.read, d.deliveredIos, d.deliveredAndroid, d.fallbackTriggered,
+    [d.registered, d.cancelled, d.noDeviceRegistered, d.delivered, d.read, d.deliveredIos, d.deliveredAndroid, d.fallbackTriggered,
       d.fallbackFailed, d.fallbackExpired].map((v) => el('td', { class: 'num', text: dash(v) })),
     el('td', { class: 'num', text: fmtMs(d.deliveryP50Ms) }), el('td', { class: 'num', text: fmtMs(d.deliveryP95Ms) }),
     el('td', { class: 'num', text: fmtRate(d.deliveryRate) }), el('td', { class: 'num', text: fmtRate(d.readRate) }),

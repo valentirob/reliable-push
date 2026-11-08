@@ -25,6 +25,7 @@ class DailyStatsRepository {
             select a.app_id,
                    count(n.id) as registered,
                    count(n.id) filter (where n.state = 'CANCELLED') as cancelled,
+                   count(n.id) filter (where n.state = 'NO_DEVICE_REGISTERED') as no_device_registered,
                    count(n.id) filter (where n.delivered_at is not null) as delivered,
                    count(n.id) filter (where n.read_at is not null) as read,
                    count(n.id) filter (where n.delivered_at is not null and p.platform = 'IOS') as delivered_ios,
@@ -74,13 +75,15 @@ class DailyStatsRepository {
         jdbc.sql("""
                         insert into daily_stats (day, app_id, registered, cancelled, delivered, read, delivered_ios,
                             delivered_android, fallback_triggered, fallback_failed, fallback_expired,
-                            delivery_p50_ms, delivery_p95_ms, computed_at)
+                            delivery_p50_ms, delivery_p95_ms, computed_at, no_device_registered)
                         select cast(:day as date), s.app_id, s.registered, s.cancelled, s.delivered, s.read,
                                s.delivered_ios, s.delivered_android, s.fallback_triggered, s.fallback_failed,
-                               s.fallback_expired, s.delivery_p50_ms, s.delivery_p95_ms, :computedAt
+                               s.fallback_expired, s.delivery_p50_ms, s.delivery_p95_ms, :computedAt,
+                               s.no_device_registered
                         from (%s) s
                         on conflict (day, app_id) do update set
                             registered = excluded.registered, cancelled = excluded.cancelled,
+                            no_device_registered = excluded.no_device_registered,
                             delivered = excluded.delivered, read = excluded.read,
                             delivered_ios = excluded.delivered_ios, delivered_android = excluded.delivered_android,
                             fallback_triggered = excluded.fallback_triggered,
@@ -159,6 +162,7 @@ class DailyStatsRepository {
                 new Counts(
                         rs.getInt("registered"),
                         rs.getInt("cancelled"),
+                        rs.getInt("no_device_registered"),
                         rs.getInt("delivered"),
                         rs.getInt("read"),
                         rs.getInt("fallback_triggered"),

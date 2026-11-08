@@ -216,6 +216,25 @@ class ReliablePushPropertiesTest {
     }
 
     @Test
+    void deviceTokenEventsGraceDefaultsTo90DaysAllowsZeroAndRejectsNegative() {
+        runner.withPropertyValues(asProperties(AppFixtures.minimalApp("shop", "k-123"))).run(context ->
+                assertThat(context.getBean(AppRegistry.class).byId("shop").orElseThrow().deviceTokenEventsGrace())
+                        .isEqualTo(Duration.ofDays(90)));
+        runner.withPropertyValues(asProperties(shop(m -> m.put(SHOP + "device-token-events-grace", "0")))).run(context -> {
+            assertThat(context).hasNotFailed();
+            assertThat(context.getBean(AppRegistry.class).byId("shop").orElseThrow().deviceTokenEventsGrace())
+                    .isEqualTo(Duration.ZERO);
+        });
+        runner.withPropertyValues(asProperties(shop(m -> m.put(SHOP + "device-token-events-grace", "30")))).run(context ->
+                assertThat(context.getBean(AppRegistry.class).byId("shop").orElseThrow().deviceTokenEventsGrace())
+                        .isEqualTo(Duration.ofDays(30)));
+        runner.withPropertyValues(asProperties(shop(m -> m.put(SHOP + "device-token-events-grace", "-1")))).run(context -> {
+            assertThat(context).hasFailed();
+            assertThat(rootMessage(context.getStartupFailure())).contains("device-token-events-grace must not be negative");
+        });
+    }
+
+    @Test
     void workerMaxConcurrencyDefaultsToTheBatchSizeAndMustBePositive() {
         Map<String, Object> p = AppFixtures.minimalApp("shop", "k-123");
 

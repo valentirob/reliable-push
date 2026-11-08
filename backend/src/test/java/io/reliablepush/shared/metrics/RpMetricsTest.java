@@ -21,7 +21,9 @@ class RpMetricsTest {
 
     @Test
     void everyKnownTagCombinationExistsAtZeroFromTheStart() {
-        assertThat(counter("rp.notifications.registered")).isZero();
+        assertThat(counter("rp.notifications.registered", "outcome", "pending")).isZero();
+        assertThat(counter("rp.notifications.registered", "outcome", "no_device_registered")).isZero();
+        assertThat(registry.get("rp.notification.registration").timer().count()).isZero();
         for (String type : new String[] {"DELIVERED", "READ"}) {
             for (String late : new String[] {"true", "false"}) {
                 assertThat(counter("rp.events", "type", type, "late", late)).isZero();
@@ -35,7 +37,10 @@ class RpMetricsTest {
 
     @Test
     void countsPerTagCombination() {
-        metrics.notificationRegistered();
+        metrics.notificationRegistered("pending");
+        metrics.notificationRegistered("no_device_registered");
+        metrics.notificationRegistered("no_device_registered");
+        metrics.notificationRegistration().record(Duration.ofMillis(3));
         metrics.event(EventType.DELIVERED, false);
         metrics.event(EventType.READ, true);
         metrics.event(EventType.READ, true);
@@ -44,7 +49,9 @@ class RpMetricsTest {
         metrics.fallback("expired");
         metrics.webhookLatency().record(Duration.ofMillis(5));
 
-        assertThat(counter("rp.notifications.registered")).isEqualTo(1);
+        assertThat(counter("rp.notifications.registered", "outcome", "pending")).isEqualTo(1);
+        assertThat(counter("rp.notifications.registered", "outcome", "no_device_registered")).isEqualTo(2);
+        assertThat(registry.get("rp.notification.registration").timer().count()).isEqualTo(1);
         assertThat(counter("rp.events", "type", "DELIVERED", "late", "false")).isEqualTo(1);
         assertThat(counter("rp.events", "type", "DELIVERED", "late", "true")).isZero();
         assertThat(counter("rp.events", "type", "READ", "late", "true")).isEqualTo(2);
@@ -52,6 +59,11 @@ class RpMetricsTest {
         assertThat(counter("rp.fallback", "outcome", "failed")).isZero();
         assertThat(counter("rp.fallback", "outcome", "expired")).isEqualTo(2);
         assertThat(registry.get("rp.webhook.latency").timer().count()).isEqualTo(1);
+    }
+
+    @Test
+    void unknownRegistrationOutcomeIsRejected() {
+        assertThatThrownBy(() -> metrics.notificationRegistered("PENDING")).isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test

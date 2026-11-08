@@ -134,6 +134,9 @@ public class AppRegistry {
         if (p.deviceTokenValidity().isZero() || p.deviceTokenValidity().isNegative()) {
             throw new IllegalStateException(base + "device-token-validity must be positive");
         }
+        if (p.deviceTokenEventsGrace().isNegative()) {
+            throw new IllegalStateException(base + "device-token-events-grace must not be negative");
+        }
         if (f.httpTimeout().isZero() || f.httpTimeout().isNegative()) {
             throw new IllegalStateException(base + "fallback.http-timeout must be positive");
         }
@@ -143,6 +146,7 @@ public class AppRegistry {
                 p.senderApiKeySha256(),
                 new AppConfig.Identity(id.type(), id.issuer(), id.audience(), id.userClaim(), id.jwksUri(), grantSecret),
                 p.deviceTokenValidity(),
+                p.deviceTokenEventsGrace(),
                 p.defaultPolicy(),
                 p.defaultTimeoutMinutes(),
                 new AppConfig.RateLimits(p.rateLimits().devicePerMinute(), p.rateLimits().senderPerMinute()),

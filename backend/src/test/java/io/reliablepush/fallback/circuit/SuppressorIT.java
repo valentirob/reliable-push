@@ -527,8 +527,8 @@ class SuppressorIT extends PostgresTestBase {
 
         UUID deviceId = UUID.randomUUID();
         jdbc.sql("""
-                insert into device (id, app_id, user_id, platform, token_version, created_at, last_seen_at)
-                values (?, 'supa', 'u-0', 'ANDROID', 0, now(), now())
+                insert into device (id, app_id, user_id, platform, token_version, created_at, last_seen_at, token_expires_at)
+                values (?, 'supa', 'u-0', 'ANDROID', 0, now(), now(), now() + interval '90 days')
                 """).param(deviceId).update();
         EventBatchResult result = tracking.process(new DevicePrincipal(A, "u-0", deviceId, 0),
                 List.of(new DeviceEvent(id, EventType.DELIVERED, clock.instant())));

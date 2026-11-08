@@ -1,7 +1,7 @@
 import { searchNotifications } from '../api.js';
 import { chip, el, fmtTime, labelled, link, message, option } from '../dom.js';
 
-const STATES = ['PENDING', 'DELIVERED', 'READ', 'FALLBACK_PENDING', 'FALLBACK_TRIGGERED', 'FALLBACK_FAILED', 'FALLBACK_EXPIRED', 'CANCELLED'];
+const STATES = ['PENDING', 'DELIVERED', 'READ', 'FALLBACK_PENDING', 'FALLBACK_TRIGGERED', 'FALLBACK_FAILED', 'FALLBACK_EXPIRED', 'CANCELLED', 'NO_DEVICE_REGISTERED'];
 
 function isoOrEmpty(v) {
   if (!v) return '';

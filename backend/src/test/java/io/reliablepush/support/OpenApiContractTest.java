@@ -29,6 +29,20 @@ class OpenApiContractTest {
     }
 
     @Test
+    void notificationRegistrationRequiresTheSendersTrackingId() {
+        OpenApiAssert.assertRequestMatchesContract("POST", "/v1/notifications",
+                "{\"trackingId\":\"" + TID + "\",\"userId\":\"u\",\"fallback\":{}}", "k", null);
+        assertThat(OpenApiAssert.validateRequest("POST", "/v1/notifications", "{\"userId\":\"u\",\"fallback\":{}}", "k", null)
+                .hasErrors()).as("trackingId is required").isTrue();
+        assertThat(OpenApiAssert.validateRequest("POST", "/v1/notifications",
+                        "{\"trackingId\":\"nope\",\"userId\":\"u\",\"fallback\":{}}", "k", null)
+                .hasErrors()).as("trackingId is a UUID").isTrue();
+        OpenApiAssert.assertMatchesContract("POST", "/v1/notifications", 201, "{\"trackingId\":\"" + TID + "\",\"userId\":\"u\","
+                + "\"state\":\"NO_DEVICE_REGISTERED\",\"policy\":\"NOT_DELIVERED\",\"timeoutMinutes\":10,"
+                + "\"createdAt\":\"2026-11-03T10:00:00Z\",\"dueAt\":null,\"closedAt\":\"2026-11-03T10:00:00Z\"}");
+    }
+
+    @Test
     void tokenRefreshAndRevoke() {
         OpenApiAssert.assertRequestMatchesContract("POST", "/v1/devices/token:refresh", null, null, "a.b.c");
         OpenApiAssert.assertMatchesContract(

@@ -66,12 +66,14 @@ public class DeviceService {
         String userId = verifyCredential(app, request.idToken()).userId();
         enforceRegisterLimit(app, userId);
         Instant now = clock.instant().truncatedTo(ChronoUnit.MICROS);
+        Instant expiresAt = tokenExpiry(app, now);
 
         UUID deviceId = null;
         int version = 0;
         if (request.deviceId() != null) {
             // only a device of this very app and user is reused; any other id (unknown, foreign) is never adopted
-            Optional<Integer> bumped = repository.reRegister(request.deviceId(), app.appId(), userId, request.platform(), now);
+            Optional<Integer> bumped = repository.reRegister(
+                    request.deviceId(), app.appId(), userId, request.platform(), now, expiresAt);
             if (bumped.isPresent()) {
                 deviceId = request.deviceId();
                 version = bumped.get();
@@ -80,10 +82,10 @@ public class DeviceService {
         }
         if (deviceId == null) {
             deviceId = UUID.randomUUID();
-            repository.insert(new Device(deviceId, app.appId(), userId, request.platform(), 0, now, now, null));
+            repository.insert(new Device(deviceId, app.appId(), userId, request.platform(), 0, now, now, null, expiresAt));
         }
 
-        DeviceTokenService.IssuedToken token = issue(app, userId, deviceId, version, now);
+        DeviceTokenService.IssuedToken token = issue(app, userId, deviceId, version, now, expiresAt);
         logDevice("device.registered", app.appId(), deviceId, userId);
         return new DeviceTokenResponse(deviceId, token.token(), token.expiresAt());
     }
@@ -91,17 +93,19 @@ public class DeviceService {
     /** Issues a new token with the same version; the old one stays valid until its own expiry. */
     public DeviceTokenResponse refresh(DevicePrincipal principal) {
         Instant now = clock.instant().truncatedTo(ChronoUnit.MICROS);
-        // conditional on the version of the presented token: a token that lost against a re-registration within the
-        // cache TTL cannot be exchanged for a current one
-        if (!repository.touch(principal.deviceId(), principal.appId(), principal.userId(), principal.tokenVersion(), now)) {
-            activeCache.evict(principal.deviceId());
-            throw new UnauthorizedException(TOKEN_REJECTED, DEVICE_CHALLENGE);
-        }
         // DeviceAuthFilter only admits tokens of configured apps; the registry is immutable, so this never fires
         AppConfig app = apps.byId(principal.appId())
                 .orElseThrow(() -> new UnauthorizedException(TOKEN_REJECTED, DEVICE_CHALLENGE));
+        Instant expiresAt = tokenExpiry(app, now);
+        // conditional on the version of the presented token: a token that lost against a re-registration within the
+        // cache TTL cannot be exchanged for a current one
+        if (!repository.touchForRefresh(
+                principal.deviceId(), principal.appId(), principal.userId(), principal.tokenVersion(), now, expiresAt)) {
+            activeCache.evict(principal.deviceId());
+            throw new UnauthorizedException(TOKEN_REJECTED, DEVICE_CHALLENGE);
+        }
         DeviceTokenService.IssuedToken token =
-                issue(app, principal.userId(), principal.deviceId(), principal.tokenVersion(), now);
+                issue(app, principal.userId(), principal.deviceId(), principal.tokenVersion(), now, expiresAt);
         logDevice("device.token_refreshed", principal.appId(), principal.deviceId(), principal.userId());
         return new DeviceTokenResponse(null, token.token(), token.expiresAt());
     }
@@ -147,6 +151,17 @@ public class DeviceService {
     }
 
     /**
+     * Whether the user has at least one active device for the app (sidecar revision spec 2.3): not revoked, and its
+     * newest token unexpired or expired for less than the app's {@code device-token-events-grace}. Time comes from the
+     * application clock. An unknown app has no devices.
+     */
+    public boolean hasActiveDevice(String appId, String userId) {
+        return apps.byId(appId)
+                .map(app -> repository.hasActiveDevice(appId, userId, clock.instant(), app.deviceTokenEventsGrace()))
+                .orElse(false);
+    }
+
+    /**
      * Registration has no device token yet, so after the credential was verified it is limited per user:
      * {@code register:<appId>:<userHash>} gets the app's {@code device-per-minute} requests per minute. Nothing is
      * consumed before verification, so unauthenticated traffic cannot exhaust a bucket of a legitimate user.
@@ -178,8 +193,14 @@ public class DeviceService {
         }
     }
 
-    private DeviceTokenService.IssuedToken issue(AppConfig app, String userId, UUID deviceId, int version, Instant now) {
-        return tokens.issue(new DeviceClaims(app.appId(), userId, deviceId, version, now, now.plus(app.deviceTokenValidity())));
+    /** The {@code exp} of a token issued at {@code now}: whole seconds, exactly what {@link DeviceTokenService} signs. */
+    private static Instant tokenExpiry(AppConfig app, Instant now) {
+        return now.plus(app.deviceTokenValidity()).truncatedTo(ChronoUnit.SECONDS);
+    }
+
+    private DeviceTokenService.IssuedToken issue(
+            AppConfig app, String userId, UUID deviceId, int version, Instant now, Instant expiresAt) {
+        return tokens.issue(new DeviceClaims(app.appId(), userId, deviceId, version, now, expiresAt));
     }
 
     private static void logDevice(String action, String appId, UUID deviceId, String userId) {

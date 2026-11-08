@@ -65,6 +65,7 @@ class OverviewQuery {
             String window,
             int registered,
             int cancelled,
+            int noDeviceRegistered,
             int delivered,
             int read,
             int fallbackTriggered,
@@ -76,7 +77,7 @@ class OverviewQuery {
             Now now) {}
 
     private static final Now NO_BACKLOG = new Now(0, 0, 0, null);
-    private static final Counts NO_COUNTS = new Counts(0, 0, 0, 0, 0, 0, 0);
+    private static final Counts NO_COUNTS = new Counts(0, 0, 0, 0, 0, 0, 0, 0);
 
     private final JdbcClient jdbc;
     private final Clock clock;
@@ -99,6 +100,7 @@ class OverviewQuery {
                             window.external,
                             c.registered(),
                             c.cancelled(),
+                            c.noDeviceRegistered(),
                             c.delivered(),
                             c.read(),
                             c.fallbackTriggered(),
@@ -118,6 +120,7 @@ class OverviewQuery {
                         select app_id,
                                count(*) as registered,
                                count(*) filter (where state = 'CANCELLED') as cancelled,
+                               count(*) filter (where state = 'NO_DEVICE_REGISTERED') as no_device_registered,
                                count(*) filter (where delivered_at is not null) as delivered,
                                count(*) filter (where read_at is not null) as read,
                                count(*) filter (where state = 'FALLBACK_TRIGGERED') as fallback_triggered,
@@ -135,6 +138,7 @@ class OverviewQuery {
                             new Counts(
                                     rs.getInt("registered"),
                                     rs.getInt("cancelled"),
+                                    rs.getInt("no_device_registered"),
                                     rs.getInt("delivered"),
                                     rs.getInt("read"),
                                     rs.getInt("fallback_triggered"),

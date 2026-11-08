@@ -46,8 +46,8 @@ class TrackingServiceIT extends PostgresTestBase {
         String userId = "user-" + UUID.randomUUID();
         UUID deviceId = UUID.randomUUID();
         jdbc.sql("""
-                insert into device (id, app_id, user_id, platform, token_version, created_at, last_seen_at)
-                values (?, ?, ?, 'ANDROID', 0, now(), now())
+                insert into device (id, app_id, user_id, platform, token_version, created_at, last_seen_at, token_expires_at)
+                values (?, ?, ?, 'ANDROID', 0, now(), now(), now() + interval '90 days')
                 """).params(deviceId, APP, userId).update();
         UUID trackingId = UUID.randomUUID();
         Instant now = Instant.now().truncatedTo(ChronoUnit.MICROS);

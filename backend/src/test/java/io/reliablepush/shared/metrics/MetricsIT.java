@@ -97,7 +97,10 @@ class MetricsIT extends PostgresTestBase {
     }
 
     private ResponseEntity<String> register(String userId, String externalId, int timeoutMinutes) {
-        String body = "{\"userId\":\"" + userId + "\",\"externalId\":\"" + externalId + "\",\"policy\":\"NOT_DELIVERED\","
+        // one tracking id per external id, so a replay of the same external id is a replay of the same registration
+        String trackingId = UUID.nameUUIDFromBytes(externalId.getBytes(java.nio.charset.StandardCharsets.UTF_8)).toString();
+        String body = "{\"trackingId\":\"" + trackingId + "\",\"userId\":\"" + userId + "\",\"externalId\":\""
+                + externalId + "\",\"policy\":\"NOT_DELIVERED\","
                 + "\"timeoutMinutes\":" + timeoutMinutes + ",\"fallback\":{\"sms\":\"hi\"}}";
         return http.post().uri("/v1/notifications")
                 .contentType(MediaType.APPLICATION_JSON)
@@ -132,8 +135,8 @@ class MetricsIT extends PostgresTestBase {
         String user = "user-" + UUID.randomUUID();
         UUID deviceId = UUID.randomUUID();
         jdbc.sql("""
-                insert into device (id, app_id, user_id, platform, token_version, created_at, last_seen_at)
-                values (?, 'shop', ?, 'ANDROID', 0, now(), now())
+                insert into device (id, app_id, user_id, platform, token_version, created_at, last_seen_at, token_expires_at)
+                values (?, 'shop', ?, 'ANDROID', 0, now(), now(), now() + interval '90 days')
                 """).params(deviceId, user).update();
         Instant now = Instant.now();
         String bearer = tokens.issue(new DeviceClaims("shop", user, deviceId, 0, now, now.plus(Duration.ofDays(1)))).token();
@@ -141,7 +144,9 @@ class MetricsIT extends PostgresTestBase {
         // every series is there from the start, before anything happened
         String before = scrape();
         assertThat(before)
-                .contains("rp_notifications_registered_total")
+                .contains("rp_notifications_registered_total{outcome=\"pending\"}")
+                .contains("rp_notifications_registered_total{outcome=\"no_device_registered\"}")
+                .contains("rp_notification_registration_seconds_bucket{le=\"1.0\"}")
                 .contains("rp_events_total{late=\"false\",type=\"DELIVERED\"}")
                 .contains("rp_events_total{late=\"true\",type=\"DELIVERED\"}")
                 .contains("rp_events_total{late=\"false\",type=\"READ\"}")
@@ -157,7 +162,8 @@ class MetricsIT extends PostgresTestBase {
                 .contains("rp_fallback_circuit_transitions_total{app=\"shop\",transition=\"FORCED\"}")
                 .contains("rp_fallback_circuit_transitions_total{app=\"shop\",transition=\"FORCE_ENDED\"}")
                 .contains("rp_fallback_circuit_check_failed_total");
-        double registered = value(before, "rp_notifications_registered_total");
+        double registered = value(before, "rp_notifications_registered_total{outcome=\"pending\"}");
+        double timed = value(before, "rp_notification_registration_seconds_count");
         double deliveredOnTime = value(before, "rp_events_total{late=\"false\",type=\"DELIVERED\"}");
         double deliveredLate = value(before, "rp_events_total{late=\"true\",type=\"DELIVERED\"}");
         double triggered = value(before, "rp_fallback_total{outcome=\"triggered\"}");
@@ -187,7 +193,8 @@ class MetricsIT extends PostgresTestBase {
         assertThat(postEvent(bearer, trackingB, "DELIVERED")).isEqualTo(200);
 
         String after = scrape();
-        assertThat(value(after, "rp_notifications_registered_total") - registered).isEqualTo(2.0);
+        assertThat(value(after, "rp_notifications_registered_total{outcome=\"pending\"}") - registered).isEqualTo(2.0);
+        assertThat(value(after, "rp_notification_registration_seconds_count") - timed).isEqualTo(3.0);
         assertThat(value(after, "rp_events_total{late=\"false\",type=\"DELIVERED\"}") - deliveredOnTime).isEqualTo(1.0);
         assertThat(value(after, "rp_events_total{late=\"true\",type=\"DELIVERED\"}") - deliveredLate).isEqualTo(1.0);
         // rows of other ITs may be claimed by the same ticks: the counter equals what the webhook actually received

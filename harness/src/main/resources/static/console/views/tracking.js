@@ -16,7 +16,7 @@ export function mount(root, ctx) {
     if (cell.target === null || cell.target === undefined) { cell.textContent = ''; return; }
     cell.textContent = fmtDuration(cell.target - now);
   }
-  const closed = (s) => ['CANCELLED', 'FALLBACK_TRIGGERED', 'FALLBACK_FAILED', 'FALLBACK_EXPIRED', 'READ'].includes(s);
+  const closed = (s) => ['CANCELLED', 'FALLBACK_TRIGGERED', 'FALLBACK_FAILED', 'FALLBACK_EXPIRED', 'READ', 'NO_DEVICE_REGISTERED'].includes(s);
 
   function renderRow(n) {
     let r = rows.get(n.trackingId);

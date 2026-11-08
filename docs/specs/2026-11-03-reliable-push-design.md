@@ -379,7 +379,7 @@ until the longest `device-token-validity` has elapsed, then remove it. The full 
 ## 9. Operations
 
 - Java 21 (virtual threads), Spring Boot 4.x, Maven wrapper, Flyway, Actuator (`/actuator/health/{liveness,readiness}`), Micrometer Prometheus.
-- Metrics: `rp_notifications_registered_total`, `rp_events_total{type,late}`, `rp_fallback_total{outcome=triggered|failed|expired}`, `rp_webhook_latency_seconds`, `rp_due_backlog`.
+- Metrics: `rp_notifications_registered_total{outcome=pending|no_device_registered}`, `rp_notification_registration_seconds` (sidecar revision spec), `rp_events_total{type,late}`, `rp_fallback_total{outcome=triggered|failed|expired}`, `rp_webhook_latency_seconds`, `rp_due_backlog`.
 
 ### 9.1 Logging
 
@@ -395,7 +395,7 @@ until the longest `device-token-validity` has elapsed, then remove it. The full 
 | Event | Emitted when |
 |---|---|
 | `api.request` | every HTTP request completes (access log: method, path template, status, duration, app, outcome) |
-| `notification.registered` / `notification.duplicate` / `notification.cancelled` | sender API |
+| `notification.registered` / `notification.no_device_registered` / `notification.duplicate` / `notification.cancelled` | sender API |
 | `device.registered` / `device.token_refreshed` / `device.revoked` | device API |
 | `tracking.event_accepted` (with `rp.event_type`, `rp.late`) / `tracking.event_ignored` (duplicate) | `/v1/events` |
 | `auth.failed` (WARN, reason code only) / `authz.denied` (WARN) / `rate_limit.exceeded` (WARN) | security filters |

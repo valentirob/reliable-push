@@ -229,8 +229,8 @@ class FallbackSchedulerIT extends PostgresTestBase {
     private DevicePrincipal device(String appId, String userId) {
         UUID deviceId = UUID.randomUUID();
         jdbc.sql("""
-                insert into device (id, app_id, user_id, platform, token_version, created_at, last_seen_at)
-                values (?, ?, ?, 'ANDROID', 0, now(), now())
+                insert into device (id, app_id, user_id, platform, token_version, created_at, last_seen_at, token_expires_at)
+                values (?, ?, ?, 'ANDROID', 0, now(), now(), now() + interval '90 days')
                 """).params(deviceId, appId, userId).update();
         return new DevicePrincipal(appId, userId, deviceId, 0);
     }

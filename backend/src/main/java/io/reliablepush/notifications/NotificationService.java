@@ -2,6 +2,7 @@ package io.reliablepush.notifications;
 
 import io.reliablepush.apps.AppConfig;
 import io.reliablepush.apps.AppRegistry;
+import io.reliablepush.devices.DeviceService;
 import io.reliablepush.shared.logging.EventLog;
 import io.reliablepush.shared.logging.UserHash;
 import io.reliablepush.shared.metrics.RpMetrics;
@@ -19,7 +20,7 @@ import java.util.UUID;
 import org.springframework.stereotype.Service;
 
 /**
- * Sender-side use cases (spec 4.1): register (idempotent per {@code externalId}), read, list and cancel. Every method
+ * Sender-side use cases (spec 4.1): register (idempotent per sender {@code trackingId}), read, list and cancel. Every method
  * is scoped to the calling app; a notification of another app is indistinguishable from a missing one.
  */
 @Service
@@ -34,10 +35,17 @@ public class NotificationService {
     private final TimeScale timeScale;
     private final Clock clock;
     private final RpMetrics metrics;
+    private final DeviceService devices;
 
     public NotificationService(
-            NotificationRepository repository, AppRegistry apps, TimeScale timeScale, Clock clock, RpMetrics metrics) {
+            NotificationRepository repository,
+            AppRegistry apps,
+            TimeScale timeScale,
+            Clock clock,
+            RpMetrics metrics,
+            DeviceService devices) {
         this.repository = repository;
+        this.devices = devices;
         this.apps = apps;
         this.timeScale = timeScale;
         this.clock = clock;
@@ -45,31 +53,57 @@ public class NotificationService {
     }
 
     /**
-     * Registers a notification, or returns the existing one when the app already registered the same
-     * {@code externalId} (also under concurrent requests: the insert is a single {@code ON CONFLICT DO NOTHING}).
+     * Registers a notification under the sender's {@code trackingId} (sidecar revision spec 2.1), or returns the
+     * existing one when the app already registered that {@code trackingId}: the first registration wins, other fields
+     * are not compared. Race-safe: the insert is a single {@code ON CONFLICT DO NOTHING}, and the loser reads the
+     * winner. A user without an active device gets a row stored closed as {@code NO_DEVICE_REGISTERED} (spec 2.2).
+     *
+     * @throws ConflictException when the {@code trackingId} belongs to another app, or when the {@code externalId}
+     *     belongs to a row with another {@code trackingId}
      */
-    public NotificationView register(String appId, RegisterNotificationRequest request) {
+    public NotificationView register(String appId, UUID trackingId, RegisterNotificationRequest request) {
         AppConfig app = apps.byId(appId).orElseThrow(() -> new IllegalStateException("authenticated app is not configured"));
         // microsecond precision is what PostgreSQL keeps, so the response equals what a later GET returns
         Instant now = clock.instant().truncatedTo(ChronoUnit.MICROS);
-        Notification notification = newNotification(UUID.randomUUID(), app, request, now, timeScale);
+        boolean tracked = devices.hasActiveDevice(appId, request.userId());
+        Notification notification = newNotification(trackingId, app, request, now, timeScale, tracked);
 
         if (repository.insert(notification)) {
-            metrics.notificationRegistered();
-            logEvent("notification.registered", notification);
+            if (tracked) {
+                metrics.notificationRegistered("pending");
+                logEvent("notification.registered", notification);
+            } else {
+                metrics.notificationRegistered("no_device_registered");
+                logEvent("notification.no_device_registered", notification);
+            }
             return NotificationView.of(notification);
         }
-        // not inserted: the app already has this externalId (insert never skips a row without one)
-        Notification existing = repository
-                .findByExternalId(appId, request.externalId())
-                .orElseThrow(() -> new IllegalStateException("notification vanished after an externalId conflict"));
+        Notification existing = existing(appId, trackingId, request.externalId());
         logEvent("notification.duplicate", existing);
         return NotificationView.of(existing);
     }
 
-    /** Builds the new row: app defaults for policy and timeout, {@code dueAt = now + timeout} on the (fast) clock. */
+    /** After a skipped insert: the app's row with this {@code trackingId}, provided nothing else conflicts. */
+    private Notification existing(String appId, UUID trackingId, String externalId) {
+        Optional<Notification> byId = repository.findById(trackingId);
+        Optional<Notification> byExternalId =
+                externalId == null ? Optional.empty() : repository.findByExternalId(appId, externalId);
+        if (byId.isPresent() && !byId.get().appId().equals(appId)) {
+            throw new ConflictException("The trackingId is already in use.");
+        }
+        if (byExternalId.isPresent() && !byExternalId.get().id().equals(trackingId)) {
+            throw new ConflictException("The externalId is already registered with another trackingId.");
+        }
+        // the insert only skips a row when one of its two unique keys is taken, and both checks above passed
+        return byId.orElseThrow(() -> new IllegalStateException("notification vanished after a conflict"));
+    }
+
+    /**
+     * Builds the new row: app defaults for policy and timeout. Tracked: {@code PENDING}, {@code dueAt = now + timeout}
+     * on the (fast) clock. Not tracked (no active device): {@code NO_DEVICE_REGISTERED}, closed at creation, never due.
+     */
     static Notification newNotification(
-            UUID id, AppConfig app, RegisterNotificationRequest request, Instant now, TimeScale timeScale) {
+            UUID id, AppConfig app, RegisterNotificationRequest request, Instant now, TimeScale timeScale, boolean tracked) {
         FallbackPolicy policy = request.policy() != null ? request.policy() : FallbackPolicy.valueOf(app.defaultPolicy());
         int timeoutMinutes = request.timeoutMinutes() != null ? request.timeoutMinutes() : app.defaultTimeoutMinutes();
         return new Notification(
@@ -80,12 +114,12 @@ public class NotificationService {
                 policy,
                 timeoutMinutes,
                 request.fallback().toString(),
-                NotificationState.PENDING,
+                tracked ? NotificationState.PENDING : NotificationState.NO_DEVICE_REGISTERED,
                 now,
-                now.plus(timeScale.minutes(timeoutMinutes)),
+                tracked ? now.plus(timeScale.minutes(timeoutMinutes)) : null,
                 null,
                 null,
-                null);
+                tracked ? null : now);
     }
 
     public Optional<NotificationView> get(String appId, UUID id) {
@@ -115,7 +149,8 @@ public class NotificationService {
 
     /**
      * Cancels a {@code PENDING} or {@code DELIVERED} notification that is not closed yet. A missing notification, or one of another app, is
-     * {@link NotFoundException}; any other state is {@link ConflictException}.
+     * {@link NotFoundException}; any other state (also {@code NO_DEVICE_REGISTERED}, final from the start) is
+     * {@link ConflictException} and leaves the row unchanged.
      */
     public void cancel(String appId, UUID id) {
         if (repository.cancel(id, appId, clock.instant().truncatedTo(ChronoUnit.MICROS))) {

@@ -43,6 +43,14 @@ class StaticAdminPageTest {
     }
 
     @Test
+    void searchOffersEveryNotificationState() {
+        String src = read("js/views/search.js");
+        for (io.reliablepush.notifications.NotificationState state : io.reliablepush.notifications.NotificationState.values()) {
+            assertThat(src).contains("'" + state.external() + "'");
+        }
+    }
+
+    @Test
     void searchResultLinksUseTheAppOfTheSearchNotTheSelector() {
         // the selector may have changed since the search: a row's links must point to the app that produced it
         String src = read("js/views/search.js");

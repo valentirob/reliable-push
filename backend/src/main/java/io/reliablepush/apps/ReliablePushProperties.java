@@ -26,7 +26,8 @@ import org.springframework.validation.annotation.Validated;
  * {@code env:NAME} references.
  *
  * <p>A duration without a unit is read in the unit its key is about: minutes for {@code worker.lease} and
- * {@code fallback.backoff} ({@code 1,2,4,8} = 1, 2, 4, 8 minutes), days for {@code device-token-validity}, Spring's
+ * {@code fallback.backoff} ({@code 1,2,4,8} = 1, 2, 4, 8 minutes), days for {@code device-token-validity} and
+ * {@code device-token-events-grace}, Spring's
  * default milliseconds everywhere else. An explicit unit ({@code 30s}, {@code 2m}) always wins.
  */
 @Validated
@@ -107,6 +108,7 @@ public record ReliablePushProperties(
                     String senderApiKeySha256,
             @Valid @NotNull Identity identity,
             @DefaultValue("90d") @DurationUnit(ChronoUnit.DAYS) @NotNull Duration deviceTokenValidity,
+            @DefaultValue("90d") @DurationUnit(ChronoUnit.DAYS) @NotNull Duration deviceTokenEventsGrace,
             @DefaultValue("NOT_DELIVERED") @Pattern(regexp = "NOT_DELIVERED|NOT_READ") String defaultPolicy,
             @DefaultValue("10") @Min(1) int defaultTimeoutMinutes,
             @Valid @DefaultValue RateLimits rateLimits,

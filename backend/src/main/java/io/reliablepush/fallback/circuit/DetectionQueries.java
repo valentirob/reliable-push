@@ -13,7 +13,8 @@ import org.springframework.stereotype.Component;
  * <p>Due set: the app's rows with {@code state in (PENDING, DELIVERED, DISPATCHING)} and {@code due_at in (now - window,
  * now]} (partial index {@code notification_due}), plus the rows closed {@code FALLBACK_TRIGGERED} or
  * {@code FALLBACK_FAILED} with {@code closed_at > now - window} (partial index {@code notification_closed}). Cohort and
- * resumed read {@code notification_app_created}.
+ * resumed read {@code notification_app_created}; both leave out {@code NO_DEVICE_REGISTERED} rows, which are never
+ * tracked (sidecar revision spec 2.2) and would otherwise read as missing deliveries.
  */
 @Component
 public class DetectionQueries {
@@ -52,7 +53,7 @@ public class DetectionQueries {
 
     /**
      * The delivered share ({@code delivered_at} set, so also NOT_READ rows the device confirmed) of the cohort: the
-     * app's notifications created between the oldest and newest {@code created_at} of {@code minDue} due rows, newest
+     * app's tracked notifications created between the oldest and newest {@code created_at} of {@code minDue} due rows, newest
      * first, at most {@value #MAX_ROWS}.
      *
      * @return {@code null} when fewer than {@code minDue} rows are due
@@ -67,6 +68,7 @@ public class DetectionQueries {
                               select count(*) as total, count(c.delivered_at) as delivered
                                 from (select delivered_at from notification
                                        where app_id = :app and created_at >= span.lo and created_at <= span.hi
+                                         and state <> 'NO_DEVICE_REGISTERED'
                                        order by created_at desc
                                        limit :max) c
                           ) cohort
@@ -91,7 +93,7 @@ public class DetectionQueries {
         long delivered = jdbc.sql("""
                         select count(c.delivered_at) from (
                             select delivered_at from notification
-                             where app_id = :app and created_at > :since
+                             where app_id = :app and created_at > :since and state <> 'NO_DEVICE_REGISTERED'
                              order by created_at desc
                              limit :max) c
                         """)
