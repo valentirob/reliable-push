@@ -1,5 +1,6 @@
 package io.reliablepush.android.internal
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.content.SharedPreferences
 import android.util.Base64
@@ -14,6 +15,9 @@ internal data class StoredRegistration(val deviceId: String, val token: DeviceTo
  * `renewalNeeded` is set when the events endpoint answered `401` (the token is past the backend's grace period or
  * revoked); `ensureRegistered` then renews the token. Saving a new token or clearing the registration clears it.
  */
+// commit(), not apply(), on purpose: a push entry point may be killed as soon as it returns, so every write (token,
+// renewalNeeded, config) must be on disk before the call that made it returns.
+@SuppressLint("ApplySharedPref")
 internal class TokenStore(context: Context, private val cipher: TokenCipher) {
     private val prefs: SharedPreferences =
         context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)

@@ -61,7 +61,7 @@ internal object EnsureRegistration {
             }
         }
         val deliver: (String?) -> Unit = { idToken ->
-            if (answered.compareAndSet(false, true)) {
+            if (answered.compareAndSet(false, true) && isCurrent()) {
                 Sdk.cancelOnMain(timeout)
                 step {
                     if (idToken.isNullOrBlank()) finish(RegisterResult.NotLoggedIn) else complete(sdk, sdk.register(idToken))
@@ -78,8 +78,8 @@ internal object EnsureRegistration {
     }
 
     private fun Run.complete(sdk: Sdk, result: RegisterResult) {
-        finish(result)
-        if (result is RegisterResult.Success) sdk.flush()
+        // not when a logout ended the run meanwhile: the logout, queued next, revokes and clears what was stored
+        if (finish(result) && result is RegisterResult.Success) sdk.flush()
     }
 
     /** Runs [block] on the SDK thread; anything it throws ends the run `Failed(null)`. */
@@ -87,7 +87,7 @@ internal object EnsureRegistration {
         try {
             Sdk.execute {
                 try {
-                    block()
+                    if (isCurrent()) block() // a run ended meanwhile (logout) does nothing more
                 } catch (t: Throwable) {
                     SdkLog.warn("sdk.internal_error", "error" to t.javaClass.simpleName)
                     finish(RegisterResult.Failed(null))
@@ -99,13 +99,28 @@ internal object EnsureRegistration {
         }
     }
 
-    /** Ends this run (once; later calls, or calls after a newer run started, do nothing) and calls back every waiter. */
-    private fun Run.finish(result: RegisterResult) {
+    private fun Run.isCurrent(): Boolean = synchronized(lock) { current === this }
+
+    /**
+     * `logout`: ends the run in progress with [RegisterResult.NotLoggedIn]. Its later steps and a later `deliver` do
+     * nothing, so it cannot store a token for the logged-out user. A step already running finishes before the logout's
+     * own work, which runs after it on the SDK thread and clears what it stored.
+     */
+    fun cancel() {
+        synchronized(lock) { current }?.finish(RegisterResult.NotLoggedIn)
+    }
+
+    /**
+     * Ends this run (once; later calls, or calls after a newer run started or a logout, do nothing) and calls back every
+     * waiter. True when this call ended it.
+     */
+    private fun Run.finish(result: RegisterResult): Boolean {
         synchronized(lock) {
-            if (current !== this) return
+            if (current !== this) return false
             current = null
         }
         callbacks.forEach { callback -> if (callback != null) Sdk.onMain { callback(result) } }
+        return true
     }
 
     /** Test only: forgets a run left in progress. */

@@ -137,18 +137,21 @@ public object ReliablePush {
      * A message without the data key `rp_tid` is not the SDK's: `false`, nothing happens. A malformed `rp_tid` (not a
      * UUID) is ignored with a WARN: `false`. Otherwise, in this order (spec §3.4):
      * 1. the stored configuration and registration are looked up;
-     * 2. the gate: can the app show the notification (notifications enabled, `POST_NOTIFICATIONS` granted, the channel
-     *    present and not blocked)? If not, the notification is still handed to the system, which decides, and nothing
-     *    is recorded, so the backend's fallback decides;
-     * 3. `DELIVERED` is written to the on-disk queue and the retry job scheduled (disk only, a few milliseconds; when
+     * 2. the notification is built (with [ReliablePushOptions.customizer]), not posted yet;
+     * 3. the gate, on the notification's final channel: can the app show it (notifications enabled,
+     *    `POST_NOTIFICATIONS` granted, the channel present and neither it nor its group blocked)? If not, the
+     *    notification is still handed to the system, which decides, and nothing is recorded, so the backend's fallback
+     *    decides;
+     * 4. `DELIVERED` is written to the on-disk queue and the retry job scheduled (disk only, a few milliseconds; when
      *    called on the main thread the write runs on a background thread and this call waits for it, at most 500 ms);
-     * 4. the notification is posted on the calling thread, so it is visible when this returns;
-     * 5. the send is scheduled on the SDK thread (it happens after this returns).
+     * 5. the notification is posted on the calling thread, so it is visible when this returns;
+     * 6. the send is scheduled on the SDK thread (it happens after this returns).
      *
      * `DELIVERED` is on disk before the notification is posted, so the event survives the process being killed as soon
-     * as the push entry point returns. If the post then fails, the event stays: no fallback fires for that push (a
-     * missed fallback is preferred to a duplicate one). When the device is not registered the notification is shown but
-     * nothing is queued (WARN `tracking.not_registered`).
+     * as the push entry point returns. If posting then throws, the minimal notification below is posted and the event
+     * stays; should even that fail, no fallback fires for that push (a missed fallback is preferred to a duplicate
+     * one). When the device is not registered the notification is shown but nothing is queued (WARN
+     * `tracking.not_registered`).
      *
      * Display never depends on tracking: nothing thrown inside the SDK escapes (WARN `sdk.internal_error`). If anything
      * throws before the notification is posted, the SDK posts a minimal one instead (title and body, else the app label,
@@ -156,9 +159,13 @@ public object ReliablePush {
      *
      * Title: data `title`, else [fallbackTitle], else the app label. Body: data `body`, else [fallbackBody], else empty.
      *
-     * @return `true` when the notification was posted; `false` when the message is not the SDK's or could not be shown
-     *   (notifications disabled for the app, `POST_NOTIFICATIONS` denied, the channel set to none, or even the minimal
-     *   notification failed). The host may then show its own.
+     * @return `true` when the notification was posted. `false` when:
+     *   - the message is not the SDK's (no or malformed `rp_tid`);
+     *   - the gate is closed: notifications disabled for the app, `POST_NOTIFICATIONS` denied, notifications paused;
+     *   - the final channel is unusable: missing, set to none, or in a blocked group (also a channel the customizer
+     *     moved the notification to);
+     *   - even the minimal notification could not be posted.
+     *   Nothing is recorded in the first three cases. The host may then show its own notification.
      */
     public fun handle(
         context: Context,
@@ -184,7 +191,9 @@ public object ReliablePush {
             val current = stateFor(app)
             options = current?.options ?: DEFAULT_OPTIONS
             val p = posterFactory(app, options).also { poster = it }
-            val canShow = p.canShow().also { showable = it }
+            val notification = p.prepare(tid, titleOf(app, data, fallbackTitle), bodyOf(data, fallbackBody))
+            // the gate on the channel the notification will really use (the host's customizer may have moved it)
+            val canShow = p.canShow(notification.channelId ?: options.channelId).also { showable = it }
             if (current == null) {
                 SdkLog.warn("tracking.not_registered", "tid" to tid, "reason" to "not_configured")
             } else if (canShow) {
@@ -193,7 +202,7 @@ public object ReliablePush {
                     tracking = current.sdk
                 }
             }
-            val shown = p.post(tid, titleOf(app, data, fallbackTitle), bodyOf(data, fallbackBody)).also { posted = it }
+            val shown = p.notify(tid, notification).also { posted = it }
             tracking?.let { sdk -> Sdk.execute { sdk.flush() } }
             return canShow && shown
         } catch (t: Throwable) {
@@ -245,14 +254,16 @@ public object ReliablePush {
     }
 
     /**
-     * Logs this installation out: revokes the device token at the backend (best effort), then clears the token, the
-     * queued events and the retry job in any case. [callback] runs on the main thread with `true` when the backend
-     * confirmed the revoke (or nothing was registered) and `false` when it could not be reached or refused.
+     * Logs this installation out: ends an [ensureRegistered] run in progress ([RegisterResult.NotLoggedIn]), revokes
+     * the device token at the backend (best effort), then clears the token, the queued events and the retry job in any
+     * case. [callback] runs on the main thread with `true` when the backend confirmed the revoke (or nothing was
+     * registered) and `false` when it could not be reached or refused.
      *
      * @throws IllegalStateException if [configure] has not been called.
      */
     public fun logout(callback: ((Boolean) -> Unit)? = null) {
         val sdk = configured()
+        EnsureRegistration.cancel() // its callbacks get NotLoggedIn; a later deliver cannot register the old user
         Sdk.execute {
             val confirmed = try {
                 sdk.logout()

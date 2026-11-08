@@ -288,15 +288,15 @@ class ReliablePushTest {
         private val failPost: Boolean = false,
         private val failMinimal: Boolean = false,
     ) : NotificationPoster(context, options) {
-        override fun canShow(): Boolean {
+        override fun canShow(channelId: String): Boolean {
             steps.add("gate queued=${queued().size}")
-            return super.canShow()
+            return super.canShow(channelId)
         }
 
-        override fun post(trackingId: String, title: String, body: String): Boolean {
+        override fun notify(trackingId: String, notification: Notification): Boolean {
             steps.add("post delivered=${queued().contains(trackingId to "DELIVERED")} sent=${events().size}")
             if (failPost) throw IllegalStateException("post failed")
-            return super.post(trackingId, title, body)
+            return super.notify(trackingId, notification)
         }
 
         override fun postMinimal(trackingId: String, title: String, body: String) {
@@ -351,14 +351,38 @@ class ReliablePushTest {
     }
 
     @Test
-    fun postNotShownAfterPersistKeepsTheEvent() {
+    fun customizerMovingToAMissingChannelRecordsNothing() {
         registered()
-        eventsStatus = 503
-        // the host's customizer moves the notification to a channel that does not exist: the system would drop it
+        // the system would drop a notification on a channel that does not exist: the gate checks the final channel
         ReliablePush.configure(context, backend.baseUrl, "news", options.copy(customizer = { b, _ -> b.setChannelId("nope") }))
         assertFalse(ReliablePush.handle(context, push()))
         settle()
-        assertEquals(listOf(tid to "DELIVERED"), queued())
+        assertEquals(0, queueSize())
+        assertTrue(events().isEmpty())
+        assertTrue(warnings().any { it == "event=notification.not_shown reason=channel_missing" })
+    }
+
+    @Test
+    fun customizerMovingToABlockedChannelRecordsNothing() {
+        registered()
+        nm.createNotificationChannel(NotificationChannel("muted", "Muted", NotificationManager.IMPORTANCE_NONE))
+        ReliablePush.configure(context, backend.baseUrl, "news", options.copy(customizer = { b, _ -> b.setChannelId("muted") }))
+        assertFalse(ReliablePush.handle(context, push()))
+        settle()
+        assertEquals(0, queueSize())
+        assertTrue(events().isEmpty())
+    }
+
+    @Test
+    fun blockedSdkChannelButOpenCustomizerChannelIsRecordedAndShown() {
+        registered()
+        nm.createNotificationChannel(NotificationChannel("reliablepush_default", "Off", NotificationManager.IMPORTANCE_NONE))
+        nm.createNotificationChannel(NotificationChannel("loud", "Loud", NotificationManager.IMPORTANCE_HIGH))
+        ReliablePush.configure(context, backend.baseUrl, "news", options.copy(customizer = { b, _ -> b.setChannelId("loud") }))
+        assertTrue(ReliablePush.handle(context, push()))
+        assertEquals("loud", posted()!!.channelId)
+        settle()
+        assertEquals(listOf(tid to "DELIVERED"), events())
     }
 
     @Test

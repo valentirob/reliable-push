@@ -258,6 +258,30 @@ class EnsureRegisteredTest {
     }
 
     @Test
+    fun logoutEndsTheRunInProgress() {
+        var pending: ((String?) -> Unit)? = null
+        val results = ArrayList<RegisterResult>()
+        val provider: (deliver: (String?) -> Unit) -> Unit = { deliver -> pending = deliver }
+        ReliablePush.ensureRegistered(provider) { results.add(it) }
+        ReliablePush.ensureRegistered(provider) { results.add(it) } // joined
+        settle()
+        var loggedOut: Boolean? = null
+        ReliablePush.logout { loggedOut = it }
+        settle()
+        assertEquals(listOf<RegisterResult>(RegisterResult.NotLoggedIn, RegisterResult.NotLoggedIn), results)
+        assertEquals(true, loggedOut)
+
+        pending!!("id-token") // the old user's token, too late: ignored
+        settle()
+        assertTrue(backend.requests.none { it.path == "/v1/devices" })
+        assertEquals(null, ReliablePush.deviceId)
+        assertEquals(null, store().load())
+
+        // a new run starts normally after the logout
+        assertEquals(RegisterResult.Success("dev-2"), ensure(provider("new-user-token")))
+    }
+
+    @Test
     fun returnsAtOnceAndCallsBackOnTheMainThread() {
         val seen = ArrayList<Boolean>()
         ReliablePush.ensureRegistered(provider("id-token")) { seen.add(Looper.myLooper() == Looper.getMainLooper()) }

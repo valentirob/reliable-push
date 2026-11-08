@@ -3,7 +3,7 @@
 The Android SDK (`io.reliablepush:reliable-push-android`, Kotlin, `minSdk 26`, `compileSdk 37`) tracks pushes that your
 backend sends through FCM: it posts the notification, reports `DELIVERED`, reports `READ` when the user taps it, and
 retries events that could not be sent. Runtime dependencies: Kotlin stdlib only (no AndroidX, OkHttp, WorkManager or
-coroutines); `firebase-messaging` is a `compileOnly` dependency, so your app supplies it. The release AAR is about 66 KB.
+coroutines); `firebase-messaging` is a `compileOnly` dependency, so your app supplies it. The release AAR is about 75 KB.
 
 Your backend registers each notification with reliable-push and puts the returned `trackingId` into the FCM message as
 `rp_tid`: see [integration-guide.md](integration-guide.md) §1 and §2. This page is the app side.
@@ -19,8 +19,9 @@ Your backend registers each notification with reliable-push and puts the returne
 If the reliable-push backend cannot be reached, your notifications are shown as usual and the events wait in the
 queue. The flow diagram is in [overview.md §7](overview.md#7-android-sdk).
 
-> **Status.** Version `0.1.2`, built and tested locally and in CI. It is not on Maven Central yet (`./gradlew
-> :reliablepush:publishToMavenLocal` installs it into `~/.m2`; releasing needs the maintainer's namespace and signing key).
+> **Status.** Version `0.2.0-SNAPSHOT` (in development; the last release is `0.1.2`), built and tested locally and in
+> CI. It is not on Maven Central yet (`./gradlew :reliablepush:publishToMavenLocal` installs it into `~/.m2`; releasing
+> needs the maintainer's namespace and signing key).
 
 ## 1. Add the library
 
@@ -71,7 +72,7 @@ ReliablePush.ensureRegistered({ deliver ->
     // called on the SDK thread only when an ID token is needed: fetch it without blocking, then deliver it once
     val user = auth.currentUser
     if (user == null) deliver(null)                                    // nobody logged in
-    else user.getIdToken(false).addOnCompleteListener { deliver(it.result?.token) }
+    else user.getIdToken(false).addOnCompleteListener { deliver(if (it.isSuccessful) it.result?.token else null) }
 }) { result ->                                                          // callback on the main thread
     when (result) {
         is RegisterResult.Success -> /* registered or renewed: result.deviceId */ Unit
@@ -97,7 +98,8 @@ in this order:
 A success stores the token and sends the queued events. Only one run happens at a time: a call during a run joins it
 (same result, its provider is not called). The provider is a callback because the SDK has no coroutines dependency:
 call `deliver` exactly once, from any thread; extra calls are ignored, and without a call within 30 s the result is
-`NotLoggedIn`. A provider that throws counts as `null`.
+`NotLoggedIn`. A provider that throws counts as `null`. `logout()` ends a run in progress: its callbacks get
+`NotLoggedIn`, and a `deliver` that comes later is ignored, so no token is stored for the user who logged out.
 
 `ReliablePush.register(idToken)` stays for an explicit registration (it always calls the backend). The ID token is
 your OIDC ID token (or a signed grant, as the harness uses). The device token that comes back is stored encrypted
@@ -136,25 +138,37 @@ app's code, so the SDK is hardened to show it whatever happens to tracking.
 1. checks `rp_tid` (without a valid one it returns at once and reads nothing else);
 2. looks up the stored configuration and registration (not configured or not registered: it shows the notification and
    records nothing, WARN `tracking.not_registered`);
-3. the gate: can the app show it (notifications enabled, `POST_NOTIFICATIONS` granted, channel present and not
+3. builds the notification, with your `customizer` (not posted yet);
+4. the gate, on the channel the notification will really use (your customizer may have moved it): can the app show it
+   (notifications enabled, `POST_NOTIFICATIONS` granted, not paused, the channel present and neither it nor its group
    blocked)? If not, the notification is still handed to the system, which decides, nothing is recorded and `handle`
-   returns `false` (section 6);
-4. writes `DELIVERED` to the on-disk queue and schedules the retry job (disk only, milliseconds);
-5. posts the notification on the calling thread;
-6. schedules the immediate send of `DELIVERED` on the SDK thread: one `POST /v1/events` with the stored token, no
+   returns `false` (section 6). So a customizer that moves the notification to a missing or blocked channel means no
+   `DELIVERED` and the fallback decides, while one that moves it from a blocked SDK channel to an open one is tracked;
+5. writes `DELIVERED` to the on-disk queue and schedules the retry job (disk only, milliseconds);
+6. posts the prepared notification on the calling thread;
+7. schedules the immediate send of `DELIVERED` on the SDK thread: one `POST /v1/events` with the stored token, no
    token renewal before or after.
 
 **Robustness.** The whole of `handle` runs inside a catch-all. If anything throws before the notification is posted
-(storage, queue, gate or the full post), the SDK posts a minimal notification instead: the title and body (else the app
-name) on the configured channel, with the `rp_tid` tap extra, without your customizer. It logs WARN
-`sdk.internal_error` with the exception's class name only. Only if even the minimal notification fails does `handle`
-return `false`, and your service may then show its own. `true` means the notification was posted.
+(storage, queue, building, gate or the post), the SDK posts a minimal notification instead: the title and body (else
+the app name) on the configured channel, with the `rp_tid` tap extra, without your customizer. It logs WARN
+`sdk.internal_error` with the exception's class name only.
+
+`true` means the notification was posted. `handle` returns `false` only when:
+- the message is not the SDK's (no or malformed `rp_tid`);
+- the gate is closed: notifications disabled for the app, `POST_NOTIFICATIONS` denied, or notifications paused;
+- the final channel is unusable: missing, set to none, or in a blocked group (including a channel your customizer
+  chose);
+- even the minimal notification could not be posted (also when its channel cannot be created).
+
+Nothing is recorded in the first three cases. In each case your service may show its own notification.
 
 **The trade-off: a missed fallback rather than a duplicate one.** `DELIVERED` is on disk before the post, so it
-survives the process being killed right after `handle`. The price: if the post itself fails after that (for example
-your customizer moves the notification to a channel that does not exist), the event is still sent and no fallback
-fires for that push. The maintainer chose this over the opposite risk, a fallback (SMS, email) for a push the user did
-see. Such a post failure is logged (`notification.not_posted` or `sdk.internal_error`).
+survives the process being killed right after `handle`. The price: if posting fails after that (the system throws
+while posting, and then the minimal notification fails too), the event is still sent and no fallback fires for that
+push. The gate runs on the final channel before anything is recorded, so this takes a failure of the platform itself,
+not a setting. The maintainer chose this over the opposite risk, a fallback (SMS, email) for a push the user did see.
+Such a failure is logged (`sdk.internal_error`).
 
 ## 5. Track opens in the launch activity
 
@@ -213,7 +227,9 @@ point of the product). `onMessageReceived` then returns `false` (WARN `notificat
 Tag `ReliablePush`, message `event=<name> key=value ...`. Names: `device.registered`, `token.refreshed` (only from
 `ensureRegistered`), `device.revoked`, `tracking.event_queued`, `tracking.event_sent`, and at WARN
 `tracking.event_dropped`, `tracking.not_registered`, `auth.failed`, `rate_limit.exceeded`, `token.unreadable`,
-`device.register_failed`, `notification.not_shown` (gate closed), `notification.not_posted`, `sdk.internal_error`
+`device.register_failed`, `notification.not_shown` (gate closed), `notification.not_posted`,
+`notification.channel_failed` (the minimal notification's channel could not be created), `tracking.persist_slow` (a
+main-thread `handle` waited 500 ms for the `DELIVERED` write and posted anyway), `sdk.internal_error`
 (an error caught inside the SDK; class name only). Below WARN is logged only when the
 host app is debuggable. Tokens, ID tokens, user ids and notification title or body are never logged; the `rp_tid` and the
 device id are.
@@ -265,7 +281,8 @@ own app's other SDKs.
 ## 12. Known limits
 
 - Notifications disabled (permission, app setting or channel): no notification, no `DELIVERED`; the fallback fires.
-- A post that fails after `DELIVERED` was persisted: no fallback for that push (section 4, the accepted trade-off).
+- A post that fails after `DELIVERED` was persisted (the full and the minimal notification): no fallback for that push
+  (section 4, the accepted trade-off).
 - No `ensureRegistered` (or `register`) for longer than the token validity plus the grace period: events are rejected
   (`401`) and wait in the queue until the app renews the token.
 - App in the **force-stopped** state: Android delivers no FCM messages; the fallback fires.

@@ -168,6 +168,9 @@ internal class Sdk private constructor(context: Context, val baseUrl: String, va
             return false
         }
         queue.add(QueuedEvent(trackingId, type, occurredAtMillis))
+        // If the OS refuses the job, schedule() logs WARN retry.schedule_failed and never throws: the event stays
+        // queued and goes out with the next flush (this push's immediate send, the next push, a successful
+        // ensureRegistered/register, or the next configure).
         scheduler.schedule()
         return true
     }
