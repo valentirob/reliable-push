@@ -3,7 +3,10 @@ package io.reliablepush.fallback.circuit;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import io.micrometer.core.instrument.MeterRegistry;
+import io.reliablepush.apps.AppRegistry;
 import io.reliablepush.shared.logging.EventCapture;
+import io.reliablepush.shared.metrics.RpMetrics;
 import io.reliablepush.support.MutableClock;
 import io.reliablepush.support.PostgresTestBase;
 import java.sql.Timestamp;
@@ -83,6 +86,15 @@ class CircuitBreakerIT extends PostgresTestBase {
 
     @Autowired
     JdbcClient jdbc;
+
+    @Autowired
+    MeterRegistry meters;
+
+    @Autowired
+    RpMetrics metrics;
+
+    @Autowired
+    AppRegistry apps;
 
     private EventCapture capture;
     private String app;
@@ -164,6 +176,13 @@ class CircuitBreakerIT extends PostgresTestBase {
         return circuits.events(appId, 100, null);
     }
 
+    /** {@code rp_fallback_circuit_transitions_total{app,transition}} of this test's app (0 when never counted). */
+    private double transitions(String transition) {
+        var counter = meters.find("rp.fallback.circuit.transitions").tag("app", app).tag("transition", transition)
+                .counter();
+        return counter == null ? 0 : counter.count();
+    }
+
     private List<LogEvent> logged(String action) {
         return capture.events().stream()
                 .filter(e -> action.equals(EventCapture.data(e).get("event.action")))
@@ -171,7 +190,7 @@ class CircuitBreakerIT extends PostgresTestBase {
     }
 
     private CircuitBreaker breaker(CircuitBreakerProperties p) {
-        return new CircuitBreaker(circuits, queries, p, transactions, jdbc, clock, 400);
+        return new CircuitBreaker(circuits, queries, p, transactions, jdbc, clock, metrics, apps, 400);
     }
 
     private static CircuitBreakerProperties disabled() {
@@ -208,9 +227,12 @@ class CircuitBreakerIT extends PostgresTestBase {
                     .containsEntry("ratio", 0.0);
         });
 
+        assertThat(transitions("OPENED")).isEqualTo(1);
+
         // a second evaluation keeps it open without a new event
         breaker.evaluate(List.of(app));
         assertThat(events(app)).hasSize(1);
+        assertThat(transitions("OPENED")).isEqualTo(1);
     }
 
     @Test
@@ -323,6 +345,7 @@ class CircuitBreakerIT extends PostgresTestBase {
                     .containsEntry("reason", "delivered_resumed")
                     .containsEntry("suppressed", 7L);
         });
+        assertThat(transitions("CLOSED")).isEqualTo(1);
     }
 
     @Test
@@ -354,6 +377,7 @@ class CircuitBreakerIT extends PostgresTestBase {
 
         assertThat(events(app)).singleElement().extracting(CircuitEvent::transition).isEqualTo("OPENED");
         assertThat(logged("fallback.circuit_opened")).hasSize(1);
+        assertThat(transitions("OPENED")).isEqualTo(1); // once per committed transition
     }
 
     @Test
@@ -472,6 +496,10 @@ class CircuitBreakerIT extends PostgresTestBase {
         assertThat(events(app).get(0).reason()).isEqualTo("force_expired");
         assertThat(logged("fallback.circuit_closed")).singleElement()
                 .satisfies(e -> assertThat(EventCapture.data(e)).containsEntry("reason", "force_expired"));
+        assertThat(transitions("OPENED")).isEqualTo(1);
+        assertThat(transitions("FORCED")).isEqualTo(1);
+        assertThat(transitions("FORCE_ENDED")).isEqualTo(1);
+        assertThat(transitions("CLOSED")).isZero();
     }
 
     // ---- retention ---------------------------------------------------------------------------------------------

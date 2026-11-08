@@ -1,7 +1,10 @@
 package io.reliablepush.fallback.circuit;
 
+import io.reliablepush.apps.AppConfig;
+import io.reliablepush.apps.AppRegistry;
 import io.reliablepush.fallback.circuit.CircuitTransitions.Transition;
 import io.reliablepush.shared.logging.EventLog;
+import io.reliablepush.shared.metrics.RpMetrics;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Clock;
@@ -34,8 +37,9 @@ import org.springframework.transaction.support.TransactionTemplate;
  * claim agree on {@code now} (also with the fast clock of the demo and E2E); the worker passes the instant of its
  * check, which is also the due cut-off of the claims that follow it.
  *
- * <p>Not profile-restricted: the API role uses {@link #force} for the operator resume. Log lines are written after the
- * transaction commits, so a rolled-back transition is never logged.
+ * <p>Not profile-restricted: the API role uses {@link #force} for the operator resume. Log lines and the metric
+ * {@code rp_fallback_circuit_transitions_total} are written after the transaction commits, so a rolled-back transition
+ * is never logged or counted.
  */
 @Component
 public class CircuitBreaker {
@@ -59,6 +63,7 @@ public class CircuitBreaker {
     private final JdbcClient jdbc;
     private final Clock clock;
     private final Duration retention;
+    private final RpMetrics metrics;
 
     /** Application-clock time of the last prune on this instance; {@code null} until the first one. */
     private volatile Instant lastPrune;
@@ -75,6 +80,8 @@ public class CircuitBreaker {
             TransactionTemplate transactions,
             JdbcClient jdbc,
             Clock clock,
+            RpMetrics metrics,
+            AppRegistry apps,
             @Value("${reliable-push.admin.rollup-retention-days:400}") int retentionDays) {
         if (retentionDays < 1) {
             throw new IllegalStateException("reliable-push.admin.rollup-retention-days must be at least 1");
@@ -86,6 +93,8 @@ public class CircuitBreaker {
         this.jdbc = jdbc;
         this.clock = clock;
         this.retention = Duration.ofDays(retentionDays);
+        this.metrics = metrics;
+        metrics.registerFallbackCircuitTransitions(apps.all().stream().map(AppConfig::appId).toList());
     }
 
     /**
@@ -248,9 +257,10 @@ public class CircuitBreaker {
         return clock.instant().truncatedTo(ChronoUnit.MICROS);
     }
 
-    /** A committed transition: its log line. */
+    /** A committed transition: its log line and {@code rp_fallback_circuit_transitions_total}. */
     private void report(Applied applied) {
         CircuitEvent e = applied.event();
+        metrics.fallbackCircuitTransition(e.appId(), e.transition());
         Map<String, Object> fields = new LinkedHashMap<>();
         fields.put("rp.app_id", e.appId());
         switch (e.transition()) {

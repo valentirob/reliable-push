@@ -21,7 +21,9 @@ import io.reliablepush.notifications.ClaimedNotification;
 import io.reliablepush.notifications.FallbackPolicy;
 import io.reliablepush.notifications.NotificationRepository;
 import io.reliablepush.notifications.NotificationState;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.reliablepush.shared.logging.EventCapture;
+import io.reliablepush.shared.metrics.RpMetrics;
 import io.reliablepush.support.MutableClock;
 import java.time.Clock;
 import java.time.Duration;
@@ -55,6 +57,7 @@ class FallbackSchedulerTest {
     private final FallbackDispatcher dispatcher = mock(FallbackDispatcher.class);
     private final CircuitBreaker breaker = mock(CircuitBreaker.class);
     private final Suppressor suppressor = mock(Suppressor.class);
+    private final SimpleMeterRegistry meters = new SimpleMeterRegistry();
 
     private FallbackScheduler scheduler() {
         return scheduler(false);
@@ -66,8 +69,8 @@ class FallbackSchedulerTest {
     }
 
     private FallbackScheduler scheduler(boolean suspended, Clock clock) {
-        return new FallbackScheduler(notifications, dispatcher, breaker, suppressor, APPS, suspended, clock,
-                Duration.ofMinutes(2), POLL, 1, 1);
+        return new FallbackScheduler(notifications, dispatcher, breaker, suppressor, new RpMetrics(meters), APPS,
+                suspended, clock, Duration.ofMinutes(2), POLL, 1, 1);
     }
 
     private static Map<String, Circuit> circuits() {
@@ -219,6 +222,18 @@ class FallbackSchedulerTest {
         }
         verify(suppressor, never()).suppress(any(), anyBoolean(), any());
         verify(notifications, never()).claimDue(any(), any(), anyInt(), any());
+        assertThat(checkFailed()).isEqualTo(1);
+    }
+
+    private double checkFailed() {
+        return meters.get("rp.fallback.circuit.check.failed").counter().count();
+    }
+
+    @Test
+    void checkFailedCounterExistsAtZeroOnceTheWorkerIsBuilt() {
+        scheduler();
+
+        assertThat(checkFailed()).isZero();
     }
 
     @Test
@@ -234,6 +249,7 @@ class FallbackSchedulerTest {
                     .containsEntry("reason", "IllegalStateException"));
         }
         verify(notifications, never()).claimDue(any(), any(), anyInt(), any());
+        assertThat(checkFailed()).isEqualTo(1);
     }
 
     @Test

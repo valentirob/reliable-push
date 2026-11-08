@@ -6,6 +6,7 @@ import io.reliablepush.fallback.circuit.Suppressor;
 import io.reliablepush.notifications.ClaimedNotification;
 import io.reliablepush.notifications.NotificationRepository;
 import io.reliablepush.shared.logging.EventLog;
+import io.reliablepush.shared.metrics.RpMetrics;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -30,7 +31,8 @@ import org.springframework.scheduling.annotation.Scheduled;
  * breaker spec 4 and 5), then claims due rows of the other apps (atomically, {@code SKIP LOCKED}: replicas never claim
  * the same row) with a lease, and dispatches them. A drain that lasts longer than one poll interval checks the
  * circuits again before its next claim. If a check fails, the tick logs WARN {@code fallback.circuit_check_failed}
- * (stack trace at ERROR from this class's logger) and claims nothing more (fail closed).
+ * (stack trace at ERROR from this class's logger), counts it in {@code rp_fallback_circuit_check_failed_total} and
+ * claims nothing more (fail closed).
  *
  * <p>Throughput: a tick does not stop after one claim. It keeps claiming while the previous claim came back full (more
  * rows are probably due), for at most half the lease, so a large backlog drains at the speed of the receivers instead
@@ -56,6 +58,7 @@ public class FallbackScheduler {
     private final FallbackDispatcher dispatcher;
     private final CircuitBreaker breaker;
     private final Suppressor suppressor;
+    private final RpMetrics metrics;
     private final List<String> appIds;
     private final boolean suspended;
     private final Clock clock;
@@ -75,6 +78,7 @@ public class FallbackScheduler {
             FallbackDispatcher dispatcher,
             CircuitBreaker breaker,
             Suppressor suppressor,
+            RpMetrics metrics,
             List<String> appIds,
             boolean suspended,
             Clock clock,
@@ -89,6 +93,8 @@ public class FallbackScheduler {
         this.dispatcher = dispatcher;
         this.breaker = breaker;
         this.suppressor = suppressor;
+        this.metrics = metrics;
+        metrics.registerFallbackCircuitCheckFailed();
         this.appIds = List.copyOf(appIds);
         this.suspended = suspended;
         this.clock = clock;
@@ -182,6 +188,7 @@ public class FallbackScheduler {
             Map<String, Circuit> circuits = breaker.evaluate(appIds, now);
             return Optional.of(suppressor.suppress(circuits, suspended, now));
         } catch (RuntimeException e) {
+            metrics.fallbackCircuitCheckFailed();
             EventLog.warn("fallback.circuit_check_failed", Map.of("reason", e.getClass().getSimpleName()));
             LOG.error("Fallback circuit check failed; nothing is claimed until a check succeeds", e);
             return Optional.empty();

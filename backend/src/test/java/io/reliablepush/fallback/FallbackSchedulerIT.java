@@ -14,6 +14,7 @@ import io.reliablepush.notifications.Notification;
 import io.reliablepush.notifications.NotificationRepository;
 import io.reliablepush.notifications.NotificationState;
 import io.reliablepush.shared.logging.EventCapture;
+import io.reliablepush.shared.metrics.RpMetrics;
 import io.reliablepush.shared.security.DevicePrincipal;
 import io.reliablepush.shared.time.TimeScale;
 import io.reliablepush.support.MutableClock;
@@ -171,6 +172,9 @@ class FallbackSchedulerIT extends PostgresTestBase {
 
     @Autowired
     Suppressor suppressor;
+
+    @Autowired
+    RpMetrics metrics;
 
     private EventCapture capture;
 
@@ -348,7 +352,7 @@ class FallbackSchedulerIT extends PostgresTestBase {
         }).when(slow).evaluate(any(), any());
         FallbackScheduler worker = new FallbackScheduler(notifications,
                 (FallbackDispatcher) ReflectionTestUtils.getField(scheduler, "dispatcher"), slow, suppressor,
-                List.of(APP, RACE_APP), false, clock, (Duration) ReflectionTestUtils.getField(scheduler, "lease"),
+                metrics, List.of(APP, RACE_APP), false, clock, (Duration) ReflectionTestUtils.getField(scheduler, "lease"),
                 Duration.ofDays(1), BATCH, MAX_CONCURRENCY);
 
         worker.tick();

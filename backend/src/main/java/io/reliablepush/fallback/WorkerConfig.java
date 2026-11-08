@@ -65,7 +65,7 @@ class WorkerConfig {
                         attempts, transactions);
         // the circuit of every configured app is evaluated, and suppressed apps are skipped, before each tick's claims
         List<String> appIds = apps.all().stream().map(AppConfig::appId).toList();
-        return new FallbackScheduler(notifications, dispatcher, breaker, suppressor, appIds,
+        return new FallbackScheduler(notifications, dispatcher, breaker, suppressor, metrics, appIds,
                 circuitProperties.suspended(), clock, lease, properties.worker().pollInterval(),
                 properties.worker().batchSize(),
                 properties.worker().maxConcurrency());

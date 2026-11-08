@@ -7,6 +7,7 @@ import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.reliablepush.tracking.EventType;
 import java.time.Duration;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class RpMetricsTest {
@@ -56,6 +57,44 @@ class RpMetricsTest {
     @Test
     void unknownFallbackOutcomeIsRejected() {
         assertThatThrownBy(() -> metrics.fallback("retry_scheduled")).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void circuitTransitionsAreRegisteredAtZeroForEveryConfiguredAppAndTransition() {
+        metrics.registerFallbackCircuitTransitions(List.of("shop", "news"));
+
+        for (String app : List.of("shop", "news")) {
+            for (String transition : List.of("OPENED", "CLOSED", "FORCED", "FORCE_ENDED")) {
+                assertThat(counter("rp.fallback.circuit.transitions", "app", app, "transition", transition)).isZero();
+            }
+        }
+    }
+
+    @Test
+    void countsCircuitTransitionsPerAppAndTransition() {
+        metrics.registerFallbackCircuitTransitions(List.of("shop"));
+
+        metrics.fallbackCircuitTransition("shop", "OPENED");
+        metrics.fallbackCircuitTransition("shop", "FORCED");
+        metrics.fallbackCircuitTransition("shop", "FORCED");
+
+        assertThat(counter("rp.fallback.circuit.transitions", "app", "shop", "transition", "OPENED")).isEqualTo(1);
+        assertThat(counter("rp.fallback.circuit.transitions", "app", "shop", "transition", "FORCED")).isEqualTo(2);
+        assertThat(counter("rp.fallback.circuit.transitions", "app", "shop", "transition", "CLOSED")).isZero();
+        assertThatThrownBy(() -> metrics.fallbackCircuitTransition("shop", "HALF_OPEN"))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void circuitCheckFailuresExistOnlyOnceTheWorkerRegistersThem() {
+        assertThat(registry.find("rp.fallback.circuit.check.failed").counter()).isNull();
+
+        metrics.registerFallbackCircuitCheckFailed();
+        assertThat(counter("rp.fallback.circuit.check.failed")).isZero();
+        metrics.fallbackCircuitCheckFailed();
+        metrics.fallbackCircuitCheckFailed();
+
+        assertThat(counter("rp.fallback.circuit.check.failed")).isEqualTo(2);
     }
 
     @Test

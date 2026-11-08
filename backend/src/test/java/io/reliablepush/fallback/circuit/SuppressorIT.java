@@ -321,6 +321,7 @@ class SuppressorIT extends PostgresTestBase {
     @Test
     void lockTimeoutClaimsNothing() throws Exception {
         List<UUID> healthy = due(B, 1);
+        double failedBefore = meters.get("rp.fallback.circuit.check.failed").counter().count();
         CountDownLatch locked = new CountDownLatch(1);
         CountDownLatch release = new CountDownLatch(1);
         // another replica holds the detector lock longer than the lock timeout
@@ -348,6 +349,7 @@ class SuppressorIT extends PostgresTestBase {
         assertThat(capture.events()).filteredOn(e -> "fallback.circuit_check_failed"
                         .equals(EventCapture.data(e).get("event.action")))
                 .singleElement().satisfies(e -> assertThat(e.getLevel()).isEqualTo(Level.WARN));
+        assertThat(meters.get("rp.fallback.circuit.check.failed").counter().count()).isEqualTo(failedBefore + 1);
 
         scheduler.tick(); // the lock is free again: the next tick fires it
         assertThat(webhook.count(healthy)).isEqualTo(1);

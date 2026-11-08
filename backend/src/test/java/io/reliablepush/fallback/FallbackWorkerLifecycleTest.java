@@ -2,7 +2,9 @@ package io.reliablepush.fallback;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.reliablepush.shared.logging.EventCapture;
+import io.reliablepush.shared.metrics.RpMetrics;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -31,7 +33,7 @@ class FallbackWorkerLifecycleTest {
         private final boolean idle;
 
         RecordingScheduler(boolean idle) {
-            super(null, null, null, null, List.of(), false, Clock.systemUTC(), Duration.ofMinutes(2),
+            super(null, null, null, null, new RpMetrics(new SimpleMeterRegistry()), List.of(), false, Clock.systemUTC(), Duration.ofMinutes(2),
                     Duration.ofSeconds(5), 1, 1);
             this.idle = idle;
         }
