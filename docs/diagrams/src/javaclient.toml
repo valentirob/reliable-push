@@ -1,0 +1,90 @@
+# Java sender client and payload jar: overview §6.
+title = "Java sender client and payload jar"
+desc = "Your Java backend asks the payload jar for a tracking id and a tracked APNs or FCM payload, registers the push with reliable-push through the immutable SenderClient with a 1 s timeout, and always sends the push with rp_tid through your own APNs or FCM client."
+width = 960
+height = 368
+
+[legend]
+input = "Your system"
+dashed = "Return"
+
+[[node]]
+id = "app"
+x = 40
+y = 144
+w = 176
+h = 80
+kind = "input"
+tag = "yours"
+name = "Your Java backend"
+sub = ["your APNs / FCM", "client"]
+
+[[node]]
+id = "pj"
+x = 360
+y = 40
+w = 240
+h = 64
+kind = "backend"
+tag = "jar"
+name = "payload jar"
+sub = "TrackingIds, ApnsPayloads, FcmPayloads"
+
+[[node]]
+id = "sc"
+x = 360
+y = 160
+w = 240
+h = 64
+kind = "backend"
+tag = "jar"
+name = "SenderClient"
+sub = "immutable, thread-safe, 1 s timeout"
+
+[[node]]
+id = "api"
+x = 712
+y = 160
+w = 208
+h = 64
+kind = "focal"
+tag = "api"
+name = "reliable-push"
+sub = "/v1/notifications"
+
+[[node]]
+id = "pp"
+x = 360
+y = 280
+w = 240
+h = 64
+kind = "external"
+tag = "cloud"
+name = "APNs / FCM"
+
+[[edge]]
+points = [[96, 144], [96, 64], [360, 64]]
+label = "NEW ID, PAYLOAD"
+label_seg = 1
+
+[[edge]]
+points = [[360, 88], [128, 88], [128, 144]]
+style = "dashed"
+label = "TID + PAYLOAD"
+label_seg = 0
+label_side = "below"
+
+[[edge]]
+points = [[216, 192], [360, 192]]
+label = "REGISTER FIRST"
+
+[[edge]]
+points = [[600, 192], [712, 192]]
+style = "track"
+label = "REGISTER\nGET LIST CANCEL"
+
+[[edge]]
+points = [[128, 224], [128, 312], [360, 312]]
+style = "push"
+label = "PUSH, RP_TID = TID"
+label_seg = 1

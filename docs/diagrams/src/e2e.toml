@@ -1,0 +1,125 @@
+# One notification, end to end: overview §3.
+type = "sequence"
+title = "One notification, end to end"
+desc = "The sender backend creates a tracking id, registers the push with reliable-push within a 1 s timeout and always sends it through FCM or APNs with rp_tid; the app's SDK reports DELIVERED and READ; if the policy is not met by dueAt, the worker checks the app's circuit, claims the row and calls the fallback receiver with a signed webhook."
+width = 960
+height = 0
+numbered = true
+
+[legend]
+input = "Your system"
+alert = "Your fallback receiver"
+flow = "Call"
+dashed = "Reply"
+
+[[actor]]
+id = "sb"
+name = "Sender backend"
+kind = "input"
+
+[[actor]]
+id = "rp"
+name = "reliable-push"
+sub = "api · worker"
+kind = "focal"
+
+[[actor]]
+id = "pp"
+name = "FCM / APNs"
+kind = "external"
+
+[[actor]]
+id = "sdk"
+name = "App + SDK"
+kind = "input"
+
+[[actor]]
+id = "fr"
+name = "Fallback receiver"
+kind = "alert"
+
+[[row]]
+kind = "note"
+over = ["sb"]
+text = "tid = TrackingIds.newId()\npayload built with tid\nregister with a 1 s timeout"
+
+[[row]]
+kind = "call"
+from = "sb"
+to = "rp"
+text = "POST /v1/notifications"
+
+[[row]]
+kind = "return"
+from = "rp"
+to = "sb"
+text = "201 (informative only)"
+
+[[row]]
+kind = "push"
+from = "sb"
+to = "pp"
+text = "push with rp_tid = tid, always"
+
+[[row]]
+kind = "push"
+from = "pp"
+to = "sdk"
+text = "arrives, app closed too"
+
+[[row]]
+kind = "track"
+from = "sdk"
+to = "rp"
+text = "POST /v1/events DELIVERED"
+
+[[row]]
+kind = "note"
+over = ["sdk"]
+text = "the user taps the notification"
+
+[[row]]
+kind = "track"
+from = "sdk"
+to = "rp"
+text = "POST /v1/events READ"
+
+[[row]]
+kind = "note"
+over = ["rp"]
+text = "policy satisfied: no fallback"
+
+[[row]]
+kind = "alt"
+guard = "[not confirmed by dueAt]"
+actors = ["rp", "fr"]
+
+[[row]]
+kind = "self"
+from = "rp"
+text = "worker: is the app's tracking working? (circuit)"
+
+[[row]]
+kind = "self"
+from = "rp"
+text = "claim the due row (PostgreSQL row lock)"
+
+[[row]]
+kind = "fallback"
+from = "rp"
+to = "fr"
+text = "signed webhook {trackingId, userId, fallback, reason}"
+
+[[row]]
+kind = "return"
+from = "fr"
+to = "rp"
+text = "2xx"
+
+[[row]]
+kind = "note"
+over = ["rp"]
+text = "FALLBACK_TRIGGERED"
+
+[[row]]
+kind = "end"

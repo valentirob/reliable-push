@@ -1,0 +1,197 @@
+# Harness and web console: overview §9.
+title = "Harness and web console"
+desc = "Local only: docker compose runs PostgreSQL, the api and two workers, and the harness with the web console, a fake sender and device simulator, a fallback receiver that checks signatures, the scenario runner, a device proxy that can cut the iOS Simulator off, and optional real FCM and APNs senders; the Android emulator and the iOS Simulator run the sample apps against the same api."
+width = 960
+height = 496
+
+[legend]
+input = "On your machine"
+optional = "Optional"
+
+[[zone]]
+x = 232
+y = 40
+w = 688
+h = 440
+tone = "plain"
+label = "docker compose: local only"
+
+[[zone]]
+x = 256
+y = 192
+w = 640
+h = 272
+tone = "accent"
+label = "harness :8090"
+
+[[node]]
+id = "emu"
+x = 40
+y = 80
+w = 152
+h = 64
+kind = "input"
+tag = "android"
+name = "Emulator"
+sub = "sample app"
+
+[[node]]
+id = "sim"
+x = 40
+y = 228
+w = 152
+h = 64
+kind = "input"
+tag = "ios"
+name = "iOS Simulator"
+sub = "sample app"
+
+[[node]]
+id = "user"
+x = 40
+y = 328
+w = 152
+h = 64
+kind = "input"
+tag = "you"
+name = "Browser"
+
+[[node]]
+id = "scripts"
+x = 40
+y = 408
+w = 152
+h = 72
+kind = "input"
+tag = "scripts"
+name = "Scripts"
+sub = ["demo, e2e,", "android-e2e, ios-e2e"]
+
+[[node]]
+id = "api"
+x = 256
+y = 80
+w = 176
+h = 64
+kind = "focal"
+tag = "backend"
+name = "api :8080"
+
+[[node]]
+id = "pg"
+x = 496
+y = 80
+w = 160
+h = 64
+kind = "store"
+tag = "db"
+name = "postgres"
+
+[[node]]
+id = "w"
+x = 720
+y = 80
+w = 176
+h = 64
+kind = "backend"
+tag = "backend"
+name = "worker-a, worker-b"
+
+[[node]]
+id = "dp"
+x = 280
+y = 224
+w = 176
+h = 72
+kind = "backend"
+tag = "proxy"
+name = "Device proxy :8091"
+sub = ["online / offline switch", "loopback by default"]
+
+[[node]]
+id = "fsds"
+x = 480
+y = 224
+w = 192
+h = 64
+kind = "backend"
+tag = "fake"
+name = "Fake sender"
+sub = "+ device simulator"
+
+[[node]]
+id = "rcv"
+x = 696
+y = 224
+w = 176
+h = 64
+kind = "alert"
+tag = "fake"
+name = "Fallback receiver"
+sub = "checks the signature"
+
+[[node]]
+id = "con"
+x = 280
+y = 328
+w = 176
+h = 64
+kind = "backend"
+tag = "ui"
+name = "Web console"
+sub = "6 screens"
+
+[[node]]
+id = "sr"
+x = 480
+y = 328
+w = 192
+h = 56
+kind = "backend"
+name = "Scenario runner"
+
+[[node]]
+id = "rs"
+x = 696
+y = 328
+w = 176
+h = 72
+kind = "optional"
+tag = "optional"
+name = "Real FCM / APNs"
+sub = "senders"
+
+[[edge]]
+points = [[192, 112], [256, 112]]
+style = "track"
+
+[[edge]]
+points = [[192, 260], [280, 260]]
+style = "track"
+
+[[edge]]
+points = [[368, 224], [368, 144]]
+style = "track"
+
+[[edge]]
+points = [[528, 224], [528, 184], [400, 184], [400, 144]]
+label = "API CALLS"
+label_seg = 1
+
+[[edge]]
+points = [[432, 112], [496, 112]]
+
+[[edge]]
+points = [[720, 112], [656, 112]]
+
+[[edge]]
+points = [[808, 144], [808, 224]]
+style = "fallback"
+label = "WEBHOOK"
+
+[[edge]]
+points = [[192, 360], [280, 360]]
+
+[[edge]]
+points = [[192, 444], [232, 444]]
+label = ""

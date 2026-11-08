@@ -1,0 +1,135 @@
+# Ops dashboard: overview §5.
+title = "Ops dashboard"
+desc = "The browser loads the static /admin/ page and calls the /v1/admin API with the admin key; the API reads PostgreSQL for live windows, search, detail, older days and circuits, and its only write is resuming an app's fallbacks; worker jobs write fallback attempts, the nightly daily_stats rollup and the circuit history, and the retention job checks the rollup first."
+width = 960
+height = 448
+
+[legend]
+input = "Your browser"
+
+[[zone]]
+x = 232
+y = 56
+w = 328
+h = 208
+tone = "accent"
+label = "Backend: every instance"
+
+[[zone]]
+x = 232
+y = 320
+w = 688
+h = 112
+tone = "plain"
+label = "Backend: worker profile"
+
+[[node]]
+id = "br"
+x = 40
+y = 96
+w = 152
+h = 72
+kind = "input"
+tag = "you"
+name = "Browser"
+sub = ["admin key in", "sessionStorage"]
+
+[[node]]
+id = "pg"
+x = 256
+y = 88
+w = 280
+h = 56
+kind = "backend"
+tag = "static"
+name = "/admin/ page"
+sub = "static files, security headers"
+
+[[node]]
+id = "aa"
+x = 256
+y = 168
+w = 280
+h = 80
+kind = "focal"
+tag = "api"
+name = "/v1/admin API"
+sub = ["X-Admin-Key, audit log;", "only write: resume fallbacks"]
+
+[[node]]
+id = "db"
+x = 640
+y = 160
+w = 280
+h = 88
+kind = "store"
+tag = "db"
+name = "PostgreSQL"
+sub = ["notification, notification_event,", "fallback_attempt, daily_stats,", "fallback_circuit(_event)"]
+
+[[node]]
+id = "wr"
+x = 256
+y = 352
+w = 152
+h = 64
+kind = "backend"
+name = "FallbackDispatcher"
+sub = ["a row per webhook", "→ fallback_attempt"]
+
+[[node]]
+id = "ru"
+x = 432
+y = 352
+w = 152
+h = 64
+kind = "backend"
+name = "DailyRollupJob"
+sub = ["nightly, advisory", "lock → daily_stats"]
+
+[[node]]
+id = "cb"
+x = 608
+y = 352
+w = 152
+h = 64
+kind = "alert"
+name = "CircuitBreaker"
+sub = ["per-app circuit,", "→ fallback_circuit"]
+
+[[node]]
+id = "rj"
+x = 784
+y = 352
+w = 120
+h = 64
+kind = "backend"
+name = "RetentionJob"
+sub = ["checks the", "rollup first"]
+
+[[edge]]
+points = [[192, 116], [256, 116]]
+label = "PAGE"
+
+[[edge]]
+points = [[192, 144], [224, 144], [224, 208], [256, 208]]
+label = "JSON"
+label_seg = 1
+label_side = "left"
+
+[[edge]]
+points = [[536, 208], [640, 208]]
+style = "track"
+label = "READ + RESUME"
+
+[[edge]]
+points = [[392, 352], [392, 280], [652, 280], [652, 248]]
+
+[[edge]]
+points = [[508, 352], [508, 296], [668, 296], [668, 248]]
+
+[[edge]]
+points = [[684, 352], [684, 248]]
+
+[[edge]]
+points = [[844, 352], [844, 248]]

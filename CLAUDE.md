@@ -22,5 +22,8 @@ The rules with `trigger: always_on`, loaded here as Antigravity loads them:
 - Hooks: `.claude/settings.json` runs `scripts/check-waits.sh --hook claude` at session start and on every prompt; its
   findings arrive as context. Background tasks you start (`run_in_background`) still follow `long-running.md`: wrap
   waits in `scripts/wait-until.sh`, never a hand-written loop.
+- Diagrams: the diagram-design plugin, when installed, gives the style; the repository's own source of truth is
+  `docs/diagrams/README.md` and `scripts/diagrams.py`, so Antigravity and a machine without the plugin draw the same.
+  Its `self_check.py` can check the HTML previews (`python3 scripts/diagrams.py --html <dir>`).
 - Claude Code's own memory is private to one machine: never rely on it for project knowledge (see AGENTS.md "AI agent
   context").

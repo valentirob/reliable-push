@@ -1,0 +1,179 @@
+# iOS SDK: overview §8.
+title = "iOS SDK"
+desc = "An APNs alert with mutable-content and rp_tid wakes the Notification Service Extension: it persists DELIVERED in the App Group, sends it once without renewing the token, and hands the notification to the system within 2 s; pushes without rp_tid stay with your own extension code; in the app, ensureRegistered is the only token renewal and trackOpen queues READ, which the app flushes one at a time."
+width = 960
+height = 480
+
+[legend]
+input = "Your code or the system"
+
+[[zone]]
+x = 280
+y = 32
+w = 224
+h = 104
+tone = "accent"
+label = "Extension process"
+
+[[zone]]
+x = 24
+y = 352
+w = 784
+h = 112
+tone = "plain"
+label = "App process"
+
+[[node]]
+id = "apns"
+x = 40
+y = 52
+w = 192
+h = 72
+kind = "external"
+tag = "cloud"
+name = "APNs alert"
+sub = ["mutable-content: 1", "rp_tid"]
+
+[[node]]
+id = "dr"
+x = 296
+y = 56
+w = 192
+h = 64
+kind = "focal"
+tag = "sdk"
+name = "didReceive"
+sub = "ReliablePushExtension"
+
+[[node]]
+id = "show"
+x = 568
+y = 56
+w = 176
+h = 64
+kind = "input"
+tag = "system"
+name = "Notification shown"
+sub = "by the system"
+
+[[node]]
+id = "own"
+x = 784
+y = 56
+w = 136
+h = 64
+kind = "input"
+tag = "yours"
+name = "Own handling"
+sub = "no rp_tid"
+
+[[node]]
+id = "ag"
+x = 296
+y = 232
+w = 192
+h = 64
+kind = "store"
+tag = "shared"
+name = "App Group"
+sub = "event queue + state"
+
+[[node]]
+id = "api"
+x = 568
+y = 232
+w = 176
+h = 64
+kind = "backend"
+tag = "api"
+name = "reliable-push"
+
+[[node]]
+id = "kc"
+x = 784
+y = 232
+w = 136
+h = 72
+kind = "store"
+tag = "shared"
+name = "Keychain group"
+sub = ["device token, read", "by the extension"]
+
+[[node]]
+id = "cfg"
+x = 40
+y = 376
+w = 192
+h = 72
+kind = "backend"
+tag = "sdk"
+name = "configure(...)"
+sub = ["baseURL, appId,", "appGroup"]
+
+[[node]]
+id = "to"
+x = 296
+y = 376
+w = 192
+h = 64
+kind = "backend"
+tag = "sdk"
+name = "trackOpen(response)"
+sub = "READ"
+
+[[node]]
+id = "reg"
+x = 568
+y = 376
+w = 224
+h = 72
+kind = "backend"
+tag = "sdk"
+name = "ensureRegistered"
+sub = ["start, foreground, login;", "the only token renewal"]
+
+[[edge]]
+points = [[232, 88], [296, 88]]
+style = "push"
+
+[[edge]]
+points = [[344, 120], [344, 232]]
+style = "track"
+label = "PERSIST"
+step = 1
+
+[[edge]]
+points = [[440, 120], [440, 168], [624, 168], [624, 232]]
+style = "track"
+label = "ONE SEND"
+step = 2
+label_seg = 1
+
+[[edge]]
+points = [[488, 80], [568, 80]]
+label = "≤ 2 S"
+step = 3
+
+[[edge]]
+points = [[472, 56], [472, 16], [852, 16], [852, 56]]
+label = "NO RP_TID"
+label_seg = 1
+label_side = "below"
+
+[[edge]]
+points = [[488, 264], [568, 264]]
+style = "track"
+label = "FLUSH"
+
+[[edge]]
+points = [[392, 376], [392, 296]]
+label = "READ"
+
+[[edge]]
+points = [[632, 376], [632, 296]]
+style = "track"
+label = "ONLY IF NEEDED"
+label_side = "left"
+
+[[edge]]
+points = [[792, 416], [852, 416], [852, 304]]

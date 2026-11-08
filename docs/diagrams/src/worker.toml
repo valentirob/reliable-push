@@ -1,0 +1,102 @@
+# How a worker claims and dispatches: overview §4.
+type = "sequence"
+title = "How a worker claims and dispatches a fallback"
+desc = "Each worker replica first checks every app's circuit under an advisory lock and expires the due rows of an open or suspended app without calling the webhook, then claims the other due rows with SKIP LOCKED and a lease, calls the receiver only inside the trigger window, and writes the outcome fenced on the lease; a replica that dies loses its lease and another one re-claims the row."
+width = 960
+height = 0
+
+[legend]
+alert = "Your fallback receiver"
+flow = "Call"
+dashed = "Reply"
+
+[[actor]]
+id = "w"
+name = "Worker replica"
+kind = "focal"
+
+[[actor]]
+id = "db"
+name = "PostgreSQL"
+kind = "store"
+
+[[actor]]
+id = "fr"
+name = "Fallback receiver"
+kind = "alert"
+
+[[row]]
+kind = "call"
+from = "w"
+to = "db"
+text = "circuit check under an advisory lock, per app"
+
+[[row]]
+kind = "alt"
+guard = "[circuit OPEN, or fallbacks suspended]"
+actors = ["w", "db"]
+
+[[row]]
+kind = "call"
+from = "w"
+to = "db"
+text = "due rows → FALLBACK_EXPIRED, no webhook"
+
+[[row]]
+kind = "end"
+
+[[row]]
+kind = "call"
+from = "w"
+to = "db"
+text = "claim due rows: SKIP LOCKED, set lease_until"
+
+[[row]]
+kind = "note"
+over = ["w", "db"]
+text = "other replicas skip locked rows: no row is claimed twice"
+
+[[row]]
+kind = "self"
+from = "w"
+text = "inside due_at + trigger window?"
+
+[[row]]
+kind = "alt"
+guard = "[inside the window]"
+
+[[row]]
+kind = "fallback"
+from = "w"
+to = "fr"
+text = "POST · X-RP-Signature · Idempotency-Key = trackingId"
+
+[[row]]
+kind = "return"
+from = "fr"
+to = "w"
+text = "2xx / 4xx / 5xx / timeout"
+
+[[row]]
+kind = "call"
+from = "w"
+to = "db"
+text = "write the outcome, fenced on lease_until"
+
+[[row]]
+kind = "else"
+guard = "[outside the window]"
+
+[[row]]
+kind = "call"
+from = "w"
+to = "db"
+text = "FALLBACK_EXPIRED, webhook not called"
+
+[[row]]
+kind = "end"
+
+[[row]]
+kind = "note"
+over = ["w", "db"]
+text = "if the worker dies, its lease ends and another replica re-claims the row"

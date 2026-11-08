@@ -38,6 +38,9 @@ and the demo (`pwsh scripts/e2e.ps1`, `scripts\demo.ps1`; not run on Windows yet
 and Xcode. `.gitattributes` keeps `*.sh`, `mvnw` and `gradlew` in LF, so a WSL or Git Bash checkout runs them as they
 are.
 
+The documentation diagrams need Python 3.11 or newer (standard library only) and, for the at-a-glance PNG, Google Chrome
+or Chromium: see [diagrams/README.md](diagrams/README.md).
+
 To continue development with an AI agent (Claude Code or Antigravity) on any of these systems, nothing else is needed:
 the shared context is in the repository (`AGENTS.md`, `.agents/`, including the hooks that flag stuck waits); see
 [AGENTS.md](../AGENTS.md#ai-agent-context-one-source-for-every-tool).

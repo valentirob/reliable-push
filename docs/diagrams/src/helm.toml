@@ -1,0 +1,159 @@
+# Helm chart and deployment: overview §10.
+title = "Helm chart: combined and split mode"
+desc = "In combined mode one Deployment runs pods with the api and worker profiles behind the Service; in split mode the API pods take the Service traffic and separate worker pods get none; both modes use PostgreSQL and the worker pods call the fallback receiver."
+width = 960
+height = 464
+
+[legend]
+external = "Kubernetes resource"
+alert = "Your fallback receiver"
+
+[[zone]]
+x = 40
+y = 40
+w = 880
+h = 152
+tone = "plain"
+label = "Combined mode"
+
+[[zone]]
+x = 40
+y = 232
+w = 880
+h = 216
+tone = "plain"
+label = "Split mode"
+
+[[node]]
+id = "i1"
+x = 64
+y = 72
+w = 152
+h = 56
+kind = "external"
+name = "Ingress / Route"
+
+[[node]]
+id = "s1"
+x = 264
+y = 72
+w = 152
+h = 56
+kind = "external"
+name = "Service"
+
+[[node]]
+id = "p1"
+x = 464
+y = 72
+w = 176
+h = 56
+kind = "focal"
+tag = "pods"
+name = "api + worker"
+
+[[node]]
+id = "pg1"
+x = 712
+y = 72
+w = 184
+h = 48
+kind = "store"
+name = "PostgreSQL"
+
+[[node]]
+id = "r1"
+x = 712
+y = 136
+w = 184
+h = 48
+kind = "alert"
+name = "Fallback receiver"
+
+[[node]]
+id = "i2"
+x = 64
+y = 264
+w = 152
+h = 56
+kind = "external"
+name = "Ingress / Route"
+
+[[node]]
+id = "s2"
+x = 264
+y = 264
+w = 152
+h = 56
+kind = "external"
+name = "Service"
+
+[[node]]
+id = "p2"
+x = 464
+y = 264
+w = 176
+h = 56
+kind = "focal"
+tag = "pods"
+name = "API"
+
+[[node]]
+id = "p3"
+x = 464
+y = 360
+w = 176
+h = 64
+kind = "backend"
+tag = "pods"
+name = "Worker"
+sub = "no Service traffic"
+
+[[node]]
+id = "pg2"
+x = 712
+y = 264
+w = 184
+h = 48
+kind = "store"
+name = "PostgreSQL"
+
+[[node]]
+id = "r2"
+x = 712
+y = 384
+w = 184
+h = 48
+kind = "alert"
+name = "Fallback receiver"
+
+[[edge]]
+points = [[216, 100], [264, 100]]
+
+[[edge]]
+points = [[416, 100], [464, 100]]
+
+[[edge]]
+points = [[640, 96], [712, 96]]
+
+[[edge]]
+points = [[640, 116], [676, 116], [676, 160], [712, 160]]
+style = "fallback"
+dashed = true
+
+[[edge]]
+points = [[216, 292], [264, 292]]
+
+[[edge]]
+points = [[416, 292], [464, 292]]
+
+[[edge]]
+points = [[640, 288], [712, 288]]
+
+[[edge]]
+points = [[640, 376], [676, 376], [676, 300], [712, 300]]
+
+[[edge]]
+points = [[640, 408], [712, 408]]
+style = "fallback"
+dashed = true

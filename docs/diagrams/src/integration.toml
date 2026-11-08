@@ -1,0 +1,86 @@
+# What your backend does, in order: integration-guide.md.
+type = "sequence"
+title = "What your backend does, in order"
+desc = "Your backend generates a tracking id with the payload jar, registers the push with reliable-push with a 1 s timeout, always sends the push through FCM or APNs with rp_tid, the device SDK reports DELIVERED and then READ, and when the push is due with its policy unmet reliable-push calls your fallback receiver with a signed webhook."
+width = 960
+height = 0
+numbered = true
+
+[legend]
+input = "Your system"
+alert = "Your fallback receiver"
+flow = "Call"
+dashed = "Reply"
+
+[[actor]]
+id = "be"
+name = "Your backend"
+sub = "+ payload jar"
+kind = "input"
+
+[[actor]]
+id = "rp"
+name = "reliable-push"
+kind = "focal"
+
+[[actor]]
+id = "pp"
+name = "FCM / APNs"
+kind = "external"
+
+[[actor]]
+id = "sdk"
+name = "Device SDK"
+kind = "input"
+
+[[actor]]
+id = "fr"
+name = "Fallback receiver"
+sub = "yours"
+kind = "alert"
+
+[[row]]
+kind = "note"
+over = ["be"]
+text = "tid = TrackingIds.newId()\npayload built with tid"
+
+[[row]]
+kind = "call"
+from = "be"
+to = "rp"
+text = "POST /v1/notifications"
+
+[[row]]
+kind = "return"
+from = "rp"
+to = "be"
+text = "201 (informative only)"
+
+[[row]]
+kind = "push"
+from = "be"
+to = "pp"
+text = "push with rp_tid = tid, always"
+
+[[row]]
+kind = "push"
+from = "pp"
+to = "sdk"
+text = "push arrives"
+
+[[row]]
+kind = "track"
+from = "sdk"
+to = "rp"
+text = "DELIVERED, then READ on tap"
+
+[[row]]
+kind = "note"
+over = ["rp"]
+text = "due and policy unmet?"
+
+[[row]]
+kind = "fallback"
+from = "rp"
+to = "fr"
+text = "signed webhook: you send the SMS, email, ..."

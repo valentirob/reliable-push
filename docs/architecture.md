@@ -18,15 +18,7 @@ The `json` / `local` profiles only switch the log layout; `e2e` and `demo` enabl
 [operations.md](operations.md). Replicas of either role can be run side by side: coordination happens through
 PostgreSQL row locks, not through any in-process state (rate limits and the revocation cache are per instance).
 
-```mermaid
-flowchart LR
-  SB["Sender backend"] -- "POST /v1/notifications<br/>(X-Api-Key)" --> API["api"]
-  SDK["Device SDK"] -- "POST /v1/devices<br/>(OIDC ID token)" --> API
-  SDK -- "POST /v1/events<br/>(device JWT)" --> API
-  API --> DB[("PostgreSQL<br/>Flyway V1..V7 at startup")]
-  WRK["worker"] --> DB
-  WRK -- "signed POST" --> FW["Fallback webhook"]
-```
+![Components and how they relate](diagrams/components.svg)
 
 The backend is a sidecar: it never sends pushes and is not on the delivery path, so an outage pauses tracking and
 fallbacks but not your notifications ([overview.md](overview.md#1-the-sidecar-principle)).
@@ -66,24 +58,17 @@ request body and is rate limited per user after that check.
 
 ## Notification lifecycle
 
-```mermaid
-stateDiagram-v2
-  [*] --> PENDING: registered, the user has an active device
-  [*] --> NO_DEVICE_REGISTERED: registered, no active device (closed at once)
-  PENDING --> DELIVERED: DELIVERED event
-  PENDING --> READ: READ event (implies delivered)
-  DELIVERED --> READ: READ event
-  PENDING --> DISPATCHING: due_at reached, policy unmet
-  DELIVERED --> DISPATCHING: due_at reached, policy unmet
-  DISPATCHING --> DISPATCHING: retryable failure, next_attempt_at = now + backoff
-  DISPATCHING --> FALLBACK_TRIGGERED: webhook 2xx
-  DISPATCHING --> FALLBACK_FAILED: final 4xx, or max-attempts exhausted
-  DISPATCHING --> FALLBACK_EXPIRED: next retry would fall after the window
-  PENDING --> FALLBACK_EXPIRED: claimed after due_at + trigger window (webhook not called)
-  DELIVERED --> FALLBACK_EXPIRED: claimed after due_at + trigger window (webhook not called)
-  PENDING --> CANCELLED: sender DELETE
-  DELIVERED --> CANCELLED: sender DELETE
-```
+![Notification states](diagrams/states.svg)
+
+The transitions the picture groups together:
+
+- `PENDING` or `DELIVERED` → `DISPATCHING` when `due_at` is reached and the policy is unmet.
+- `DISPATCHING` → `DISPATCHING` on a retryable failure, with `next_attempt_at = now + backoff`; → `FALLBACK_TRIGGERED`
+  on a 2xx; → `FALLBACK_FAILED` on a final 4xx or when the attempts are exhausted; → `FALLBACK_EXPIRED` when the next
+  retry would fall after the trigger window, or the app's circuit is open.
+- `PENDING` or `DELIVERED` → `FALLBACK_EXPIRED` when the row is claimed after `due_at` + trigger window, or the app's
+  circuit is open: the webhook is not called.
+- `PENDING` or `DELIVERED` → `CANCELLED` on the sender's `DELETE`.
 
 `DISPATCHING` is reported as `FALLBACK_PENDING` by the API.
 

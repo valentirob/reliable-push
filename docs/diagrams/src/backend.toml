@@ -1,0 +1,154 @@
+# Backend modules: overview §4.
+title = "Backend modules"
+desc = "Every instance serves the HTTP API through one filter chain into the notification, device and tracking controllers; worker instances run the fallback scheduler, which first asks the circuit breaker and then claims due rows, the dispatcher and the signed webhook client, and the retention job; all of them use PostgreSQL, and the per-app configuration feeds the controllers and the dispatcher."
+width = 960
+height = 520
+
+[legend]
+dashed = "Configuration"
+
+[[zone]]
+x = 40
+y = 88
+w = 400
+h = 232
+tone = "plain"
+label = "HTTP API: every instance"
+
+[[zone]]
+x = 520
+y = 88
+w = 400
+h = 288
+tone = "plain"
+label = "Background: worker profile"
+
+[[node]]
+id = "apps"
+x = 392
+y = 16
+w = 176
+h = 56
+kind = "backend"
+tag = "config"
+name = "apps"
+sub = "per-app configuration"
+
+[[node]]
+id = "filter"
+x = 64
+y = 116
+w = 352
+h = 76
+kind = "backend"
+tag = "web"
+name = "Filter chain"
+sub = ["trace id, access log, 64 KB body limit,", "sender key / device JWT, rate limit"]
+
+[[node]]
+id = "ctrl"
+x = 64
+y = 216
+w = 352
+h = 80
+kind = "focal"
+tag = "api"
+name = "Controllers"
+sub = ["notifications: register, get, list, cancel", "devices: register, refresh, revoke", "tracking: DELIVERED / READ events"]
+
+[[node]]
+id = "fs"
+x = 544
+y = 120
+w = 168
+h = 56
+kind = "backend"
+name = "FallbackScheduler"
+sub = "claims due rows"
+
+[[node]]
+id = "fd"
+x = 744
+y = 120
+w = 152
+h = 56
+kind = "backend"
+name = "FallbackDispatcher"
+sub = "decision + window"
+
+[[node]]
+id = "cb"
+x = 544
+y = 216
+w = 168
+h = 72
+kind = "alert"
+tag = "guard"
+name = "CircuitBreaker"
+sub = ["per app, before the claim;", "suppresses open apps"]
+
+[[node]]
+id = "wc"
+x = 744
+y = 216
+w = 152
+h = 56
+kind = "backend"
+name = "HttpWebhookClient"
+sub = "HMAC signature"
+
+[[node]]
+id = "rj"
+x = 744
+y = 304
+w = 152
+h = 48
+kind = "backend"
+name = "RetentionJob"
+
+[[node]]
+id = "db"
+x = 360
+y = 432
+w = 280
+h = 72
+kind = "store"
+tag = "db"
+name = "PostgreSQL"
+sub = ["notification, notification_event, device,", "fallback_attempt, daily_stats, fallback_circuit"]
+
+[[edge]]
+points = [[240, 192], [240, 216]]
+
+[[edge]]
+points = [[240, 296], [240, 468], [360, 468]]
+
+[[edge]]
+points = [[600, 176], [600, 216]]
+label = "1 · EVALUATE"
+
+[[edge]]
+points = [[544, 148], [504, 148], [504, 432]]
+label = "2 · CLAIM"
+label_seg = 1
+label_at = 0.85
+
+[[edge]]
+points = [[616, 288], [616, 432]]
+
+[[edge]]
+points = [[712, 148], [744, 148]]
+
+[[edge]]
+points = [[820, 176], [820, 216]]
+
+[[edge]]
+points = [[820, 352], [820, 468], [640, 468]]
+
+[[edge]]
+points = [[568, 44], [820, 44], [820, 120]]
+style = "dashed"
+
+[[edge]]
+points = [[480, 72], [480, 256], [416, 256]]
+style = "dashed"

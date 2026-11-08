@@ -1,0 +1,151 @@
+# Components and how they relate: overview §2 and architecture.md.
+title = "Components and how they relate"
+desc = "Your sender backend pushes through FCM and APNs and registers each tracked push with the reliable-push api role; the app's SDK registers the device and sends events with a device JWT after the api verifies the identity provider's ID token; the worker role reads PostgreSQL and calls your fallback receiver with an HMAC-signed webhook."
+width = 960
+height = 532
+
+[legend]
+input = "Your system"
+alert = "Your fallback receiver"
+dashed = "Token check"
+
+[[zone]]
+x = 184
+y = 204
+w = 592
+h = 208
+tone = "accent"
+label = "reliable-push"
+
+[[node]]
+id = "sb"
+x = 40
+y = 44
+w = 200
+h = 76
+kind = "input"
+tag = "yours"
+name = "Sender backend"
+sub = ["+ payload jar, client-java", "(both optional)"]
+
+[[node]]
+id = "pp"
+x = 384
+y = 48
+w = 192
+h = 64
+kind = "external"
+tag = "cloud"
+name = "FCM / APNs"
+
+[[node]]
+id = "app"
+x = 720
+y = 48
+w = 200
+h = 64
+kind = "input"
+tag = "yours"
+name = "Mobile app"
+sub = "+ reliable-push SDK"
+
+[[node]]
+id = "api"
+x = 216
+y = 240
+w = 176
+h = 64
+kind = "focal"
+tag = "api"
+name = "api role"
+sub = "REST /v1/*"
+
+[[node]]
+id = "wrk"
+x = 568
+y = 240
+w = 176
+h = 64
+kind = "backend"
+tag = "worker"
+name = "worker role"
+sub = "fallback scheduler"
+
+[[node]]
+id = "db"
+x = 392
+y = 328
+w = 176
+h = 56
+kind = "store"
+tag = "db"
+name = "PostgreSQL"
+sub = "Flyway at startup"
+
+[[node]]
+id = "idp"
+x = 40
+y = 448
+w = 192
+h = 64
+kind = "input"
+tag = "yours"
+name = "Identity provider"
+sub = "OIDC"
+
+[[node]]
+id = "rcv"
+x = 720
+y = 448
+w = 200
+h = 64
+kind = "alert"
+tag = "yours"
+name = "Fallback receiver"
+sub = "HTTPS endpoint"
+
+[[edge]]
+points = [[240, 80], [384, 80]]
+style = "push"
+label = "PUSH + RP_TID"
+
+[[edge]]
+points = [[576, 80], [720, 80]]
+style = "push"
+label = "ARRIVES"
+
+[[edge]]
+points = [[140, 120], [140, 272], [216, 272]]
+style = "track"
+label = "REGISTER\nX-API-KEY"
+label_seg = 0
+label_at = 0.45
+
+[[edge]]
+points = [[776, 112], [776, 168], [352, 168], [352, 240]]
+style = "track"
+label = "DEVICES, EVENTS · DEVICE JWT"
+label_seg = 1
+
+[[edge]]
+points = [[216, 288], [120, 288], [120, 448]]
+style = "dashed"
+label = "VERIFY ID TOKEN"
+label_seg = 1
+label_side = "left"
+label_at = 0.6
+
+[[edge]]
+points = [[304, 304], [304, 356], [392, 356]]
+style = "flow"
+
+[[edge]]
+points = [[656, 304], [656, 356], [568, 356]]
+style = "flow"
+
+[[edge]]
+points = [[744, 272], [820, 272], [820, 448]]
+style = "fallback"
+label = "SIGNED WEBHOOK"
+label_seg = 1
+label_at = 0.6

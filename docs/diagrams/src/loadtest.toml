@@ -1,0 +1,108 @@
+# Load tests: overview §11.
+title = "Load tests"
+desc = "A Gatling container on the same compose network drives 500 notifications and 1,000 events per second against an api limited to 2 CPUs and 1 GiB, the workers deliver the burst of fallbacks to the harness receiver, the BurstDrainProbe reads the workers' Prometheus endpoint, and the results land in harness/build/load/summary.json."
+width = 960
+height = 400
+
+[legend]
+input = "Load tools"
+alert = "Harness receiver"
+
+[[node]]
+id = "g"
+x = 40
+y = 64
+w = 192
+h = 64
+kind = "input"
+tag = "gatling"
+name = "Gatling container"
+sub = "same compose network"
+
+[[node]]
+id = "api"
+x = 360
+y = 64
+w = 192
+h = 64
+kind = "focal"
+tag = "backend"
+name = "api"
+sub = "2 CPUs / 1 GiB"
+
+[[node]]
+id = "pg"
+x = 680
+y = 128
+w = 176
+h = 64
+kind = "store"
+tag = "db"
+name = "postgres"
+
+[[node]]
+id = "w"
+x = 360
+y = 200
+w = 192
+h = 64
+kind = "backend"
+tag = "backend"
+name = "workers"
+
+[[node]]
+id = "rcv"
+x = 680
+y = 232
+w = 176
+h = 56
+kind = "alert"
+name = "harness receiver"
+
+[[node]]
+id = "out"
+x = 40
+y = 200
+w = 192
+h = 56
+kind = "store"
+tag = "file"
+name = "summary.json"
+sub = "harness/build/load"
+
+[[node]]
+id = "p"
+x = 40
+y = 320
+w = 192
+h = 64
+kind = "input"
+tag = "jdk"
+name = "BurstDrainProbe"
+
+[[edge]]
+points = [[232, 96], [360, 96]]
+style = "track"
+label = "500 NOTIF./S\n1,000 EVENTS/S"
+
+[[edge]]
+points = [[552, 96], [600, 96], [600, 148], [680, 148]]
+
+[[edge]]
+points = [[552, 216], [632, 216], [632, 172], [680, 172]]
+
+[[edge]]
+points = [[552, 252], [680, 252]]
+style = "fallback"
+
+[[edge]]
+points = [[136, 128], [136, 200]]
+style = "dashed"
+label = "RESULTS"
+
+[[edge]]
+points = [[232, 352], [296, 352], [296, 232], [360, 232]]
+style = "dashed"
+label = "/actuator/prometheus"
+label_seg = 1
+label_side = "left"
