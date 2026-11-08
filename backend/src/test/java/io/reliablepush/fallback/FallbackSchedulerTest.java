@@ -209,8 +209,7 @@ class FallbackSchedulerTest {
         when(breaker.evaluate(APPS)).thenReturn(circuits());
         when(suppressor.suppress(any(), anyBoolean(), any())).thenThrow(new IllegalStateException("boom"));
 
-        try (EventCapture capture = new EventCapture();
-                EventCapture errors = new EventCapture(FallbackScheduler.class.getName())) {
+        try (EventCapture capture = new EventCapture()) {
             assertThat(scheduler().tick()).isZero();
 
             assertThat(capture.events()).singleElement().satisfies(e -> assertThat(EventCapture.data(e))
@@ -254,8 +253,7 @@ class FallbackSchedulerTest {
             return null;
         }).when(dispatcher).process(any());
 
-        try (EventCapture capture = new EventCapture();
-                EventCapture errors = new EventCapture(FallbackScheduler.class.getName())) {
+        try (EventCapture capture = new EventCapture()) {
             assertThat(scheduler(false, clock).tick()).isEqualTo(1); // the row claimed before still ran
 
             assertThat(capture.events()).singleElement().satisfies(e -> assertThat(EventCapture.data(e))
@@ -263,6 +261,25 @@ class FallbackSchedulerTest {
         }
         verify(notifications, times(1)).claimDue(any(), any(), anyInt(), any());
         verify(dispatcher, times(1)).process(any());
+    }
+
+    @Test
+    void stopRequestedDuringTheRecheckOfALongDrainClaimsNothingMore() {
+        MutableClock clock = new MutableClock(NOW);
+        FallbackScheduler scheduler = scheduler(false, clock);
+        when(breaker.evaluate(APPS)).thenReturn(circuits()).thenAnswer(invocation -> {
+            scheduler.requestStop(); // the shutdown arrives while the second check runs
+            return circuits();
+        });
+        when(notifications.claimDue(any(), any(), anyInt(), any())).thenReturn(List.of(row()));
+        doAnswer(invocation -> {
+            clock.advance(Duration.ofSeconds(6));
+            return null;
+        }).when(dispatcher).process(any());
+
+        assertThat(scheduler.tick()).isEqualTo(1);
+
+        verify(notifications, times(1)).claimDue(any(), any(), anyInt(), any());
     }
 
     @Test

@@ -26,8 +26,8 @@ import org.springframework.transaction.support.TransactionTemplate;
  * during a long drain), in one transaction holding {@code pg_advisory_xact_lock(4242002)}, waited for at most
  * {@link #LOCK_TIMEOUT} ({@code SET LOCAL lock_timeout}): the workers evaluate one after the other, each from the
  * committed state of the one before, so a transition is written once and no worker claims from a stale state. A lock
- * that cannot be taken in time throws, and the tick claims nothing (fail closed). The evaluation also deletes, once a day
- * per instance, the circuit events older than {@code admin.rollup-retention-days} (spec 3); while the breaker is
+ * that cannot be taken in time throws, and the tick claims nothing (fail closed). The evaluation also deletes, once a
+ * day per instance, the circuit events older than {@code admin.rollup-retention-days} (spec 3); while the breaker is
  * disabled only that prune runs, under a non-blocking try-lock.
  *
  * <p>Time comes from the application {@link Clock}, the one the claim and the tracking writes use, so detection and

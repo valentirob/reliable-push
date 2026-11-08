@@ -198,6 +198,7 @@ class AdminFallbackController {
     }
 
     private static String encode(long id) {
-        return Base64.getUrlEncoder().withoutPadding().encodeToString(Long.toString(id).getBytes(StandardCharsets.US_ASCII));
+        byte[] bytes = Long.toString(id).getBytes(StandardCharsets.US_ASCII);
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
     }
 }

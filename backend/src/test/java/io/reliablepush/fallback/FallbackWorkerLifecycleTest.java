@@ -31,8 +31,8 @@ class FallbackWorkerLifecycleTest {
         private final boolean idle;
 
         RecordingScheduler(boolean idle) {
-            super(null, null, null, null, List.of(), false, Clock.systemUTC(), Duration.ofMinutes(2), Duration.ofSeconds(5),
-                    1, 1);
+            super(null, null, null, null, List.of(), false, Clock.systemUTC(), Duration.ofMinutes(2),
+                    Duration.ofSeconds(5), 1, 1);
             this.idle = idle;
         }
 

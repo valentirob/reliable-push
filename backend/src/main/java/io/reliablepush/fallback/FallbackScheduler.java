@@ -224,6 +224,10 @@ public class FallbackScheduler {
                     }
                     excluded = again.get();
                     checkedAt = now;
+                    if (stopRequested) { // stop requested during the check, which can take seconds: claim nothing
+                        slots.release(capacity);
+                        break;
+                    }
                 }
                 first = false;
                 List<ClaimedNotification> claimed;
