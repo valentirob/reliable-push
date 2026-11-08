@@ -290,13 +290,14 @@ final class SDK: Sendable {
         return await withCheckedContinuation { c in
             waiting.withLock { $0 = c }
             let timer = Task {
-                try? await sleep(timeout)
+                // A cancelled sleep means the provider answered: never report that as a timeout.
+                guard (try? await sleep(timeout)) != nil else { return }
                 finish(nil)
             }
             Task {
                 let answer = await provider()
-                timer.cancel()
                 finish(.some(answer))
+                timer.cancel()
             }
         }
     }
