@@ -30,6 +30,11 @@ All notable changes to this project are documented here. Versions follow [Semant
 - The at-a-glance picture is redrawn in the same style and animated: the numbered steps light up in order and a cursor
   shows the fallback timeline (CSS only, so it plays on GitHub and in the presentation; still for reduced motion). The
   PNG is its static frame; the 0.2.0 picture is kept in `docs/images/backup/`.
+- The presentation explains the flow from the top down: the animated at-a-glance picture with its six steps, then one
+  slide each for the backend (API: register and events; worker: circuit check, claim, trigger window, signed webhook,
+  outcomes), the iOS flow (the Notification Service Extension confirms an alert that iOS draws) and the Android flow
+  (the SDK turns a data-only message into a local notification after the gate), and an iOS vs Android comparison. The
+  SDK slides now cover only what goes into the app.
 
 ## 0.2.0 — 2026-11-08
 
