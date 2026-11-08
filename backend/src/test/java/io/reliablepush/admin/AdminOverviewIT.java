@@ -84,6 +84,9 @@ class AdminOverviewIT extends PostgresTestBase {
         notification("shop", "READ", recent, null, true, true);
         notification("shop", "FALLBACK_TRIGGERED", recent, null, false, false);
         notification("shop", "FALLBACK_TRIGGERED", now.minus(2, ChronoUnit.HOURS), null, false, false);
+        // untracked (no device): counted as registered, left out of the rate denominators
+        notification("shop", "NO_DEVICE_REGISTERED", recent, null, false, false);
+        notification("shop", "NO_DEVICE_REGISTERED", recent, null, false, false);
 
         ResponseEntity<String> response = get(ALL_KEY, "/v1/admin/overview?app=shop&window=1h");
 
@@ -92,8 +95,9 @@ class AdminOverviewIT extends PostgresTestBase {
         String body = response.getBody();
         assertThat((String) JsonPath.read(body, "$.items[0].appId")).isEqualTo("shop");
         assertThat((String) JsonPath.read(body, "$.items[0].window")).isEqualTo("1h");
-        assertThat((Integer) JsonPath.read(body, "$.items[0].registered")).isEqualTo(4);
+        assertThat((Integer) JsonPath.read(body, "$.items[0].registered")).isEqualTo(6);
         assertThat((Integer) JsonPath.read(body, "$.items[0].cancelled")).isEqualTo(1);
+        assertThat((Integer) JsonPath.read(body, "$.items[0].noDeviceRegistered")).isEqualTo(2);
         assertThat((Integer) JsonPath.read(body, "$.items[0].delivered")).isEqualTo(2);
         assertThat((Integer) JsonPath.read(body, "$.items[0].read")).isEqualTo(1);
         assertThat((Integer) JsonPath.read(body, "$.items[0].fallbackTriggered")).isEqualTo(1);
@@ -105,7 +109,7 @@ class AdminOverviewIT extends PostgresTestBase {
 
         // the older row is inside a wider window
         String wide = get(ALL_KEY, "/v1/admin/overview?app=shop&window=24h").getBody();
-        assertThat((Integer) JsonPath.read(wide, "$.items[0].registered")).isEqualTo(5);
+        assertThat((Integer) JsonPath.read(wide, "$.items[0].registered")).isEqualTo(7);
     }
 
     @Test

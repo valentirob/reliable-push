@@ -261,6 +261,27 @@ class CircuitBreakerIT extends PostgresTestBase {
     }
 
     @Test
+    void usersWithoutDeviceAreNotPartOfTheCohort() {
+        // the campaign of campaignThenSilenceStaysClosed, plus ten untracked sends (no device) per tracked one
+        campaign("NOT_DELIVERED", 200);
+        jdbc.sql("""
+                        insert into notification (id, app_id, user_id, policy, timeout_minutes, fallback_payload, state,
+                                                  created_at, closed_at)
+                        select gen_random_uuid(), :app, 'u-none', 'NOT_DELIVERED', 10, '{}'::jsonb,
+                               'NO_DEVICE_REGISTERED', c.at, c.at
+                          from (select cast(:base as timestamptz) - (g % 200) * interval '1 millisecond' as at
+                                  from generate_series(0, 1999) g) c
+                        """)
+                .param("app", app)
+                .param("base", Timestamp.from(now.minus(Duration.ofMinutes(10))))
+                .update();
+
+        assertThat(queries.cohortRatio(app, now, properties.window(), 50)).isGreaterThan(0.5);
+        assertThat(breaker.evaluate(List.of(app)).get(app).state()).isEqualTo(CircuitState.CLOSED);
+        assertThat(events(app)).isEmpty();
+    }
+
+    @Test
     void notReadDeliveredRowsCountAsDelivered() {
         // NOT_READ: delivered but unopened rows come due (DELIVERED, due_at set); their delivery counts in the cohort
         campaign("NOT_READ", 100);

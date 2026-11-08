@@ -33,7 +33,6 @@ final class ReliablePushExtensionTests: XCTestCase {
 
     override func setUp() {
         SDK.resetForTesting()
-        RefreshGate.resetForTesting()
         StubURLProtocol.reset()
         fx = SDKFixture()
         fx.storeConfig()
@@ -45,8 +44,8 @@ final class ReliablePushExtensionTests: XCTestCase {
         fx.cleanup()
     }
 
-    private func makeExtension(timeout: TimeInterval = 5) -> ReliablePushExtension {
-        ReliablePushExtension(environment: fx.environment, options: ReliablePushOptions(extensionSendTimeout: timeout))
+    private func makeExtension(timeout: TimeInterval = 5, environment: SDKEnvironment? = nil) -> ReliablePushExtension {
+        ReliablePushExtension(environment: environment ?? fx.environment, options: ReliablePushOptions(extensionSendTimeout: timeout))
     }
 
     private func request(_ userInfo: [AnyHashable: Any], title: String = "Original title") -> UNNotificationRequest {
@@ -125,7 +124,7 @@ final class ReliablePushExtensionTests: XCTestCase {
         let ext = makeExtension()
         fx.storeConfig()
         StubURLProtocol.reset { SDKFixture.acceptAll($0) }
-        let tid = UUID().uuidString
+        let tid = UUID().uuidString.lowercased()
         let h = recorder()
         XCTAssertTrue(ext.didReceive(request(["rp_tid": tid]), withContentHandler: h.handler))
         wait(for: [h.called], timeout: 5)
@@ -149,7 +148,7 @@ final class ReliablePushExtensionTests: XCTestCase {
     // MARK: delivered
 
     func testDeliveredIsPersistedBeforeHandlerAndSent() {
-        let tid = UUID().uuidString
+        let tid = UUID().uuidString.lowercased()
         let queue = fx.queue
         let queuedAtSend = Locked<[String]>([])
         StubURLProtocol.reset { req in
@@ -170,6 +169,21 @@ final class ReliablePushExtensionTests: XCTestCase {
         XCTAssertEqual(h.contents.first?.title, "Original title")
         waitForFlushEnd()
         XCTAssertEqual(fx.queue.count, 0)
+    }
+
+    func testUpperCaseRpTidIsQueuedSentAndAcknowledgedInLowerCase() {
+        StubURLProtocol.reset { SDKFixture.acceptAll($0) } // echoes lower case, like the backend
+        let upper = UUID().uuidString.uppercased(), lower = upper.lowercased()
+        let seen = Locked<String?>(nil)
+        let h = recorder()
+        XCTAssertTrue(makeExtension().didReceive(request(["rp_tid": upper]), withContentHandler: h.handler,
+                                                 customize: { _, tid in seen.withLock { $0 = tid } }))
+        wait(for: [h.called], timeout: 5)
+        waitForFlushEnd()
+        XCTAssertEqual(seen.withLock { $0 }, lower, "the customizer gets the normalized id")
+        XCTAssertEqual(SDKFixture.sentEvents(), ["\(lower)|DELIVERED"])
+        XCTAssertEqual(fx.queue.count, 0, "acknowledged once")
+        XCTAssertFalse(fx.log.messages.contains { $0.contains("unacknowledged") })
     }
 
     func testDeniedSettingsMeanNoDelivered() {
@@ -201,7 +215,7 @@ final class ReliablePushExtensionTests: XCTestCase {
         StubURLProtocol.reset { SDKFixture.acceptAll($0) }
         var expected: [String] = []
         for status in [UNAuthorizationStatus.provisional, .ephemeral] {
-            let tid = UUID().uuidString
+            let tid = UUID().uuidString.lowercased()
             expected.append("\(tid)|DELIVERED")
             fx.settings.set(GateSettings(authorized: GateSettings.allows(status), alert: false, notificationCenter: true,
                                          lockScreen: false))
@@ -215,7 +229,7 @@ final class ReliablePushExtensionTests: XCTestCase {
 
     func testZeroSendTimeoutStillReadsGateAndQueuesDelivered() {
         StubURLProtocol.reset { _ in .hang }
-        let tid = UUID().uuidString
+        let tid = UUID().uuidString.lowercased()
         let h = recorder()
         XCTAssertTrue(makeExtension(timeout: 0).didReceive(request(["rp_tid": tid]), withContentHandler: h.handler))
         XCTAssertEqual(fx.queue.peek(max: 10).map(\.key), ["\(tid)|DELIVERED"])
@@ -256,7 +270,7 @@ final class ReliablePushExtensionTests: XCTestCase {
 
     func testContentHandlerCalledOnceWhenBackendHangs() {
         StubURLProtocol.reset { _ in .hang }
-        let tid = UUID().uuidString
+        let tid = UUID().uuidString.lowercased()
         let h = recorder()
         let start = Date()
         XCTAssertTrue(makeExtension(timeout: 0.5).didReceive(request(["rp_tid": tid]), withContentHandler: h.handler))
@@ -277,7 +291,7 @@ final class ReliablePushExtensionTests: XCTestCase {
             Thread.sleep(forTimeInterval: 0.5)
             return SDKFixture.acceptAll(req)
         }
-        let tid = UUID().uuidString
+        let tid = UUID().uuidString.lowercased()
         let h = recorder()
         let ext = makeExtension(timeout: 10)
         XCTAssertTrue(ext.didReceive(request(["rp_tid": tid]), withContentHandler: h.handler,
@@ -301,7 +315,7 @@ final class ReliablePushExtensionTests: XCTestCase {
 
     func testCustomizerRunsBeforeHandler() {
         StubURLProtocol.reset { SDKFixture.acceptAll($0) }
-        let tid = UUID().uuidString
+        let tid = UUID().uuidString.lowercased()
         let h = recorder()
         let seenTid = Locked<String?>(nil)
         XCTAssertTrue(makeExtension().didReceive(request(["rp_tid": tid, "extra": "v"]), withContentHandler: h.handler,
@@ -320,5 +334,156 @@ final class ReliablePushExtensionTests: XCTestCase {
         XCTAssertEqual(content?.body, "Original body")
         XCTAssertEqual(content?.userInfo["extra"] as? String, "v")
         waitForFlushEnd()
+    }
+
+    // MARK: default timeout, no renewal, one send (spec 3.1, 3.3)
+
+    func testDefaultSendTimeoutIsTwoSeconds() {
+        XCTAssertEqual(ReliablePushOptions().extensionSendTimeout, 2)
+        XCTAssertEqual(ReliablePushOptions(extensionSendTimeout: 60).extensionSendTimeout, 60, "clamped by the extension")
+        StubURLProtocol.reset { _ in .hang }
+        let h = recorder()
+        let ext = ReliablePushExtension(environment: fx.environment, options: .init())
+        let elapsed = handledOnce(ext, h, within: 2.5)
+        XCTAssertGreaterThan(elapsed, 1.8, "waits for the send up to the 2 s default")
+        waitForFlushEnd()
+    }
+
+    func testUnauthorizedSendMakesNoRefreshAndSetsRenewalNeeded() {
+        fx.register(token: SDKFixture.staleToken) // under 20 % left: the old SDK refreshed first
+        StubURLProtocol.reset { _ in .response(status: 401) }
+        let tid = UUID().uuidString.lowercased()
+        let h = recorder()
+        XCTAssertTrue(makeExtension().didReceive(request(["rp_tid": tid]), withContentHandler: h.handler))
+        wait(for: [h.called], timeout: 5)
+        waitForFlushEnd()
+        XCTAssertEqual(StubURLProtocol.requests.map(\.url.path), ["/v1/events"], "only the event send")
+        XCTAssertTrue(fx.tokens().renewalNeeded)
+        XCTAssertTrue(fx.state.renewalNeeded)
+        XCTAssertEqual(fx.queue.peek(max: 10).map(\.key), ["\(tid)|DELIVERED"], "the event stays queued")
+        XCTAssertEqual(h.count, 1)
+    }
+
+    func testExpiredTokenIsSentWithoutRefresh() {
+        fx.register(token: SDKFixture.expiredToken) // the backend accepts it within its events grace period
+        StubURLProtocol.reset { SDKFixture.acceptAll($0) }
+        let tid = UUID().uuidString.lowercased()
+        let h = recorder()
+        XCTAssertTrue(makeExtension().didReceive(request(["rp_tid": tid]), withContentHandler: h.handler))
+        wait(for: [h.called], timeout: 5)
+        waitForFlushEnd()
+        XCTAssertEqual(StubURLProtocol.requests.map(\.url.path), ["/v1/events"])
+        XCTAssertEqual(StubURLProtocol.requests.first?.headers["Authorization"], "Bearer \(SDKFixture.expiredToken)")
+        XCTAssertEqual(fx.queue.count, 0)
+    }
+
+    func testOneSendWithThisNotificationFirst() {
+        for i in 0..<60 { fx.queue.add(QueuedEvent(trackingId: "old\(i)", type: .read, occurredAt: SDKFixture.now)) }
+        StubURLProtocol.reset { SDKFixture.acceptAll($0) }
+        let tid = UUID().uuidString.lowercased()
+        let h = recorder()
+        XCTAssertTrue(makeExtension().didReceive(request(["rp_tid": tid]), withContentHandler: h.handler))
+        wait(for: [h.called], timeout: 5)
+        waitForFlushEnd()
+        XCTAssertEqual(StubURLProtocol.requests.count, 1, "one POST /v1/events")
+        XCTAssertEqual(SDKFixture.sentEvents().first, "\(tid)|DELIVERED")
+        XCTAssertEqual(SDKFixture.sentEvents().count, 50)
+        XCTAssertEqual(fx.queue.count, 11, "the rest waits for the app")
+    }
+
+    // MARK: fault injection: the handler is called exactly once, within timeout + 0.5 s
+
+    /// Calls `didReceive` for a fresh tracked request and returns the seconds until the handler ran; fails unless it
+    /// ran exactly once within `within` and no second call follows.
+    @discardableResult
+    private func handledOnce(_ ext: ReliablePushExtension, _ h: HandlerRecorder, within: TimeInterval,
+                             tid: String = UUID().uuidString.lowercased()) -> TimeInterval {
+        let start = Date()
+        let at = Locked<Date?>(nil)
+        let handler = h.handler
+        XCTAssertTrue(ext.didReceive(request(["rp_tid": tid]), withContentHandler: { content in
+            at.withLock { $0 = $0 ?? Date() }
+            handler(content)
+        }))
+        wait(for: [h.called], timeout: within + 1)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.7))
+        XCTAssertEqual(h.count, 1, "exactly once")
+        let elapsed = (at.withLock { $0 } ?? .distantFuture).timeIntervalSince(start)
+        XCTAssertLessThanOrEqual(elapsed, within, "handed back in time")
+        return elapsed
+    }
+
+    func testKeychainReadFailureHandsBackAtOnceAndKeepsTheEvent() {
+        StubURLProtocol.reset { SDKFixture.acceptAll($0) }
+        let env = fx.environment(secrets: FailingSecretStore())
+        let tid = UUID().uuidString.lowercased()
+        // the cached device id says registered: DELIVERED is kept for the app, nothing can be sent without the token
+        let elapsed = handledOnce(makeExtension(timeout: 2, environment: env), recorder(), within: 2.5, tid: tid)
+        XCTAssertLessThan(elapsed, 1, "no wait without a token")
+        XCTAssertEqual(fx.queue.peek(max: 10).map(\.key), ["\(tid)|DELIVERED"])
+        XCTAssertTrue(StubURLProtocol.requests.isEmpty)
+        XCTAssertTrue(fx.warned("token.unavailable"))
+
+        // no cached device id either: not registered, nothing recorded
+        fx.state.clearRegistration()
+        handledOnce(makeExtension(timeout: 2, environment: env), recorder(), within: 1)
+        XCTAssertEqual(fx.queue.count, 1)
+    }
+
+    func testCorruptQueueFileHandsBackOnceAndStillSends() throws {
+        try FileManager.default.createDirectory(at: fx.dir, withIntermediateDirectories: true)
+        try Data("{not json".utf8).write(to: fx.dir.appendingPathComponent("events.json"))
+        StubURLProtocol.reset { SDKFixture.acceptAll($0) }
+        let tid = UUID().uuidString.lowercased()
+        handledOnce(makeExtension(timeout: 2), recorder(), within: 2.5, tid: tid)
+        waitForFlushEnd()
+        XCTAssertEqual(SDKFixture.sentEvents(), ["\(tid)|DELIVERED"])
+        XCTAssertTrue(fx.warned("tracking.event_dropped"), "the corrupt file is reported")
+    }
+
+    func testUnwritableQueueHandsBackAtOnceWithoutSending() throws {
+        // a regular file where the queue directory should be: nothing can be persisted
+        try FileManager.default.createDirectory(at: fx.dir.deletingLastPathComponent(), withIntermediateDirectories: true)
+        XCTAssertTrue(FileManager.default.createFile(atPath: fx.dir.path, contents: Data()))
+        StubURLProtocol.reset { SDKFixture.acceptAll($0) }
+        let elapsed = handledOnce(makeExtension(timeout: 2), recorder(), within: 2.5)
+        XCTAssertLessThan(elapsed, 1, "an SDK error hands the notification back at once")
+        XCTAssertTrue(StubURLProtocol.requests.isEmpty)
+        XCTAssertTrue(fx.warned("tracking.event_dropped"))
+    }
+
+    func testAppGroupUnavailableHandsBackTheOriginalAtOnce() {
+        let suite = fx.suite
+        let ext = ReliablePushExtension(resolve: {
+            try? SDKEnvironment.appGroup("group.missing", options: .init(),
+                                         defaults: { _ in UserDefaults(suiteName: suite) }, container: { _ in nil })
+        }, options: .init())
+        let h = recorder()
+        let elapsed = handledOnce(ext, h, within: 2.5)
+        XCTAssertLessThan(elapsed, 0.5)
+        XCTAssertEqual(h.contents.first?.title, "Original title")
+        XCTAssertTrue(StubURLProtocol.requests.isEmpty)
+    }
+
+    func testHangingSettingsReadHandsBackWithinTheBudget() {
+        StubURLProtocol.reset { SDKFixture.acceptAll($0) }
+        let env = fx.environment(settings: HangingSettings())
+        // default budget: the 2 s settings cap is the whole budget
+        handledOnce(ReliablePushExtension(environment: env, options: .init()), recorder(), within: 2.5)
+        // a shorter budget also bounds the settings read
+        handledOnce(makeExtension(timeout: 0.5, environment: env), recorder(), within: 1.0)
+        // no answer is not a "no": iOS shows the content, so DELIVERED is recorded (queued, or sent if time was left)
+        waitForFlushEnd()
+        XCTAssertEqual(fx.queue.count + SDKFixture.sentEvents().count, 2, "unanswered settings count as shown")
+    }
+
+    func testNetworkErrorHandsBackOnceAndKeepsTheEvent() {
+        StubURLProtocol.reset { _ in .fail }
+        let tid = UUID().uuidString.lowercased()
+        let elapsed = handledOnce(makeExtension(timeout: 2), recorder(), within: 2.5, tid: tid)
+        XCTAssertLessThan(elapsed, 1.5, "a transport error ends the send at once")
+        waitForFlushEnd()
+        XCTAssertEqual(fx.queue.peek(max: 10).map(\.key), ["\(tid)|DELIVERED"])
+        XCTAssertFalse(fx.tokens().renewalNeeded)
     }
 }

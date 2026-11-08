@@ -9,6 +9,37 @@ final class FakeSettings: NotificationSettingsSource, @unchecked Sendable {
     func current() async -> GateSettings { value.withLock { $0 } }
 }
 
+/// Notification settings that never answer (a hanging `notificationSettings()` read).
+struct HangingSettings: NotificationSettingsSource {
+    func current() async -> GateSettings {
+        while !Task.isCancelled { try? await Task.sleep(nanoseconds: 1_000_000_000) }
+        return .shown
+    }
+}
+
+/// Secret store whose every call fails as an unexpected Keychain error would (e.g. -34018, missing entitlement).
+final class FailingSecretStore: SecretStore {
+    func read(account: String) -> SecretRead { .failed(-34018) }
+    func write(_ data: Data, account: String) -> Bool { false }
+    func delete(account: String) {}
+}
+
+/// The fixture's secrets, except that the read after `blockNextRead(for:)` blocks its thread first (a slow Keychain).
+final class SlowOnceSecretStore: SecretStore, @unchecked Sendable {
+    private let inner: FakeSecretStore
+    private let delay = Locked<TimeInterval?>(nil)
+    init(_ inner: FakeSecretStore) { self.inner = inner }
+    func blockNextRead(for seconds: TimeInterval) { delay.withLock { $0 = seconds } }
+    func read(account: String) -> SecretRead {
+        if let seconds = delay.withLock({ d -> TimeInterval? in defer { d = nil }; return d }) {
+            Thread.sleep(forTimeInterval: seconds)
+        }
+        return inner.read(account: account)
+    }
+    func write(_ data: Data, account: String) -> Bool { inner.write(data, account: account) }
+    func delete(account: String) { inner.delete(account: account) }
+}
+
 extension GateSettings {
     static let shown = GateSettings(authorized: true, alert: true, notificationCenter: true, lockScreen: true)
 }
@@ -56,6 +87,8 @@ final class SDKFixture {
     /// Expiring token: under 20 % left at `now`, so the next flush refreshes first.
     static let staleToken = DeviceTokenTests.token(iat: 1_700_000_000 - 3500, exp: 1_700_000_000 + 100)
     static let freshToken = DeviceTokenTests.token(iat: 1_700_000_000, exp: 1_700_000_000 + 3600)
+    /// Expired 100 s before `now` (inside the backend's events grace period).
+    static let expiredToken = DeviceTokenTests.token(iat: 1_700_000_000 - 3700, exp: 1_700_000_000 - 100)
 
     let root: URL
     let dir: URL
@@ -65,6 +98,8 @@ final class SDKFixture {
     let settings = FakeSettings()
     let activity = FakeActivity()
     let log = WarnBox()
+    /// `SDKEnvironment.providerTimeout` of the next `environment` (30 s in production).
+    var providerTimeout: TimeInterval = 30
 
     init() {
         root = FileManager.default.temporaryDirectory.appendingPathComponent("rp-sdk-\(UUID().uuidString)")
@@ -75,10 +110,13 @@ final class SDKFixture {
         SDKLog.sink = { level, message in box.add("\(level) \(message)") }
     }
 
-    var environment: SDKEnvironment {
-        SDKEnvironment(state: state, queueDirectory: dir, secrets: secrets, settings: settings,
+    var environment: SDKEnvironment { environment() }
+
+    /// The fixture's environment, with the secret store or the settings source replaced (fault injection).
+    func environment(secrets: (any SecretStore)? = nil, settings: (any NotificationSettingsSource)? = nil) -> SDKEnvironment {
+        SDKEnvironment(state: state, queueDirectory: dir, secrets: secrets ?? self.secrets, settings: settings ?? self.settings,
                        sessionConfiguration: { StubURLProtocol.configuration() },
-                       now: { SDKFixture.now }, activity: activity)
+                       now: { SDKFixture.now }, activity: activity, providerTimeout: providerTimeout)
     }
 
     var queue: EventQueue { EventQueue(directory: dir) }
@@ -109,7 +147,8 @@ final class SDKFixture {
         }
     }
 
-    /// Stub reply acknowledging every event of the request as ACCEPTED.
+    /// Stub reply acknowledging every event of the request as ACCEPTED, echoing the ids in lower case as the backend
+    /// does (it stores the canonical UUID form).
     static func acceptAll(_ req: URLRequest) -> StubURLProtocol.Reply {
         var body = req.httpBody ?? Data()
         if let s = req.httpBodyStream {
@@ -119,7 +158,7 @@ final class SDKFixture {
         }
         let obj = try? JSONSerialization.jsonObject(with: body) as? [String: Any]
         let ids = ((obj?["events"] as? [[String: Any]]) ?? []).compactMap { $0["trackingId"] as? String }
-        let list = ids.map { #"{"trackingId":"\#($0)","outcome":"ACCEPTED"}"# }.joined(separator: ",")
+        let list = ids.map { #"{"trackingId":"\#($0.lowercased())","outcome":"ACCEPTED"}"# }.joined(separator: ",")
         return .response(status: 200, body: Data(#"{"items":[\#(list)]}"#.utf8))
     }
 

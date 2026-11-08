@@ -29,7 +29,7 @@ function appBlock(o, showName, first, circuit) {
     showName ? el('h2', { text: o.appId }) : null,
     circuitBadge(circuit),
     el('div', { class: 'tiles' },
-      tile('Registered', String(o.registered), o.cancelled + ' cancelled'),
+      tile('Registered', String(o.registered), o.cancelled + ' cancelled, ' + o.noDeviceRegistered + ' without device'),
       tile('Delivery rate', fmtRate(o.deliveryRate), o.delivered + ' delivered'),
       tile('Read rate', fmtRate(o.readRate), o.read + ' read'),
       tile('Fallbacks triggered', String(o.fallbackTriggered), fmtRate(o.fallbackRate)),

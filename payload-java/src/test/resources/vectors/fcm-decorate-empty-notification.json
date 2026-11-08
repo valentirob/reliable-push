@@ -1,0 +1,20 @@
+{
+  "name": "fcm-decorate-empty-notification",
+  "description": "empty title and body are not visible",
+  "operation": "fcm.decorate",
+  "input": {
+    "trackingId": "6f1c2b9e-5d1a-4c55-9a38-0c1f3a7d9e11",
+    "fcm": {
+      "message": {
+        "token": "tok",
+        "notification": {
+          "title": "",
+          "body": ""
+        }
+      }
+    }
+  },
+  "expect": {
+    "error": "FCM_NO_NOTIFICATION"
+  }
+}

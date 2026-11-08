@@ -53,7 +53,6 @@ final class SDKLogTests: XCTestCase {
     /// bearer header or notification text may reach the log.
     func testNoTokenOrContentInLogs() async throws {
         SDK.resetForTesting()
-        RefreshGate.resetForTesting()
         let fx = SDKFixture()
         defer { fx.cleanup() }
         SDKLog.debug = true
@@ -67,7 +66,7 @@ final class SDKLogTests: XCTestCase {
 
         StubURLProtocol.reset { req in
             switch req.url?.path {
-            case "/v1/devices": return SDKFixture.registration(token: SDKFixture.staleToken) // next flush refreshes
+            case "/v1/devices": return SDKFixture.registration(token: SDKFixture.staleToken) // ensureRegistered refreshes
             case "/v1/devices/token:refresh": return SDKFixture.refreshed()
             case "/v1/devices/me": return .response(status: 204)
             default: return SDKFixture.acceptAll(req)
@@ -75,11 +74,13 @@ final class SDKLogTests: XCTestCase {
         }
         let registered = await ReliablePush.register(idToken: idToken)
         XCTAssertEqual(registered, .success(deviceId: "dev1"))
+        let renewed = await ReliablePush.ensureRegistered(idTokenProvider: { idToken })
+        XCTAssertEqual(renewed, .success(deviceId: "dev1"))
 
         let content = UNMutableNotificationContent()
         content.title = "SECRET-TITLE"
         content.body = "SECRET-BODY"
-        let tid = UUID().uuidString
+        let tid = UUID().uuidString.lowercased()
         content.userInfo = ["rp_tid": tid]
         let request = UNNotificationRequest(identifier: "n1", content: content, trigger: nil)
         let handled = expectation(description: "handled")

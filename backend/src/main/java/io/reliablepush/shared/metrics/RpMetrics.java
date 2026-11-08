@@ -5,6 +5,7 @@ import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import io.reliablepush.tracking.EventType;
+import java.time.Duration;
 import java.util.Collection;
 import java.util.EnumMap;
 import java.util.LinkedHashMap;
@@ -16,8 +17,12 @@ import org.springframework.stereotype.Component;
 /**
  * The Prometheus metrics of spec 9.2, in one place. Micrometer names, exposed by the Prometheus registry as:
  * <ul>
- *   <li>{@code rp_notifications_registered_total}: notifications really inserted (replays of an {@code externalId} are not);</li>
- *   <li>{@code rp_events_total{type,late}}: event rows stored ({@code late=true} when the state transition no longer applied);</li>
+ *   <li>{@code rp_notifications_registered_total{outcome=pending|no_device_registered}}: notifications really inserted
+ *       (replays of a {@code trackingId} or {@code externalId} are not), by the state they were stored in;</li>
+ *   <li>{@code rp_notification_registration_seconds}: server time of {@code POST /v1/notifications} (a histogram, so an
+ *       installation can compare it with the sender's registration timeout);</li>
+ *   <li>{@code rp_events_total{type,late,token}}: event rows stored ({@code late=true} when the state transition no longer
+ *       applied; {@code token=grace} when the device token was expired but inside the app's grace, else {@code valid});</li>
  *   <li>{@code rp_fallback_total{outcome=triggered|failed|expired}}: fallback outcomes that were persisted;</li>
  *   <li>{@code rp_fallback_suppressed_total{app,reason=circuit_open|fallback_suspended}}: fallbacks the circuit breaker
  *       closed without a call (worker role only, see {@link #registerFallbackSuppressed});</li>
@@ -37,6 +42,7 @@ import org.springframework.stereotype.Component;
 public class RpMetrics {
 
     static final String NOTIFICATIONS_REGISTERED = "rp.notifications.registered";
+    static final String NOTIFICATION_REGISTRATION = "rp.notification.registration";
     static final String EVENTS = "rp.events";
     static final String FALLBACK = "rp.fallback";
     static final String WEBHOOK_LATENCY = "rp.webhook.latency";
@@ -44,6 +50,18 @@ public class RpMetrics {
     static final String FALLBACK_SUPPRESSED = "rp.fallback.suppressed";
     static final String FALLBACK_CIRCUIT_TRANSITIONS = "rp.fallback.circuit.transitions";
     static final String FALLBACK_CIRCUIT_CHECK_FAILED = "rp.fallback.circuit.check.failed";
+
+    /** The values of the {@code outcome} tag of {@code rp_notifications_registered_total}. */
+    public static final List<String> REGISTRATION_OUTCOMES = List.of("pending", "no_device_registered");
+
+    /**
+     * The histogram buckets of {@code rp_notification_registration_seconds}, around the recommended 1 s sender
+     * timeout (sidecar revision spec 1).
+     */
+    static final Duration[] REGISTRATION_BUCKETS = {
+        Duration.ofMillis(5), Duration.ofMillis(10), Duration.ofMillis(25), Duration.ofMillis(50), Duration.ofMillis(100),
+        Duration.ofMillis(250), Duration.ofMillis(500), Duration.ofSeconds(1), Duration.ofMillis(2500), Duration.ofSeconds(5)
+    };
 
     /** The values of the {@code outcome} tag of {@code rp_fallback_total}. */
     public static final List<String> FALLBACK_OUTCOMES = List.of("triggered", "failed", "expired");
@@ -55,7 +73,8 @@ public class RpMetrics {
     public static final List<String> CIRCUIT_TRANSITIONS = List.of("OPENED", "CLOSED", "FORCED", "FORCE_ENDED");
 
     private final MeterRegistry registry;
-    private final Counter registered;
+    private final Map<String, Counter> registered = new LinkedHashMap<>();
+    private final Timer registration;
     private final Map<EventType, Counter[]> events = new EnumMap<>(EventType.class);
     private final Map<String, Counter> fallback = new LinkedHashMap<>();
     private final Timer webhookLatency;
@@ -63,13 +82,23 @@ public class RpMetrics {
 
     public RpMetrics(MeterRegistry registry) {
         this.registry = registry;
-        this.registered = Counter.builder(NOTIFICATIONS_REGISTERED)
-                .description("Notifications registered (new rows only, not idempotent replays)")
+        for (String outcome : REGISTRATION_OUTCOMES) {
+            registered.put(outcome, Counter.builder(NOTIFICATIONS_REGISTERED)
+                    .description("Notifications registered (new rows only, not idempotent replays), by stored state")
+                    .tag("outcome", outcome)
+                    .register(registry));
+        }
+        this.registration = Timer.builder(NOTIFICATION_REGISTRATION)
+                .description("Server time of POST /v1/notifications")
+                .serviceLevelObjectives(REGISTRATION_BUCKETS)
                 .register(registry);
         for (EventType type : EventType.values()) {
-            Counter onTime = eventCounter(type, false);
-            Counter late = eventCounter(type, true);
-            events.put(type, new Counter[] {onTime, late});
+            events.put(type, new Counter[] {
+                eventCounter(type, false, "valid"),
+                eventCounter(type, true, "valid"),
+                eventCounter(type, false, "grace"),
+                eventCounter(type, true, "grace")
+            });
         }
         for (String outcome : FALLBACK_OUTCOMES) {
             fallback.put(outcome, Counter.builder(FALLBACK)
@@ -82,22 +111,40 @@ public class RpMetrics {
                 .register(registry);
     }
 
-    private Counter eventCounter(EventType type, boolean late) {
+    private Counter eventCounter(EventType type, boolean late, String token) {
         return Counter.builder(EVENTS)
                 .description("Device events stored")
                 .tag("type", type.name())
                 .tag("late", Boolean.toString(late))
+                .tag("token", token)
                 .register(registry);
     }
 
-    /** A notification was really inserted. */
-    public void notificationRegistered() {
-        registered.increment();
+    /**
+     * A notification was really inserted.
+     *
+     * @param outcome {@code pending} or {@code no_device_registered}
+     * @throws IllegalArgumentException for any other value (tags stay a closed set)
+     */
+    public void notificationRegistered(String outcome) {
+        Counter counter = registered.get(outcome);
+        if (counter == null) {
+            throw new IllegalArgumentException("unknown registration outcome: " + outcome);
+        }
+        counter.increment();
     }
 
-    /** A device event row was stored; {@code late} when the notification could no longer make the transition. */
-    public void event(EventType type, boolean late) {
-        events.get(type)[late ? 1 : 0].increment();
+    /** The timer of {@code POST /v1/notifications} (untagged). */
+    public Timer notificationRegistration() {
+        return registration;
+    }
+
+    /**
+     * A device event row was stored; {@code late} when the notification could no longer make the transition, {@code
+     * inGrace} when the device token was past its expiry and accepted under the app's grace.
+     */
+    public void event(EventType type, boolean late, boolean inGrace) {
+        events.get(type)[(late ? 1 : 0) + (inGrace ? 2 : 0)].increment();
     }
 
     /**

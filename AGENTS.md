@@ -23,6 +23,7 @@ sending pushes itself.
 | `android/` | Android SDK, FCM v1 data mode (AndroidConfigV2 mode deferred until Google's GA); guide `docs/android.md` | Kotlin, minSdk 26 |
 | `ios/` (+ root `Package.swift`) | iOS SDK + Notification Service Extension helper; guide `docs/ios.md` | Swift, iOS 15+, SPM |
 | `client-java/` | Optional zero-dependency Java client for the sender API | Java 17+, JDK only |
+| `payload-java/` | Optional zero-dependency Java 8+ payload library: tracking ids, tracked APNs and FCM payloads, golden vectors for other languages | Java 8 bytecode, JDK only |
 | `harness/` | Fake sender, fake fallback receiver, device simulator, E2E scenarios, web console for manual tests and demos (`./scripts/demo.sh`) | Java, plain HTML/JS, docker-compose |
 | `deploy/helm/` | Helm chart for the backend only (`deploy/helm/reliable-push`, combined/split, GKE and OpenShift values); tool images pinned in `deploy/helm/tools.env` | Helm, Kubernetes ≥ 1.30 |
 | `loadtest/` | Local-only Gatling load tests (NFR-2 ingest, fallback burst) and a JDK-only drain probe, run by `./scripts/load.sh` | Java 21, Gatling, docker-compose |
@@ -84,6 +85,7 @@ running the Maven commands. Details: `docs/testing.md`.
 | Backend one integration test | `cd backend && ./mvnw -B verify -Dit.test=NotificationApiIT -Dtest=NoSuchTest -Dsurefire.failIfNoSpecifiedTests=false -Djacoco.skip=true` |
 | Backend image build only | `docker build -t reliable-push-backend:dev backend` |
 | Java sender client build + tests (run from the repo root) | `./mvnw -B -pl client-java verify` |
+| Payload jar build + tests (JDK 21 locally; CI also runs the tests on a Java 8 JVM with `-Djvm=<path to java 8>`) | `./mvnw -B -pl payload-java verify` |
 | Harness build + tests (includes `client-java`) | `./mvnw -B -pl harness -am verify` |
 | Console smoke test against a running stack (needs Playwright's Chromium) | `./mvnw -B -pl harness -am verify -Pconsole-smoke` |
 | Demo / manual-test web console (local only; `--realtime` for real minutes) | `./scripts/demo.sh [--realtime]` → http://127.0.0.1:8090/ |

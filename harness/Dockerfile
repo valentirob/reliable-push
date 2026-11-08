@@ -1,9 +1,10 @@
 # Local test/demo harness image. Build context = repo root: docker build -f harness/Dockerfile .
-# ---- build stage: builds client-java and the harness in one reactor, then splits the jar into layers ----
+# ---- build stage: builds payload-java, client-java and the harness in one reactor, then splits the jar into layers ----
 FROM eclipse-temurin:21.0.13_9-jdk AS build
 WORKDIR /build
 COPY .mvn/ .mvn/
 COPY mvnw pom.xml ./
+COPY payload-java/ payload-java/
 COPY client-java/ client-java/
 COPY harness/ harness/
 # the root pom lists loadtest as a module: Maven needs its pom to read the reactor (its sources are not built here)

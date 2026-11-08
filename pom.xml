@@ -11,6 +11,7 @@
     <description>Aggregator for the reliable-push modules (the backend has its own build).</description>
 
     <modules>
+        <module>payload-java</module>
         <module>client-java</module>
         <module>harness</module>
         <module>loadtest</module>

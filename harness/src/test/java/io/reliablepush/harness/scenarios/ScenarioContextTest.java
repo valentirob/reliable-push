@@ -51,6 +51,10 @@ class ScenarioContextTest {
                 null);
     }
 
+    static FakeSender.SendResult registered(UUID id) {
+        return new FakeSender.SendResult(id, n(id, NotificationState.PENDING), null, false);
+    }
+
     @BeforeEach
     void setUp() {
         when(sender.senderClient("shop")).thenReturn(client);
@@ -127,7 +131,7 @@ class ScenarioContextTest {
 
     @Test
     void sendRecordsTheAppSoAwaitStateNeedsNoAppId() {
-        when(sender.send(any(SendPushCommand.class))).thenReturn(n(id, NotificationState.PENDING));
+        when(sender.send(any(SendPushCommand.class))).thenReturn(registered(id));
         when(client.get(id)).thenReturn(Optional.of(n(id, NotificationState.PENDING)));
 
         ScenarioResult r = run(ctx -> {
@@ -141,7 +145,7 @@ class ScenarioContextTest {
     @Test
     void sendUsesAUniqueFallbackTextThatTheHygieneScanLooksFor() {
         org.mockito.ArgumentCaptor<SendPushCommand> sent = org.mockito.ArgumentCaptor.forClass(SendPushCommand.class);
-        when(sender.send(sent.capture())).thenReturn(n(id, NotificationState.PENDING));
+        when(sender.send(sent.capture())).thenReturn(registered(id));
         when(inbox.signaturesForLogHygieneScan()).thenReturn(List.of("0123456789abcdef"));
         java.util.concurrent.atomic.AtomicReference<List<String>> secrets =
                 new java.util.concurrent.atomic.AtomicReference<>();
@@ -158,6 +162,45 @@ class ScenarioContextTest {
         assertThat(sent.getValue().fallback().get("channel")).isEqualTo("sms");
         assertThat(secrets.get()).containsAll(texts.stream().map(String.class::cast).toList())
                 .contains("0123456789abcdef");
+    }
+
+    @Test
+    void sendFailsTheScenarioWhenTheRegistrationFailed() {
+        when(sender.send(any(SendPushCommand.class))).thenReturn(new FakeSender.SendResult(id, null, 400, false));
+
+        ScenarioResult r = run(ctx -> ctx.send("shop", ctx.userId(1), FallbackPolicy.NOT_DELIVERED, 5, Map.of()));
+
+        assertThat(r.status()).isEqualTo("FAILED");
+        assertThat(r.failure().actual()).contains("400");
+    }
+
+    @Test
+    void sendWithOptionsReturnsTheResultAndPassesTheOptions() {
+        org.mockito.ArgumentCaptor<SendPushCommand> sent = org.mockito.ArgumentCaptor.forClass(SendPushCommand.class);
+        when(sender.send(sent.capture())).thenReturn(new FakeSender.SendResult(id, null, null, true));
+        java.util.concurrent.atomic.AtomicReference<FakeSender.SendResult> result =
+                new java.util.concurrent.atomic.AtomicReference<>();
+
+        ScenarioResult r = run(ctx -> result.set(ctx.send("shop", ctx.userId(1), FallbackPolicy.NOT_DELIVERED, 5,
+                Map.of(), id, "ext-1", true)));
+
+        assertThat(r.status()).isEqualTo("PASSED");
+        assertThat(result.get().skipped()).isTrue();
+        assertThat(sent.getValue().trackingId()).isEqualTo(id);
+        assertThat(sent.getValue().externalId()).isEqualTo("ext-1");
+        assertThat(sent.getValue().skipRegistration()).isTrue();
+    }
+
+    @Test
+    void awaitStateFailsFastOnNoDeviceRegistered() {
+        when(client.get(id)).thenReturn(Optional.of(n(id, NotificationState.NO_DEVICE_REGISTERED)));
+
+        ScenarioResult r = run(ctx -> {
+            ctx.track(id, "shop");
+            ctx.awaitState(id, NotificationState.DELIVERED, Duration.ofSeconds(30));
+        });
+
+        assertThat(r.failure().actual()).contains("NO_DEVICE_REGISTERED").contains("final");
     }
 
     @Test

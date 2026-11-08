@@ -1,0 +1,10 @@
+{
+  "name": "tracking-ids-valid-lowercase",
+  "operation": "trackingIds.isValid",
+  "input": {
+    "id": "6f1c2b9e-5d1a-4c55-9a38-0c1f3a7d9e11"
+  },
+  "expect": {
+    "output": true
+  }
+}

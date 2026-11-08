@@ -1,0 +1,30 @@
+{
+  "name": "fcm-decorate-uppercase-tracking-id",
+  "description": "an upper-case tracking id is embedded lower-cased",
+  "operation": "fcm.decorate",
+  "input": {
+    "trackingId": "6F1C2B9E-5D1A-4C55-9A38-0C1F3A7D9E11",
+    "fcm": {
+      "message": {
+        "token": "tok",
+        "notification": {
+          "title": "T"
+        }
+      }
+    }
+  },
+  "expect": {
+    "output": {
+      "message": {
+        "token": "tok",
+        "data": {
+          "rp_tid": "6f1c2b9e-5d1a-4c55-9a38-0c1f3a7d9e11",
+          "title": "T"
+        },
+        "android": {
+          "priority": "HIGH"
+        }
+      }
+    }
+  }
+}

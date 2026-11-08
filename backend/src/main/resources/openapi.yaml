@@ -27,12 +27,22 @@ paths:
       operationId: registerNotification
       summary: Register a notification to track
       description: |
-        Registers a push that the sender is about to send (or has sent) and returns its `trackingId`, which the
-        sender must put into the push payload as `rp_tid`. The `appId` comes from the API key, never from the body.
+        Registers a push that the sender is about to send, under the `trackingId` the sender generated and puts into
+        the push payload as `rp_tid` (send the push whatever the outcome of this call). The `appId` comes from the
+        API key, never from the body.
 
-        Idempotent per app when `externalId` is given: a request with an `externalId` that already exists for the
-        app creates nothing and returns the existing record (same `trackingId`, still `201`), also when two such
-        requests race.
+        Idempotent per app on `trackingId`: a request whose `trackingId` already exists for the app creates nothing
+        and returns the existing record (still `201`), also when two such requests race. The first registration
+        wins: the other fields of a repeated request are not compared. A `trackingId` of another app is `409`, and so
+        is an `externalId` the app already registered under another `trackingId` (also when the request's
+        `trackingId` matches a second existing row).
+
+        Validation order: the other body fields are validated first (`422` naming each invalid field); a missing or
+        malformed `trackingId` is reported (`400`) only when the rest of the body is valid.
+
+        When the user has no active device for the app (not revoked, token unexpired or expired for less than the
+        app's `device-token-events-grace`), the notification is stored closed with state `NO_DEVICE_REGISTERED`: it
+        is not tracked and never falls back. The answer is still `201`.
 
         `policy` and `timeoutMinutes` default to the app's configured `default-policy` / `default-timeout-minutes`.
         `dueAt` is `createdAt + timeoutMinutes`. Unknown JSON fields are ignored.
@@ -46,7 +56,9 @@ paths:
               $ref: '#/components/schemas/RegisterNotificationRequest'
       responses:
         '201':
-          description: Registered (or the existing record, for a repeated `externalId`).
+          description: |
+            Registered with state `PENDING` (tracked) or `NO_DEVICE_REGISTERED` (no active device), or the existing
+            record for a repeated `trackingId`.
           headers:
             Location:
               description: Path of the new notification, `/v1/notifications/{trackingId}`.
@@ -60,6 +72,12 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: The `trackingId` belongs to another app, or the `externalId` to another `trackingId`.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '413':
           $ref: '#/components/responses/PayloadTooLarge'
         '422':
@@ -158,8 +176,9 @@ paths:
       summary: Cancel a notification
       description: |
         Only an open notification (`closedAt` null) in state `PENDING` or `DELIVERED` can be cancelled; it becomes
-        `CANCELLED` and no fallback is sent. Any other state (including an already cancelled one) is `409`, and so is
-        a `DELIVERED` notification already closed by its `NOT_DELIVERED` policy.
+        `CANCELLED` and no fallback is sent. Any other state (including an already cancelled one and
+        `NO_DEVICE_REGISTERED`) is `409` and leaves the notification unchanged, and so is a `DELIVERED` notification
+        already closed by its `NOT_DELIVERED` policy.
       security:
         - SenderApiKey: []
       responses:
@@ -238,7 +257,11 @@ paths:
               schema:
                 $ref: '#/components/schemas/DeviceToken'
         '401':
-          $ref: '#/components/responses/Unauthorized'
+          description: "Missing or invalid device token. This route needs an unexpired token (no grace period): past expiry the app registers again with an ID token."
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '503':
@@ -256,7 +279,11 @@ paths:
         '204':
           description: Revoked.
         '401':
-          $ref: '#/components/responses/Unauthorized'
+          description: "Missing or invalid device token. A token expired by less than the app's `device-token-events-grace` is still accepted here; past it, or when the device was revoked or re-registered, the answer is `401`."
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '503':
@@ -290,7 +317,11 @@ paths:
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
-          $ref: '#/components/responses/Unauthorized'
+          description: "Missing or invalid device token. A token expired by less than the app's `device-token-events-grace` (default 90 days) is still accepted here; past it, or when the device was revoked or re-registered, the answer is `401`."
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '413':
           $ref: '#/components/responses/PayloadTooLarge'
         '422':
@@ -335,7 +366,7 @@ paths:
       description: |
         One entry per app (sorted by id): every visible app, or the one named by `app` (which must be visible,
         otherwise `404`). The counts cover the notifications created in the last `window`. A rate is
-        `count / (registered - cancelled)` and `null` when that denominator is zero. `now` is the current state,
+        `count / (registered - cancelled - noDeviceRegistered)` and `null` when that denominator is zero. `now` is the current state,
         independent of the window: `pending` = `PENDING`/`DELIVERED` rows not yet due, `dueUnclaimed` = such rows
         already due and not yet claimed by a worker, `dispatching` = rows with a fallback call in flight or waiting for
         a retry, `oldestDueAgeSeconds` = age of the oldest `dueUnclaimed` row (`null` when there is none).
@@ -955,9 +986,9 @@ components:
 
     AdminDailyDay:
       type: object
-      required: [day, registered, cancelled, delivered, read, deliveredIos, deliveredAndroid, fallbackTriggered,
-                 fallbackFailed, fallbackExpired, deliveryP50Ms, deliveryP95Ms, deliveryRate, readRate, fallbackRate,
-                 live]
+      required: [day, registered, cancelled, noDeviceRegistered, delivered, read, deliveredIos, deliveredAndroid,
+                 fallbackTriggered, fallbackFailed, fallbackExpired, deliveryP50Ms, deliveryP95Ms, deliveryRate,
+                 readRate, fallbackRate, live]
       properties:
         day:
           type: string
@@ -966,6 +997,9 @@ components:
           type: integer
         cancelled:
           type: integer
+        noDeviceRegistered:
+          type: integer
+          description: Notifications stored as `NO_DEVICE_REGISTERED` (counted in `registered`, not tracked).
         delivered:
           type: integer
         read:
@@ -1011,8 +1045,8 @@ components:
 
     AdminOverview:
       type: object
-      required: [appId, window, registered, cancelled, delivered, read, fallbackTriggered, fallbackFailed,
-                 fallbackExpired, deliveryRate, readRate, fallbackRate, now]
+      required: [appId, window, registered, cancelled, noDeviceRegistered, delivered, read, fallbackTriggered,
+                 fallbackFailed, fallbackExpired, deliveryRate, readRate, fallbackRate, now]
       properties:
         appId:
           type: string
@@ -1023,6 +1057,9 @@ components:
           type: integer
         cancelled:
           type: integer
+        noDeviceRegistered:
+          type: integer
+          description: Notifications stored as `NO_DEVICE_REGISTERED` (counted in `registered`, not tracked).
         delivered:
           type: integer
         read:
@@ -1167,7 +1204,10 @@ components:
       type: string
       description: |
         `FALLBACK_PENDING`: the fallback was claimed and the webhook is in progress or awaiting a retry.
-        `READ`, `FALLBACK_TRIGGERED`, `FALLBACK_FAILED`, `FALLBACK_EXPIRED` and `CANCELLED` are final.
+        `NO_DEVICE_REGISTERED`: the user had no active device when the notification was registered; it is stored
+        closed (`closedAt` = `createdAt`, no `dueAt`), not tracked, and never falls back.
+        `READ`, `FALLBACK_TRIGGERED`, `FALLBACK_FAILED`, `FALLBACK_EXPIRED`, `CANCELLED` and `NO_DEVICE_REGISTERED`
+        are final.
       enum:
         - PENDING
         - DELIVERED
@@ -1177,11 +1217,20 @@ components:
         - FALLBACK_FAILED
         - FALLBACK_EXPIRED
         - CANCELLED
+        - NO_DEVICE_REGISTERED
 
     RegisterNotificationRequest:
       type: object
-      required: [userId, fallback]
+      required: [trackingId, userId, fallback]
       properties:
+        trackingId:
+          type: string
+          format: uuid
+          description: |
+            Generated by the sender (for example with the payload library's `TrackingIds.newId()`) and put into the
+            push payload as `rp_tid`. Makes the registration idempotent. Accepted in any case, stored and returned in
+            lower case. Missing or not a UUID: `400` with field `trackingId` (after the `422` field validation of the
+            rest of the body).
         userId:
           type: string
           minLength: 1
@@ -1191,7 +1240,7 @@ components:
           type: string
           minLength: 1
           maxLength: 128
-          description: The sender's own id; unique per app, makes the registration idempotent.
+          description: The sender's own id; optional, unique per app (one `trackingId` per `externalId`).
         policy:
           $ref: '#/components/schemas/FallbackPolicy'
         timeoutMinutes:
@@ -1384,8 +1433,8 @@ components:
   responses:
     BadRequest:
       description: |
-        The body is not readable JSON (malformed, wrong types, unknown enum value), or (admin API) a query parameter
-        is missing or malformed: `errors` names the field.
+        The body is not readable JSON (malformed, wrong types, unknown enum value), the registration's `trackingId` is
+        missing or not a UUID, or (admin API) a query parameter is missing or malformed: `errors` names the field.
       content:
         application/problem+json:
           schema:

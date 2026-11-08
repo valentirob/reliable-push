@@ -20,10 +20,13 @@ import java.time.Duration;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * NFR-2 event ingest: open model, one scenario instance per arrival registers a notification, then reports
+ * NFR-2 event ingest: open model, one scenario instance per arrival registers a notification (with the sender's own
+ * {@code trackingId}, as the payload jar's {@code TrackingIds.newId()} makes it: a random UUID) for a user with a
+ * provisioned device, so every row is tracked ({@code PENDING}, not {@code NO_DEVICE_REGISTERED}), then reports
  * DELIVERED and READ. 500 arrivals/s give 1,000 {@code POST /v1/events}/s. Run explicitly (never in verify):
  * {@code gatling:test -Dgatling.simulationClass=io.reliablepush.loadtest.EventIngestSimulation}.
  */
@@ -63,14 +66,15 @@ public class EventIngestSimulation extends Simulation {
 
     private final ScenarioBuilder arrival = scenario("event-ingest")
             .feed(FEEDER)
+            .exec(session -> session.set("trackingId", UUID.randomUUID().toString()))
             .group("register").on(
                     exec(http("register").post("/v1/notifications")
                             .header("X-Api-Key", C.senderApiKey())
-                            .body(StringBody("{\"userId\":\"#{userId}\",\"policy\":\"NOT_READ\",\"timeoutMinutes\":10,"
-                                    + "\"fallback\":{\"sms\":\"load\"}}"))
+                            .body(StringBody("{\"trackingId\":\"#{trackingId}\",\"userId\":\"#{userId}\","
+                                    + "\"policy\":\"NOT_READ\",\"timeoutMinutes\":10,\"fallback\":{\"sms\":\"load\"}}"))
                             .check(status().is(201))
-                            .check(jsonPath("$.trackingId").saveAs("trackingId"))))
-            // no trackingId after a failed register: the events would fail too and be counted against `events`
+                            .check(jsonPath("$.state").is("PENDING"))))
+            // no tracked row after a failed register: its events would only measure NOT_FOUND answers
             .exitHereIfFailed()
             .pause(Duration.ofMillis(50))
             // Two occurrences of the group: a group's response time is the sum of its requests, so keeping

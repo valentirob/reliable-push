@@ -6,7 +6,7 @@ enum FlushResult: Sendable {
     case done
     /// Events remain (also when the flush was cancelled); try again at the next launch / NSE run.
     case retryLater
-    /// No usable registration (never registered, or a refresh was answered 401).
+    /// No registration (never registered, or logged out).
     case notRegistered
     /// Not attempted: another flush held the lock (until the deadline, if any), or a 429 `Retry-After` has not elapsed.
     case skipped
@@ -14,10 +14,10 @@ enum FlushResult: Sendable {
 
 /// Sends queued events in batches of 50 to `POST /v1/events`; same outcome rules as the Android SDK.
 ///
-/// Token: refreshed first when `needsRefresh` and the process-wide `RefreshGate` allows (a transient failure of that
-/// early refresh is not fatal; the current token may still work). A 401 refreshes once more (gate permitting) and
-/// retries the batch once; a refresh answered 401 clears the registration. Events are kept on every other failure.
-/// An event the server leaves unacknowledged in two sent batches is dropped with a WARN (Android parity).
+/// Never renews the device token (spec 3.1): the stored token is sent as it is, also when expired (the backend accepts
+/// it on this endpoint within a grace period). A 401 keeps the events queued and sets `renewalNeeded`, which the app's
+/// `ensureRegistered` acts on. Events are kept on every other failure. An event the server leaves unacknowledged in two
+/// sent batches is dropped with a WARN (Android parity).
 final class EventSender: Sendable {
     static let batchSize = 50
     static let maxRetryAfter = 3600
@@ -39,7 +39,9 @@ final class EventSender: Sendable {
         self.now = now
     }
 
-    func flush(deadline: Date?) async -> FlushResult {
+    /// Sends at most `maxBatches` batches before `deadline`. `priority` (the extension's own event) leads the first
+    /// batch, so a long queue cannot push it out of the extension's one send.
+    func flush(deadline: Date?, maxBatches: Int = .max, priority: QueuedEvent? = nil) async -> FlushResult {
         if let notBefore = state.retryNotBefore {
             // further away than any Retry-After we store: set under a wrong clock, so expired
             if notBefore.timeIntervalSince(now()) > TimeInterval(Self.maxRetryAfter) {
@@ -61,61 +63,44 @@ final class EventSender: Sendable {
         defer { held.release() }
 
         if queue.count == 0 { return .done }
-        let deviceId: String
-        var token: DeviceToken
+        let token: DeviceToken
         switch tokens.load() {
         case .notRegistered:
             SDKLog.warn("tracking.not_registered")
             return .notRegistered
         case .unavailable:
             return .retryLater
-        case let .registered(id, t):
-            deviceId = id
+        case let .registered(_, t):
             token = t
         }
 
-        if token.needsRefresh(now: now()) && RefreshGate.tryAcquire() {
-            switch await refresh(deviceId: deviceId, token: token.raw) {
-            case .refreshed(let t): token = t
-            case .failed(.notRegistered): return .notRegistered
-            case .rateLimited: return .retryLater
-            case .failed: break
-            }
-        }
-
         var attempted = Set<String>()
-        while true {
+        var sent = 0
+        while sent < maxBatches {
             if Task.isCancelled { return .retryLater }
             if let deadline, now() >= deadline { return queue.count > 0 ? .retryLater : .done }
-            let batch = queue.peek(max: Self.batchSize, excluding: attempted)
+            let batch: [QueuedEvent]
+            if sent == 0, let priority {
+                batch = [priority] + queue.peek(max: Self.batchSize - 1, excluding: [priority.key])
+            } else {
+                batch = queue.peek(max: Self.batchSize, excluding: attempted)
+            }
             if batch.isEmpty { break }
             attempted.formUnion(batch.map(\.key))
+            sent += 1
 
-            var result = await api.sendEvents(token: token.raw, events: batch)
-            if case .http(401, _) = result {
-                guard RefreshGate.tryAcquire() else {
-                    SDKLog.warn("auth.failed", ["status": "401", "refresh": "exhausted"])
-                    return .retryLater
-                }
-                switch await refresh(deviceId: deviceId, token: token.raw) {
-                case .refreshed(let t): token = t
-                case .failed(let r): return r
-                case .rateLimited: return .retryLater
-                }
-                result = await api.sendEvents(token: token.raw, events: batch)
-                if case .http(401, _) = result {
-                    SDKLog.warn("auth.failed", ["status": "401", "refresh": "done"])
-                    return .retryLater
-                }
-            }
-
-            switch result {
+            switch await api.sendEvents(token: token.raw, events: batch) {
             case .ok(let items):
                 handle(batch: batch, items: items)
             case .networkError:
                 return .retryLater
+            case .http(401, _):
+                // past the backend's grace period, or revoked: the app renews (ensureRegistered); the events wait
+                tokens.markRenewalNeeded()
+                SDKLog.warn("auth.failed", ["status": "401", "call": "events"])
+                return .retryLater
             case let .http(status, retryAfter):
-                if (400...499).contains(status) && status != 401 && status != 408 && status != 429 {
+                if (400...499).contains(status) && status != 408 && status != 429 {
                     queue.remove(keys: Set(batch.map(\.key)))
                     SDKLog.warn("tracking.event_dropped", ["count": "\(batch.count)", "status": "\(status)"])
                 } else {
@@ -131,10 +116,10 @@ final class EventSender: Sendable {
 
     private func handle(batch: [QueuedEvent], items: [EventOutcome]) {
         var byId: [String: String] = [:]
-        for item in items { byId[item.trackingId] = item.outcome }
+        for item in items { byId[item.trackingId.lowercased()] = item.outcome } // case-insensitive match
         var done = Set<String>()
         for e in batch {
-            switch byId[e.trackingId] {
+            switch byId[e.trackingId.lowercased()] {
             case "ACCEPTED", "DUPLICATE", "LATE":
                 done.insert(e.key)
                 SDKLog.info("tracking.event_sent", ["trackingId": e.trackingId])
@@ -157,36 +142,6 @@ final class EventSender: Sendable {
         SDKLog.warn("rate_limit.exceeded", ["retryAfter": retryAfter.map(String.init) ?? "none"])
         if let retryAfter {
             state.retryNotBefore = now().addingTimeInterval(TimeInterval(min(max(retryAfter, 0), Self.maxRetryAfter)))
-        }
-    }
-
-    private enum RefreshOutcome {
-        case refreshed(DeviceToken)
-        case failed(FlushResult)
-        case rateLimited
-    }
-
-    private func refresh(deviceId: String, token: String) async -> RefreshOutcome {
-        switch await api.refresh(token: token) {
-        case .ok(let issued):
-            guard let parsed = DeviceToken.parse(issued.deviceToken),
-                  tokens.save(Registration(deviceId: deviceId, deviceToken: issued.deviceToken, expiresAt: issued.expiresAt))
-            else { return .failed(.retryLater) }
-            SDKLog.info("token.refreshed", ["deviceId": deviceId])
-            return .refreshed(parsed)
-        case let .http(status, retryAfter):
-            if status == 401 {
-                tokens.clear()
-                SDKLog.warn("auth.failed", ["status": "401", "refresh": "rejected"])
-                return .failed(.notRegistered)
-            }
-            if status == 429 {
-                rateLimited(retryAfter)
-                return .rateLimited
-            }
-            return .failed(.retryLater)
-        case .networkError:
-            return .failed(.retryLater)
         }
     }
 }

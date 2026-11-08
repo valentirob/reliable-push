@@ -98,8 +98,8 @@ class AdminSearchIT extends PostgresTestBase {
     private UUID device(String app, String user, String platform, Instant createdAt, boolean revoked) {
         UUID id = UUID.randomUUID();
         jdbc.sql("""
-                        insert into device (id, app_id, user_id, platform, token_version, created_at, last_seen_at, revoked_at)
-                        values (:id, :app, :user, :platform, 1, :created, :seen, :revoked)
+                        insert into device (id, app_id, user_id, platform, token_version, created_at, last_seen_at, revoked_at, token_expires_at)
+                        values (:id, :app, :user, :platform, 1, :created, :seen, :revoked, now() + interval '90 days')
                         """)
                 .param("id", id)
                 .param("app", app)
@@ -146,6 +146,13 @@ class AdminSearchIT extends PostgresTestBase {
         UUID early = notification("shop", user, ext, "PENDING", BASE);
         UUID late = notification("shop", user, null, "FALLBACK_FAILED", BASE.plus(2, ChronoUnit.HOURS));
         String base = "/v1/admin/notifications?app=shop&userId=" + enc(user);
+        String otherUser = user();
+        UUID untracked = notification("shop", otherUser, null, "NO_DEVICE_REGISTERED", BASE);
+        notification("shop", otherUser, null, "CANCELLED", BASE);
+
+        assertThat(ids(checked(SHOP_KEY, "/v1/admin/notifications?app=shop&userId=" + enc(otherUser)
+                        + "&state=NO_DEVICE_REGISTERED")))
+                .containsExactly(untracked.toString());
 
         assertThat(ids(checked(SHOP_KEY, base + "&externalId=" + enc(ext)))).containsExactly(early.toString());
         assertThat(ids(checked(SHOP_KEY, base + "&state=FALLBACK_FAILED"))).containsExactly(late.toString());

@@ -7,7 +7,11 @@ import org.junit.jupiter.api.Test;
 class RatesTest {
 
     private static Counts counts(int registered, int cancelled) {
-        return new Counts(registered, cancelled, 0, 0, 0, 0, 0);
+        return counts(registered, cancelled, 0);
+    }
+
+    private static Counts counts(int registered, int cancelled, int noDevice) {
+        return new Counts(registered, cancelled, noDevice, 0, 0, 0, 0, 0);
     }
 
     @Test
@@ -16,8 +20,14 @@ class RatesTest {
     }
 
     @Test
+    void untrackedNotificationsAreLeftOutOfTheDenominator() {
+        assertThat(Rates.of(3, counts(12, 2, 4))).isEqualTo(0.5);
+    }
+
+    @Test
     void emptyDenominatorIsNull() {
         assertThat(Rates.of(0, counts(0, 0))).isNull();
         assertThat(Rates.of(0, counts(4, 4))).isNull();
+        assertThat(Rates.of(0, counts(4, 1, 3))).isNull();
     }
 }

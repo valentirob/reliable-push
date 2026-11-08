@@ -146,8 +146,8 @@ class SchemaIT extends PostgresTestBase {
                 values (?, 'app-ev', 'u1', 'NOT_READ', 10, '{}'::jsonb, 'PENDING', now())
                 """).param(notificationId).update();
         jdbc.sql("""
-                insert into device (id, app_id, user_id, platform, token_version, created_at, last_seen_at)
-                values (?, 'app-ev', 'u1', 'ANDROID', 1, now(), now())
+                insert into device (id, app_id, user_id, platform, token_version, created_at, last_seen_at, token_expires_at)
+                values (?, 'app-ev', 'u1', 'ANDROID', 1, now(), now(), now() + interval '90 days')
                 """).param(deviceId).update();
 
         assertThatThrownBy(() -> insertEvent(notificationId, deviceId, "BOGUS"))
@@ -207,8 +207,8 @@ class SchemaIT extends PostgresTestBase {
     @Test
     void deviceRejectsUnknownPlatform() {
         assertThatThrownBy(() -> jdbc.sql("""
-                insert into device (id, app_id, user_id, platform, token_version, created_at, last_seen_at)
-                values (?, 'app-dev', 'u1', 'WINDOWS', 1, now(), now())
+                insert into device (id, app_id, user_id, platform, token_version, created_at, last_seen_at, token_expires_at)
+                values (?, 'app-dev', 'u1', 'WINDOWS', 1, now(), now(), now() + interval '90 days')
                 """).param(UUID.randomUUID()).update())
                 .isInstanceOf(DataIntegrityViolationException.class);
     }

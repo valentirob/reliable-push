@@ -3,13 +3,18 @@
 #   docker compose -p reliable-push-demo -f harness/compose/docker-compose.yml -f harness/compose/demo.override.yml ...
 # With --realtime scripts/demo.sh also uses demo.realtime.override.yml and strips the fast clock from the secrets file.
 # The circuit breaker is set back to the production defaults: backend.env.template carries the E2E tuning (window 30 s,
-# min-due 10), which would trip any demo app after 10 unmet fallbacks in 30 s.
+# min-due 10), which would trip any demo app after 10 unmet fallbacks in 30 s. The app `grace` gets production-like
+# token settings too: the template's 5 s validity and 15 s events grace exist only for the token-grace E2E scenario.
 
 x-circuit-defaults: &circuit-defaults
   RELIABLEPUSH_FALLBACK_CIRCUITBREAKER_WINDOW: 5m
   RELIABLEPUSH_FALLBACK_CIRCUITBREAKER_MINDUE: "50"
   RELIABLEPUSH_FALLBACK_CIRCUITBREAKER_CLOSEMINDELIVERED: "10"
   RELIABLEPUSH_FALLBACK_CIRCUITBREAKER_MINOPEN: 1m
+
+x-grace-app: &grace-app
+  RELIABLEPUSH_APPS_GRACE_DEVICETOKENVALIDITY: 90d
+  RELIABLEPUSH_APPS_GRACE_DEVICETOKENEVENTSGRACE: 90d
 
 services:
   secrets:
@@ -26,21 +31,21 @@ services:
       - path: ../build/demo/secrets.env
         required: false
     environment:
-      <<: *circuit-defaults
+      <<: [*circuit-defaults, *grace-app]
       SPRING_PROFILES_ACTIVE: api,json,demo
   worker-a:
     env_file: !override
       - path: ../build/demo/secrets.env
         required: false
     environment:
-      <<: *circuit-defaults
+      <<: [*circuit-defaults, *grace-app]
       SPRING_PROFILES_ACTIVE: worker,json,demo
   worker-b:
     env_file: !override
       - path: ../build/demo/secrets.env
         required: false
     environment:
-      <<: *circuit-defaults
+      <<: [*circuit-defaults, *grace-app]
       SPRING_PROFILES_ACTIVE: worker,json,demo
   harness:
     env_file: !override

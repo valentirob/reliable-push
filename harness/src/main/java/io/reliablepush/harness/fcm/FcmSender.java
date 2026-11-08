@@ -63,7 +63,7 @@ public final class FcmSender {
                 .timeout(Duration.ofSeconds(10))
                 .header("Authorization", "Bearer " + accessToken)
                 .header("Content-Type", "application/json; charset=UTF-8")
-                .POST(HttpRequest.BodyPublishers.ofString(PayloadPreview.fcmV1(trackingId, title, body, fcmToken)))
+                .POST(HttpRequest.BodyPublishers.ofString(PayloadPreview.fcmV1Compact(trackingId, title, body, fcmToken)))
                 .build();
         HttpResponse<String> res;
         try {

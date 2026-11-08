@@ -55,6 +55,12 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         do {
             try ReliablePush.configure(baseURL: config.baseURL, appId: config.appId, appGroup: config.appGroup)
             model.configured()
+            // renews the device token when needed (the SDK never does it on the receive path); returns at once
+            Task { await model.ensureRegistered() }
+            NotificationCenter.default.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil,
+                                                   queue: .main) { [model] _ in
+                Task { @MainActor in await model.ensureRegistered() }
+            }
         } catch {
             sampleLog.error("event=sample.configure_failed error=\(String(describing: error), privacy: .public)")
             model.status = "configure failed: \(error)"

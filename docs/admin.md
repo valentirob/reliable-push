@@ -52,7 +52,10 @@ A `401` from any call returns to the sign-in form. Closing the tab forgets the k
 | Fallback circuit | `#/circuit/<app>` | Reached from the badge on the overview. The app's circuit state and its history (when, transition `OPENED` / `CLOSED` / `FORCED` / `FORCE_ENDED`, reason, due count, ratio, suppressed count, admin key), newest first, "Next page" for more. For keys with `fallback-control` and an `OPEN` circuit, a "Resume fallbacks" button asks for confirmation (`window.confirm`) and then shows the `FORCED` state; a `409` (suspended or disabled) or `503` (a detector run holds the lock) shows the server's message, a `409` or `404` reads the circuit again (a `404` then shows "App not found." once), and a network error is reported, never retried (only reads are retried, so a resume is never sent twice). The view shows "Fallbacks suspended by configuration" whenever the config suspends all fallbacks, also with the breaker disabled. What to check before resuming: [runbook](operations.md#runbook-circuit-open) |
 | Devices | `#/devices/<app>/<userId>` | The user's devices, revoked ones included, newest first, at most 50 |
 
-Rates are `count / (registered - cancelled)`; with a zero denominator the page shows "–".
+Rates are `count / (registered - cancelled - noDeviceRegistered)`; with a zero denominator the page shows "–".
+`noDeviceRegistered` counts the notifications stored as `NO_DEVICE_REGISTERED` (the user had no active device: not
+tracked, never a fallback); the Registered tile shows it under the total, the trends table in its own column, and Search
+can filter on that state.
 
 Numbers come from two places. The live windows (1 h, 24 h, 7 d) and the most recent days are computed from the
 `notification` table. Older days come from `daily_stats`, written every night by `DailyRollupJob` and kept for

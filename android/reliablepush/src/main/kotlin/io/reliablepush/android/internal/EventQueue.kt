@@ -17,11 +17,11 @@ import java.io.IOException
  * consistent; mutual exclusion uses one process-wide lock rather than a per-instance one for the same reason.
  * A corrupt file counts as empty. A write failure is logged and the event is lost (no crash on a push path).
  */
-internal class EventQueue(dir: File) {
+internal open class EventQueue(dir: File) { // open: fault-injection tests override add (Sdk.queueFactory)
     private val file = AtomicFile(File(dir, FILE_NAME))
     private val dir = dir
 
-    fun add(event: QueuedEvent) = synchronized(LOCK) {
+    open fun add(event: QueuedEvent): Unit = synchronized(LOCK) {
         val items = read() ?: return@synchronized
         if (items.any { it.event.key() == event.key() }) return@synchronized
         items.add(Entry(event, 0))

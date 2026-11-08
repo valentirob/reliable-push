@@ -1,0 +1,12 @@
+{
+  "name": "apns-build-invalid-tracking-id",
+  "operation": "apns.build",
+  "input": {
+    "trackingId": "nope",
+    "title": "T",
+    "body": "B"
+  },
+  "expect": {
+    "error": "INVALID_TRACKING_ID"
+  }
+}

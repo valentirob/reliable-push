@@ -91,8 +91,8 @@ class DailyRollupIT extends PostgresTestBase {
     private UUID device(String app, String platform) {
         UUID id = UUID.randomUUID();
         jdbc.sql("""
-                        insert into device (id, app_id, user_id, platform, token_version, created_at, last_seen_at)
-                        values (:id, :app, 'u', :platform, 1, now(), now())
+                        insert into device (id, app_id, user_id, platform, token_version, created_at, last_seen_at, token_expires_at)
+                        values (:id, :app, 'u', :platform, 1, now(), now(), now() + interval '90 days')
                         """)
                 .param("id", id)
                 .param("app", app)
@@ -149,6 +149,7 @@ class DailyRollupIT extends PostgresTestBase {
     void upsertsWindowWithZeroRows() throws Exception {
         row("shop", "FALLBACK_TRIGGERED", Instant.parse("2026-11-03T10:00:00Z"), null, null);
         row("shop", "CANCELLED", Instant.parse("2026-11-04T10:00:00Z"), null, null);
+        row("shop", "NO_DEVICE_REGISTERED", Instant.parse("2026-11-04T11:00:00Z"), null, null);
 
         assertThat(job.run()).isEqualTo(7);
 
@@ -160,7 +161,8 @@ class DailyRollupIT extends PostgresTestBase {
         assertThat(jdbc.sql("select max(day)::text from daily_stats").query(String.class).single())
                 .isEqualTo("2026-11-05");
         assertThat(stats("shop", "2026-11-03")).containsEntry("registered", 1).containsEntry("fallback_triggered", 1);
-        assertThat(stats("shop", "2026-11-04")).containsEntry("cancelled", 1);
+        assertThat(stats("shop", "2026-11-04")).containsEntry("cancelled", 1).containsEntry("no_device_registered", 1)
+                .containsEntry("registered", 2);
         Map<String, Object> zeros = stats("other", "2026-11-03");
         assertThat(zeros).containsEntry("registered", 0).containsEntry("delivered", 0);
         assertThat(zeros.get("delivery_p50_ms")).isNull();
@@ -433,7 +435,7 @@ class DailyRollupIT extends PostgresTestBase {
         row("shop", "FALLBACK_TRIGGERED", Instant.parse("2026-11-06T08:00:00Z"), null, null);
         // older than the window: only stored
         jdbc.sql("""
-                        insert into daily_stats values ('2026-10-20', 'shop', 4, 0, 2, 1, 1, 1, 1, 0, 0, 1500, 2500, now())
+                        insert into daily_stats values ('2026-10-20', 'shop', 5, 0, 2, 1, 1, 1, 1, 0, 0, 1500, 2500, now(), 1)
                         """)
                 .update();
         // stale stored row for a window day: the live number wins
@@ -453,7 +455,8 @@ class DailyRollupIT extends PostgresTestBase {
         assertThat(days).contains("2026-10-30", "2026-11-04", "2026-11-06").doesNotContain("2026-10-21");
         assertThat(days).isSorted();
         assertThat(this.<Boolean>first(body, "$.days[?(@.day=='2026-10-20')].live")).isFalse();
-        assertThat(this.<Integer>first(body, "$.days[?(@.day=='2026-10-20')].registered")).isEqualTo(4);
+        assertThat(this.<Integer>first(body, "$.days[?(@.day=='2026-10-20')].registered")).isEqualTo(5);
+        assertThat(this.<Integer>first(body, "$.days[?(@.day=='2026-10-20')].noDeviceRegistered")).isEqualTo(1);
         assertThat(this.<Double>first(body, "$.days[?(@.day=='2026-10-20')].deliveryRate")).isEqualTo(0.5);
         assertThat(this.<Boolean>first(body, "$.days[?(@.day=='2026-11-04')].live")).isTrue();
         assertThat(this.<Integer>first(body, "$.days[?(@.day=='2026-11-04')].registered")).isEqualTo(1);

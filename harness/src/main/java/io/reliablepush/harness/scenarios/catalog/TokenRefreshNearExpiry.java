@@ -2,6 +2,7 @@ package io.reliablepush.harness.scenarios.catalog;
 
 import io.reliablepush.client.FallbackPolicy;
 import io.reliablepush.client.NotificationState;
+import io.reliablepush.harness.devices.DeviceSimulator;
 import io.reliablepush.harness.devices.DeviceSimulator.DeviceEventRecord;
 import io.reliablepush.harness.devices.Platform;
 import io.reliablepush.harness.devices.SimulatedDevice;
@@ -19,8 +20,9 @@ class TokenRefreshNearExpiry extends CatalogScenario {
 
     TokenRefreshNearExpiry() {
         super("token-refresh-near-expiry",
-                "App news (device-token-validity PT20S): the device refreshes its token near expiry and its later "
-                        + "events are still accepted.");
+                "App news (device-token-validity PT20S): near expiry the event path still sends with the old token "
+                        + "(no refresh on receive); ensureRegistered refreshes it, a second call does nothing, and "
+                        + "later events are accepted.");
     }
 
     @Override
@@ -39,22 +41,38 @@ class TokenRefreshNearExpiry extends CatalogScenario {
         expectAccepted(ctx, ctx.awaitDeviceEvents(first, 1, QUICK).get(0));
         ctx.awaitState(first, NotificationState.DELIVERED, QUICK);
 
-        // less than 20 % of the validity left (the simulator refreshes then), yet still valid
+        // less than 20 % of the validity left, yet still valid: the receive path must not renew (spec 3.1, D5)
         ctx.sleepUntil(expires.minus(validity.dividedBy(5)).plusSeconds(1));
         UUID second = ctx.send(NEWS, user, FallbackPolicy.NOT_DELIVERED, TIMEOUT_MINUTES,
                 Map.of(d.deviceId(), "deliver:200ms"));
         expectAccepted(ctx, ctx.awaitDeviceEvents(second, 1, QUICK).get(0));
         ctx.awaitState(second, NotificationState.DELIVERED, QUICK);
+        Instant afterEvent = ctx.devices().device(d.deviceId()).tokenExpiresAt();
+        ctx.check(afterEvent.equals(expires), "the token unchanged by the events call (expires " + expires + ")",
+                () -> "token now expires at " + afterEvent, "the device simulator must not refresh on the event path");
 
+        // the app calls ensureRegistered: < 20 % left -> refresh
+        DeviceSimulator.EnsureResult result = ctx.devices().ensureRegistered(d.deviceId());
+        ctx.log("ensureRegistered: " + result);
+        ctx.check(result == DeviceSimulator.EnsureResult.REFRESHED, "ensureRegistered REFRESHED",
+                () -> String.valueOf(result), "less than 20 % of the validity was left (spec 3.2)");
         Instant renewed = ctx.devices().device(d.deviceId()).tokenExpiresAt();
         ctx.check(renewed.isAfter(expires), "a refreshed token expiring after " + expires,
-                () -> "token still expires at " + renewed,
-                "the simulator refreshes before an events call when < 20 % of the validity is left (spec 7.1)");
+                () -> "token still expires at " + renewed, "POST /v1/devices/token:refresh; see the api log");
         ctx.awaitLogEntry("device.token_refreshed", "rp.device_id", d.deviceId().toString(), QUICK);
+
+        DeviceSimulator.EnsureResult again = ctx.devices().ensureRegistered(d.deviceId());
+        ctx.check(again == DeviceSimulator.EnsureResult.ALREADY_REGISTERED, "a second ensureRegistered does nothing",
+                () -> String.valueOf(again), "the fresh token has more than 20 % of its validity left");
+
+        UUID third = ctx.send(NEWS, user, FallbackPolicy.NOT_DELIVERED, TIMEOUT_MINUTES,
+                Map.of(d.deviceId(), "deliver:200ms"));
+        expectAccepted(ctx, ctx.awaitDeviceEvents(third, 1, QUICK).get(0));
+        ctx.awaitState(third, NotificationState.DELIVERED, QUICK);
     }
 
     private static void expectAccepted(ScenarioContext ctx, DeviceEventRecord e) {
         ctx.check("ACCEPTED".equals(e.outcome()), "event " + e.type() + " ACCEPTED",
-                () -> e.type() + " answered " + e.outcome(), "UNAUTHORIZED means the token or its refresh failed");
+                () -> e.type() + " answered " + e.outcome(), "UNAUTHORIZED means the device token was refused (see auth.failed in the api log)");
     }
 }

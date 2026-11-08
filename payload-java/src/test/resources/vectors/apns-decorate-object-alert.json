@@ -1,0 +1,36 @@
+{
+  "name": "apns-decorate-object-alert",
+  "description": "sender keys and order kept, mutable-content and rp_tid appended",
+  "operation": "apns.decorate",
+  "input": {
+    "trackingId": "6f1c2b9e-5d1a-4c55-9a38-0c1f3a7d9e11",
+    "apns": {
+      "aps": {
+        "alert": {
+          "title": "T",
+          "body": "B"
+        },
+        "sound": "default",
+        "badge": 3
+      },
+      "orderId": 1001,
+      "price": 1.5
+    }
+  },
+  "expect": {
+    "output": {
+      "aps": {
+        "alert": {
+          "title": "T",
+          "body": "B"
+        },
+        "sound": "default",
+        "badge": 3,
+        "mutable-content": 1
+      },
+      "orderId": 1001,
+      "price": 1.5,
+      "rp_tid": "6f1c2b9e-5d1a-4c55-9a38-0c1f3a7d9e11"
+    }
+  }
+}

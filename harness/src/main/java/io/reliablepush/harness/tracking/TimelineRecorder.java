@@ -49,13 +49,26 @@ public class TimelineRecorder {
         this.clock = clock;
         sender.onSent(s -> {
             enqueue(() -> {
-                TimelineEntry reg = timeline.registered(s.appId(), s.notification());
-                if (reg != null) {
-                    publish(s.notification().trackingId(), reg);
+                if (s.notification() != null) {
+                    TimelineEntry reg = timeline.registered(s.appId(), s.notification());
+                    if (reg != null) {
+                        publish(s.trackingId(), reg);
+                    }
+                } else {
+                    // the push still goes out (spec 1): the history shows why it is not tracked
+                    Map<String, Object> d = new LinkedHashMap<>();
+                    if (s.result().skipped()) {
+                        d.put("reason", "skipped");
+                    } else {
+                        d.put("reason", "failed");
+                        d.put("status", s.result().failureStatus());
+                    }
+                    publish(s.trackingId(), timeline.append(s.trackingId(), s.appId(),
+                            new TimelineEntry(clock.instant(), "registration_missing", d)));
                 }
             });
             enqueue(() -> {
-                UUID id = s.notification().trackingId();
+                UUID id = s.trackingId();
                 publish(id, timeline.append(id, s.appId(),
                         new TimelineEntry(clock.instant(), "push_simulated", Map.of("devices", s.deviceCount()))));
             });

@@ -58,7 +58,8 @@ class ScenarioControllerIT {
             "not-delivered-single-fallback", "late-delivery-after-fallback", "multi-device", "cancellation",
             "receiver-retries-then-succeeds", "receiver-final-failure", "retries-exhausted-fails",
             "token-refresh-near-expiry", "rate-limited", "log-catalogue", "log-hygiene",
-            "worker-crash-inside-window", "worker-crash-outside-window");
+            "worker-crash-inside-window", "worker-crash-outside-window", "admin-dashboard", "fallback-circuit",
+            "no-device-registered", "client-tracking-id", "registration-lost", "token-grace");
 
     @LocalServerPort
     int port;

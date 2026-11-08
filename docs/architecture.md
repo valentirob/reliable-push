@@ -23,7 +23,7 @@ flowchart LR
   SB["Sender backend"] -- "POST /v1/notifications<br/>(X-Api-Key)" --> API["api"]
   SDK["Device SDK"] -- "POST /v1/devices<br/>(OIDC ID token)" --> API
   SDK -- "POST /v1/events<br/>(device JWT)" --> API
-  API --> DB[("PostgreSQL<br/>Flyway V1..V5 at startup")]
+  API --> DB[("PostgreSQL<br/>Flyway V1..V7 at startup")]
   WRK["worker"] --> DB
   WRK -- "signed POST" --> FW["Fallback webhook"]
 ```
@@ -55,6 +55,8 @@ servlet filters on top of `nimbus-jose-jwt`.
 In order: `TraceIdFilter` (correlation id, `X-Request-Id`) -> `AccessLogFilter` (`api.request`) -> `BodySizeLimitFilter`
 (64 KB on `/v1/**`) -> `SenderApiKeyFilter` for `/v1/notifications/**` or `DeviceAuthFilter` for
 `/v1/devices/token:refresh`, `/v1/devices/me` and `/v1/events` -> `RateLimitFilter` (per sender app or per device).
+`DeviceAuthFilter` grants the per-app `device-token-events-grace` to an expired token only on exactly `POST /v1/events`
+and `DELETE /v1/devices/me` (exact route match); `token:refresh` always needs an unexpired token.
 `AdminKeyFilter` guards `/v1/admin/**` (header `X-Admin-Key`, rate limit bucket `admin:<keyId>`) and `AdminPageFilter` serves
 `/admin/**` with its security headers. Both are registered only when an admin key is configured, so without one these paths
 answer like any unknown path. The page files live in `backend/src/main/resources/admin-ui/` and are mapped to `/admin/**`
@@ -66,7 +68,8 @@ request body and is rate limited per user after that check.
 
 ```mermaid
 stateDiagram-v2
-  [*] --> PENDING: registered
+  [*] --> PENDING: registered, the user has an active device
+  [*] --> NO_DEVICE_REGISTERED: registered, no active device (closed at once)
   PENDING --> DELIVERED: DELIVERED event
   PENDING --> READ: READ event (implies delivered)
   DELIVERED --> READ: READ event
@@ -84,7 +87,11 @@ stateDiagram-v2
 
 `DISPATCHING` is reported as `FALLBACK_PENDING` by the API.
 
-`READ`, `FALLBACK_TRIGGERED`, `FALLBACK_FAILED`, `FALLBACK_EXPIRED` and `CANCELLED` are final. Under policy
+`READ`, `FALLBACK_TRIGGERED`, `FALLBACK_FAILED`, `FALLBACK_EXPIRED`, `CANCELLED` and `NO_DEVICE_REGISTERED` are final.
+Registration is idempotent on the sender's `trackingId` (`insert ... on conflict do nothing`, then a re-read). A device is
+active for `(app_id, user_id)` when it is not revoked and `token_expires_at` + 60 s (the token verifier's clock skew) +
+`device-token-events-grace` is not in the past, the same window in which its token is accepted; without one the row is inserted as `NO_DEVICE_REGISTERED` with `closed_at = created_at` and no `due_at`, so the
+worker never sees it and later events are stored as `LATE`. Under policy
 `NOT_DELIVERED` a `DELIVERED` row is already satisfied: `due_at` is cleared and `closed_at` set, but it can still become
 `READ`. Under `NOT_READ` it stays due until `READ`.
 
@@ -199,7 +206,8 @@ verified credential. Every device-authenticated request verifies the token stric
 
 `notification`, `notification_event`, `device`, `fallback_attempt`, `daily_stats`, `fallback_circuit` and
 `fallback_circuit_event`, created by Flyway migrations `V1__init.sql`, `V2__event_unique_and_close_invariant.sql`,
-`V3__lease_until.sql`, `V4__admin.sql`, `V5__admin_index.sql` and `V6__fallback_circuit.sql` (applied automatically at startup;
+`V3__lease_until.sql`, `V4__admin.sql`, `V5__admin_index.sql`, `V6__fallback_circuit.sql` and `V7__sidecar_revision.sql`
+(state `NO_DEVICE_REGISTERED`, `device.token_expires_at`, `daily_stats.no_device_registered`; applied automatically at startup;
 `V5` builds the index `notification_app_created` with `create index concurrently`, so writes continue while it builds).
 `fallback_attempt` holds one row per webhook call, written by the worker in the same transaction as the fenced outcome update;
 `daily_stats` holds one row per app and UTC day, recomputed nightly by `DailyRollupJob` (advisory lock, so one worker runs it)

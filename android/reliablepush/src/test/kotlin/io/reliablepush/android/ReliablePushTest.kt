@@ -12,7 +12,9 @@ import androidx.test.core.app.ApplicationProvider
 import io.reliablepush.android.internal.EventQueue
 import io.reliablepush.android.internal.FlushResult
 import io.reliablepush.android.internal.RecordedRequest
-import io.reliablepush.android.internal.RefreshGate
+import io.reliablepush.android.internal.NotificationPoster
+import io.reliablepush.android.internal.QueuedEvent
+import io.reliablepush.android.internal.TokenStore
 import io.reliablepush.android.internal.ScriptedResponse
 import io.reliablepush.android.internal.Sdk
 import io.reliablepush.android.internal.TestBackend
@@ -68,7 +70,6 @@ class ReliablePushTest {
         context.getSharedPreferences("io.reliablepush.store", Context.MODE_PRIVATE).edit().clear().commit()
         EventQueue(Sdk.queueDir(context)).clear()
         js.cancelAll()
-        RefreshGate.reset()
         ShadowLog.clear()
         backend.handler = ::answer
     }
@@ -77,6 +78,7 @@ class ReliablePushTest {
     fun tearDown() {
         settle()
         ReliablePush.resetForTest()
+        Sdk.queueFactory = { EventQueue(it) }
         backend.close()
     }
 
@@ -92,13 +94,15 @@ class ReliablePushTest {
             jobPendingAtEventsCall.add(js.getPendingJob(jobId) != null)
             if (eventsStatus == 200) {
                 val arr = JSONObject(req.body).getJSONArray("events")
-                val items = List(arr.length()) { """{"trackingId":"${arr.getJSONObject(it).getString("trackingId")}","outcome":"ACCEPTED"}""" }
+                // the real backend echoes ids in lower case (canonical UUID form)
+                val items = List(arr.length()) { """{"trackingId":"${arr.getJSONObject(it).getString("trackingId").lowercase()}","outcome":"ACCEPTED"}""" }
                 ScriptedResponse(200, """{"accepted":${items.size},"ignored":0,"items":[${items.joinToString(",")}]}""")
             } else {
                 ScriptedResponse(eventsStatus, headers = eventsRetryAfter?.let { mapOf("Retry-After" to it) } ?: emptyMap())
             }
         }
         "DELETE /v1/devices/me" -> ScriptedResponse(revokeStatus)
+        "POST /v1/devices/token:refresh" -> ScriptedResponse(500) // never expected: no refresh outside ensureRegistered
         else -> ScriptedResponse(404)
     }
 
@@ -209,9 +213,9 @@ class ReliablePushTest {
     fun notificationsDisabledMeansNoDelivered() {
         registered()
         shadowOf(nm).setNotificationsEnabled(false)
+        // the gate is closed: the notification is still handed to the system (it decides), nothing is recorded
         assertFalse(ReliablePush.handle(context, push()))
         settle()
-        assertTrue(shadowOf(nm).allNotifications.isEmpty())
         assertEquals(0, queueSize())
         assertTrue(events().isEmpty())
         assertNull(js.getPendingJob(jobId))
@@ -223,7 +227,6 @@ class ReliablePushTest {
         nm.createNotificationChannel(NotificationChannel("reliablepush_default", "Off", NotificationManager.IMPORTANCE_NONE))
         assertFalse(ReliablePush.handle(context, push()))
         settle()
-        assertTrue(shadowOf(nm).allNotifications.isEmpty())
         assertEquals(0, queueSize())
         assertTrue(events().isEmpty())
     }
@@ -274,6 +277,254 @@ class ReliablePushTest {
         settle()
         assertEquals(ids.toSet(), events().filter { it.second == "DELIVERED" }.map { it.first }.toSet())
         assertEquals(0, queueSize())
+    }
+
+    // ---- handle: order gate -> persist -> post -> send, and display never depends on tracking (spec §3.4) ----
+
+    private val steps = Collections.synchronizedList(ArrayList<String>())
+
+    /** Records each step with what is on disk / sent at that moment; can fail the full or the minimal post. */
+    private inner class ProbePoster(
+        options: ReliablePushOptions,
+        private val failPost: Boolean = false,
+        private val failMinimal: Boolean = false,
+        private val failPrepare: Boolean = false,
+    ) : NotificationPoster(context, options) {
+        override fun prepare(trackingId: String, title: String, body: String): Notification {
+            if (failPrepare) throw IllegalStateException("prepare failed")
+            return super.prepare(trackingId, title, body)
+        }
+
+        override fun canShow(channelId: String): Boolean {
+            steps.add("gate queued=${queued().size}")
+            return super.canShow(channelId)
+        }
+
+        override fun notify(trackingId: String, notification: Notification): Boolean {
+            steps.add("post delivered=${queued().contains(trackingId to "DELIVERED")} sent=${events().size}")
+            if (failPost) throw IllegalStateException("post failed")
+            return super.notify(trackingId, notification)
+        }
+
+        override fun postMinimal(trackingId: String, title: String, body: String) {
+            steps.add("minimal delivered=${queued().contains(trackingId to "DELIVERED")}")
+            if (failMinimal) throw IllegalStateException("minimal failed")
+            super.postMinimal(trackingId, title, body)
+        }
+    }
+
+    private fun probe(failPost: Boolean = false, failMinimal: Boolean = false, failPrepare: Boolean = false) {
+        ReliablePush.posterFactory = { _, o -> ProbePoster(o, failPost, failMinimal, failPrepare) }
+    }
+
+    private fun internalErrors() = warnings().filter { it.startsWith("event=sdk.internal_error") }
+
+    @Test
+    fun handleOrderIsGatePersistPostSend() {
+        registered()
+        backend.handler = { req -> if (req.path == "/v1/events") steps.add("send"); answer(req) }
+        probe()
+        assertTrue(ReliablePush.handle(context, push()))
+        settle()
+        assertEquals(listOf("gate queued=0", "post delivered=true sent=0", "send"), steps)
+        assertEquals(listOf(tid to "DELIVERED"), events())
+        assertTrue(internalErrors().isEmpty())
+    }
+
+    @Test
+    fun postThrowingOnceFallsBackToTheMinimalNotification() {
+        registered()
+        probe(failPost = true)
+        assertTrue(ReliablePush.handle(context, push(title = "Hello", body = "World")))
+        assertEquals(listOf("gate queued=0", "post delivered=true sent=0", "gate queued=1", "minimal delivered=true"), steps)
+        val n = posted()!!
+        assertEquals("Hello", n.extras.getString(Notification.EXTRA_TITLE))
+        assertEquals(tid, shadowOf(n.contentIntent).savedIntent.getStringExtra("rp_tid"))
+        settle()
+        assertEquals(listOf(tid to "DELIVERED"), events()) // persisted before the post, and still sent
+        assertEquals(listOf("event=sdk.internal_error error=IllegalStateException"), internalErrors())
+    }
+
+    @Test
+    fun minimalPostFailingToo_returnsFalse_andKeepsTheEvent() {
+        registered()
+        eventsStatus = 503
+        probe(failPost = true, failMinimal = true)
+        assertFalse(ReliablePush.handle(context, push()))
+        settle()
+        // DELIVERED was persisted before the post: it stays (a missed fallback, accepted by D8)
+        assertEquals(listOf(tid to "DELIVERED"), queued())
+        assertEquals(2, internalErrors().size)
+    }
+
+    @Test
+    fun customizerMovingToAMissingChannelRecordsNothing() {
+        registered()
+        // the system would drop a notification on a channel that does not exist: the gate checks the final channel
+        ReliablePush.configure(context, backend.baseUrl, "news", options.copy(customizer = { b, _ -> b.setChannelId("nope") }))
+        assertFalse(ReliablePush.handle(context, push()))
+        settle()
+        assertEquals(0, queueSize())
+        assertTrue(events().isEmpty())
+        assertTrue(warnings().any { it == "event=notification.not_shown reason=channel_missing" })
+    }
+
+    @Test
+    fun customizerMovingToABlockedChannelRecordsNothing() {
+        registered()
+        nm.createNotificationChannel(NotificationChannel("muted", "Muted", NotificationManager.IMPORTANCE_NONE))
+        ReliablePush.configure(context, backend.baseUrl, "news", options.copy(customizer = { b, _ -> b.setChannelId("muted") }))
+        assertFalse(ReliablePush.handle(context, push()))
+        settle()
+        assertEquals(0, queueSize())
+        assertTrue(events().isEmpty())
+    }
+
+    @Test
+    fun blockedSdkChannelButOpenCustomizerChannelIsRecordedAndShown() {
+        registered()
+        nm.createNotificationChannel(NotificationChannel("reliablepush_default", "Off", NotificationManager.IMPORTANCE_NONE))
+        nm.createNotificationChannel(NotificationChannel("loud", "Loud", NotificationManager.IMPORTANCE_HIGH))
+        ReliablePush.configure(context, backend.baseUrl, "news", options.copy(customizer = { b, _ -> b.setChannelId("loud") }))
+        assertTrue(ReliablePush.handle(context, push()))
+        assertEquals("loud", posted()!!.channelId)
+        settle()
+        assertEquals(listOf(tid to "DELIVERED"), events())
+    }
+
+    @Test
+    fun gateThrowingPersistsDeliveredThenPostsTheMinimalNotification() {
+        registered()
+        ReliablePush.posterFactory = { c, o -> NotificationPoster(c, o, paused = { throw SecurityException("x") }) }
+        assertTrue(ReliablePush.handle(context, push(title = "Hello")))
+        assertEquals("Hello", posted()!!.extras.getString(Notification.EXTRA_TITLE))
+        settle()
+        // no gate said "not shown" (both threw) and the minimal notification is shown: DELIVERED, so no duplicate fallback
+        assertEquals(listOf(tid to "DELIVERED"), events())
+        assertEquals(0, queueSize())
+        assertEquals(List(2) { "event=sdk.internal_error error=SecurityException" }, internalErrors())
+    }
+
+    @Test
+    fun prepareThrowingPersistsDeliveredBeforeTheMinimalNotification() {
+        registered()
+        probe(failPrepare = true)
+        assertTrue(ReliablePush.handle(context, push()))
+        assertEquals(listOf("gate queued=0", "minimal delivered=true"), steps) // the minimal one's gate
+        assertNotNull(posted())
+        settle()
+        assertEquals(listOf(tid to "DELIVERED"), events())
+        assertEquals(listOf("event=sdk.internal_error error=IllegalStateException"), internalErrors())
+    }
+
+    @Test
+    fun prepareThrowingWithoutAUsableSdkChannelRecordsNothing() {
+        registered()
+        nm.deleteNotificationChannel("reliablepush_default")
+        // neither the full nor the minimal notification can get a channel: nothing is shown, so the fallback must fire
+        ReliablePush.posterFactory = { _, o ->
+            object : NotificationPoster(context, o) {
+                override fun prepare(trackingId: String, title: String, body: String): Notification =
+                    throw IllegalStateException("prepare failed")
+
+                override fun prepareMinimalChannel() = Unit
+            }
+        }
+        assertFalse(ReliablePush.handle(context, push()))
+        settle()
+        assertEquals(0, queueSize())
+        assertTrue(events().isEmpty())
+    }
+
+    @Test
+    fun prepareThrowingWithNotificationsDisabledRecordsNothing() {
+        registered()
+        shadowOf(nm).setNotificationsEnabled(false) // the system drops the minimal notification too
+        probe(failPrepare = true)
+        assertFalse(ReliablePush.handle(context, push()))
+        settle()
+        assertEquals(0, queueSize())
+        assertTrue(events().isEmpty())
+    }
+
+    @Test
+    fun gateClosedThenThrowingRecordsNothing() {
+        registered()
+        shadowOf(nm).setNotificationsEnabled(false) // the gate answers false
+        probe(failPost = true)
+        ReliablePush.handle(context, push())
+        settle()
+        assertEquals(0, queueSize())
+        assertTrue(events().isEmpty())
+    }
+
+    @Test
+    fun upperCaseRpTidIsQueuedSentAndAcknowledgedInLowerCase() {
+        registered()
+        val upper = tid.uppercase()
+        assertTrue(ReliablePush.handle(context, push(upper)))
+        val n = posted(tid)!!
+        settle()
+        assertEquals(listOf(tid to "DELIVERED"), events())
+        assertEquals("acknowledged once", 0, queueSize())
+        assertTrue(warnings().none { it.contains("unacknowledged") })
+
+        val tap = Intent().putExtra("rp_tid", upper)
+        ReliablePush.trackOpen(tap)
+        settle()
+        assertEquals(listOf(tid to "DELIVERED", tid to "READ"), events())
+        assertEquals(0, queueSize())
+        assertEquals(tid, shadowOf(n.contentIntent).savedIntent.getStringExtra("rp_tid"))
+    }
+
+    @Test
+    fun tokenStoreThrowingPostsTheMinimalNotification() {
+        registered()
+        // a corrupt preference: reading the device id throws ClassCastException
+        context.getSharedPreferences("io.reliablepush.store", Context.MODE_PRIVATE).edit().putInt("device_id", 7).commit()
+        probe()
+        assertTrue(ReliablePush.handle(context, push()))
+        assertNotNull(posted())
+        assertEquals(listOf("gate queued=0", "gate queued=0", "minimal delivered=false"), steps)
+        settle()
+        assertEquals(0, queueSize())
+        assertEquals(listOf("event=sdk.internal_error error=ClassCastException"), internalErrors())
+    }
+
+    @Test
+    fun tokenStoreThrowingOnTheLazyPathPostsTheMinimalNotification() {
+        registered()
+        ReliablePush.resetForTest() // new process, configure not called yet: the state is built from storage
+        Sdk.cipherFactory = { throw IllegalStateException("keystore unavailable") }
+        assertTrue(ReliablePush.handle(context, push(title = null, body = null)))
+        val label = context.applicationInfo.loadLabel(context.packageManager).toString()
+        assertEquals(label, posted()!!.extras.getString(Notification.EXTRA_TITLE))
+        assertEquals(1, internalErrors().size)
+    }
+
+    @Test
+    fun queueWriteThrowingPostsTheMinimalNotification() {
+        Sdk.queueFactory = { dir ->
+            object : EventQueue(dir) {
+                override fun add(event: QueuedEvent) = throw IllegalStateException("disk")
+            }
+        }
+        registered()
+        probe()
+        assertTrue(ReliablePush.handle(context, push()))
+        assertEquals(listOf("gate queued=0", "gate queued=0", "minimal delivered=false"), steps)
+        assertNotNull(posted())
+        assertEquals(listOf("event=sdk.internal_error error=IllegalStateException"), internalErrors())
+    }
+
+    @Test
+    fun handleFromAWorkerThreadPersistsBeforeThePostToo() {
+        registered()
+        probe()
+        var returned: Boolean? = null
+        Thread { returned = ReliablePush.handle(context, push()) }.apply { start(); join() } // the FCM worker thread
+        assertEquals(true, returned)
+        assertEquals("post delivered=true sent=0", steps[1])
     }
 
     // ---- trackOpen ----
@@ -576,6 +827,23 @@ class ReliablePushTest {
         assertEquals(FlushResult.Done, job.sender { false }.flush())
         assertEquals(0, queueSize())
         assertEquals(listOf(tid to "DELIVERED"), events().filter { it.second == "DELIVERED" }.distinct())
+    }
+
+    @Test
+    fun retryJobNeverRefreshes() {
+        registered()
+        eventsStatus = 503
+        ReliablePush.handle(context, push())
+        settle()
+        // the stored token is in its last 20 % (and the backend now rejects it): still no refresh on this path
+        val nowSec = System.currentTimeMillis() / 1000
+        TokenStore(context, FakeCipher()).save(io.reliablepush.android.internal.Registration("dev-1", fakeJwt(nowSec - 95, nowSec + 5), 0))
+        eventsStatus = 401
+        val job = Sdk.fromStoredConfig(context, jobId)!!
+        assertEquals(FlushResult.NotRegistered, job.sender { false }.flush())
+        assertEquals(1, queueSize()) // kept for ensureRegistered
+        assertTrue(TokenStore(context, FakeCipher()).renewalNeeded())
+        assertTrue(backend.requests.none { it.path.contains("refresh") })
     }
 
     @Test

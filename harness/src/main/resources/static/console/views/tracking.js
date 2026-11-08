@@ -16,7 +16,7 @@ export function mount(root, ctx) {
     if (cell.target === null || cell.target === undefined) { cell.textContent = ''; return; }
     cell.textContent = fmtDuration(cell.target - now);
   }
-  const closed = (s) => ['CANCELLED', 'FALLBACK_TRIGGERED', 'FALLBACK_FAILED', 'FALLBACK_EXPIRED', 'READ'].includes(s);
+  const closed = (s) => ['CANCELLED', 'FALLBACK_TRIGGERED', 'FALLBACK_FAILED', 'FALLBACK_EXPIRED', 'READ', 'NO_DEVICE_REGISTERED'].includes(s);
 
   function renderRow(n) {
     let r = rows.get(n.trackingId);
@@ -78,7 +78,8 @@ export function mount(root, ctx) {
       } });
       detail.replaceChildren(
         el('h3', { text: 'Notification ' + id }),
-        d.notification ? el('p', {}, badge(d.notification.state), ' user ', el('strong', { text: d.notification.userId }), ' ', cancelBtn) : null,
+        d.notification ? el('p', {}, badge(d.notification.state), ' user ', el('strong', { text: d.notification.userId }), ' ', d.notification.state === 'NO_DEVICE_REGISTERED' ? el('span', { class: 'muted', text: 'no active device when registered: not tracked, never a fallback' }) : cancelBtn)
+          : el('p', { class: 'muted', text: 'Not registered with the backend: the push went out untracked (no fallback).' }),
         el('ul', { class: 'timeline' }, items.map((e) => el('li', {}, fmtTime(e.at) + ' ', el('strong', { text: e.kind }), ' ', el('span', { class: 'muted', text: summarize(e.details) }))), hooks));
     } catch (e) { if (seq === detailSeq) err.show(e); }
   }

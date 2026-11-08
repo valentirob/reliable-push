@@ -92,6 +92,7 @@ configuration without any app fails the start):
 | `identity.jwks-uri` | discovery | Optional; otherwise `<issuer>/.well-known/openid-configuration` is used. https (http only for a local issuer) |
 | `identity.grant-secret-ref` | none | Required for `signed-grant` (`env:NAME`, at least 32 bytes), rejected for other types |
 | `device-token-validity` | `90d` | Positive duration (a bare number means days); lifetime of issued device tokens |
+| `device-token-events-grace` | `90d` | Duration, not negative (a bare number means days; `0` = no grace). Maximum 3650 days (startup fails above). A device whose newest token expired less than this ago still counts as active, so the user's notifications are tracked; without an active device a registration is stored as `NO_DEVICE_REGISTERED`. The same grace applies to the device token itself: `POST /v1/events` and `DELETE /v1/devices/me` accept a token expired by up to this long (`token:refresh` does not; the app registers again); signature, issuer, version and revocation checks still apply |
 | `default-policy` | `NOT_DELIVERED` | `NOT_DELIVERED` or `NOT_READ`; used when a registration omits `policy` |
 | `default-timeout-minutes` | `10` | At least 1; used when a registration omits `timeoutMinutes` |
 | `rate-limits.device-per-minute` | `60` | At least 1; per device, and per user for registration |
@@ -151,8 +152,9 @@ The ops dashboard ([admin.md](admin.md)) is served by every instance that serves
 
 | Metric | Type | Meaning |
 |---|---|---|
-| `rp_notifications_registered_total` | counter | Notifications inserted (replays of an `externalId` are not counted) |
-| `rp_events_total{type,late}` | counter | Event rows stored; `type` = `DELIVERED`/`READ`, `late` = `true` when the transition no longer applied |
+| `rp_notifications_registered_total{outcome}` | counter | Notifications inserted (replays of a `trackingId` are not counted); `outcome` = `pending` (tracked) or `no_device_registered` (the user had no active device: stored closed, never falls back) |
+| `rp_notification_registration_seconds` | histogram | Server time of `POST /v1/notifications` (`_bucket` with `le` = 5 ms … 5 s, `_count`, `_sum`, `_max`). Compare it with the sender's registration timeout (1 s recommended): a registration slower than the timeout and the whole push delivery can cause one needless fallback |
+| `rp_events_total{type,late,token}` | counter | Event rows stored; `type` = `DELIVERED`/`READ`, `late` = `true` when the transition no longer applied, `token` = `valid` or `grace` (the device token was expired but inside `device-token-events-grace`; a rising `grace` share means apps are not reopened often enough to refresh) |
 | `rp_fallback_total{outcome}` | counter | Fallback outcomes persisted by the worker: `triggered`, `failed`, `expired` (`expired` includes the fallbacks suppressed by the circuit breaker) |
 | `rp_fallback_suppressed_total{app,reason}` | counter | Fallbacks closed as `FALLBACK_EXPIRED` without a call by the circuit breaker; `reason` = `circuit_open` or `fallback_suspended`. **Worker role only** |
 | `rp_fallback_circuit_transitions_total{app,transition}` | counter | Committed circuit transitions, one per stored `fallback_circuit_event`; `transition` = `OPENED`, `CLOSED`, `FORCED` or `FORCE_ENDED`. Both roles (a resume is counted by the API replica that served it): sum over the replicas |
@@ -200,16 +202,17 @@ below, all top-level. ThreadContext entries `trace.id` and `rp.*` are top-level;
 | Event | Emitted when | Main fields |
 |---|---|---|
 | `api.request` | Every HTTP request completes | `http.request.method`, `url.path` (route template), `http.response.status_code`, `event.duration` (ns), `event.outcome` (`success` below 400), `rp.app_id`, `rp.device_id` when authenticated |
-| `notification.registered` | A notification was inserted | `rp.app_id`, `rp.tracking_id`, `rp.user_hash` |
-| `notification.duplicate` | A registration repeated an existing `externalId` | same |
+| `notification.registered` | A notification was inserted and is tracked (`PENDING`) | `rp.app_id`, `rp.tracking_id`, `rp.user_hash` |
+| `notification.no_device_registered` | A notification was inserted for a user without an active device: stored as `NO_DEVICE_REGISTERED`, no fallback | same |
+| `notification.duplicate` | A registration repeated an existing `trackingId` (nothing inserted) | same |
 | `notification.cancelled` | Sender cancelled a notification | `rp.app_id`, `rp.tracking_id` |
 | `device.registered` | Device registered or re-registered | `rp.app_id`, `rp.device_id`, `rp.user_hash` |
 | `device.token_refreshed` | Device token refreshed | same |
 | `device.revoked` | Device revoked | same |
-| `tracking.event_accepted` | An event was stored (also late ones) | `rp.event_type`, `rp.late`, `rp.tracking_id`, `rp.device_id`, `rp.app_id`, `rp.user_hash` |
+| `tracking.event_accepted` | An event was stored (also late ones) | `rp.event_type`, `rp.late`, `token_state` (`valid` or `grace`), `rp.tracking_id`, `rp.device_id`, `rp.app_id`, `rp.user_hash` |
 | `tracking.event_ignored` | Duplicate event (`reason=duplicate`) | same |
 | `auth.failed` (WARN) | Credential rejected | `reason` code only: `missing_key`, `unknown_key`, `missing_admin_key`, `unknown_admin_key` (admin API, header `X-Admin-Key`), `missing_token`, `malformed`, `unknown_kid`, `bad_signature`, `wrong_issuer`, `wrong_audience`, `expired`, `not_yet_valid`, `missing_user_claim`, `lifetime_too_long`, `jwks_unavailable`, `revoked`, `unknown_app` (a valid device token of an app no longer configured); `rp.app_id` for device registration |
-| `authz.denied` (WARN) | Event for a `trackingId` of another user (`reason=tracking_id_of_another_user`) | `rp.app_id`, `rp.device_id`, `rp.user_hash`, `rp.tracking_id` |
+| `authz.denied` (WARN) | Event for a `trackingId` of another user (`reason=tracking_id_of_another_user`) | `token_state`, `rp.app_id`, `rp.device_id`, `rp.user_hash`, `rp.tracking_id` |
 | `rate_limit.exceeded` (WARN) | A bucket ran empty | `rate_limit.scope` = `sender`, `device`, `register` or `admin`, `rp.app_id`, `rp.device_id`, `rp.user_hash` or (admin) `rp.admin_key` |
 | `admin.search` | Admin notification search answered | `rp.admin_key`, `rp.app_id`, `filters` = comma-separated filter names used (never values) |
 | `admin.notification_viewed` | Admin opened a notification detail | `rp.admin_key`, `rp.app_id`, `rp.tracking_id`, `rp.user_hash` |
@@ -370,7 +373,9 @@ admin disabled, or the rollup schedule `-`, retention behaves as before.
 - **Mixed-version deployments:** migrations are forward-only and run at startup. `V3` adds `notification.lease_until`
   and a CHECK that only `DISPATCHING` rows hold a lease; older API instances are unaffected, but do not run pre-V3 and
   current workers side by side (an old worker that re-claims a row left with a lease would fail to close it). Replace worker
-  replicas with a stop-then-start (`Recreate`) rollout across that boundary.
+  replicas with a stop-then-start (`Recreate`) rollout across that boundary. The same holds for `V7` (0.2.0) for every
+  replica, API included: pre-V7 instances cannot register devices or read `NO_DEVICE_REGISTERED` rows, and V7 locks
+  `notification` while it re-checks its state constraint ([deployment.md](deployment.md#upgrades)).
 - **Config skew during rollouts:** a worker without an app's configuration leaves that app's due rows alone (retried
   after one lease) and expires them 20 minutes after `due_at`; add new apps to all replicas before sending traffic.
 - **Circuit detection cost:** per tick, every configured app costs two small reads of the due-set indexes (and a

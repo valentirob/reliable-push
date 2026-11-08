@@ -1,0 +1,39 @@
+{
+  "name": "fcm-decorate-android-notification-overrides",
+  "description": "android.notification.title wins over notification.title; both notification objects are removed",
+  "operation": "fcm.decorate",
+  "input": {
+    "trackingId": "6f1c2b9e-5d1a-4c55-9a38-0c1f3a7d9e11",
+    "fcm": {
+      "message": {
+        "topic": "news",
+        "notification": {
+          "title": "T",
+          "body": "B"
+        },
+        "android": {
+          "notification": {
+            "title": "AT"
+          },
+          "ttl": "5s"
+        }
+      }
+    }
+  },
+  "expect": {
+    "output": {
+      "message": {
+        "topic": "news",
+        "android": {
+          "ttl": "5s",
+          "priority": "HIGH"
+        },
+        "data": {
+          "rp_tid": "6f1c2b9e-5d1a-4c55-9a38-0c1f3a7d9e11",
+          "title": "AT",
+          "body": "B"
+        }
+      }
+    }
+  }
+}

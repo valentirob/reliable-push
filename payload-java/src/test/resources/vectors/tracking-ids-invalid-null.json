@@ -1,0 +1,10 @@
+{
+  "name": "tracking-ids-invalid-null",
+  "operation": "trackingIds.isValid",
+  "input": {
+    "id": null
+  },
+  "expect": {
+    "output": false
+  }
+}

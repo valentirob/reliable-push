@@ -295,32 +295,80 @@ class DeviceSimulatorIT {
     }
 
     @Test
-    void refreshesOnlyNearExpiry() {
+    void ensureRegisteredRefreshesOnlyNearExpiry() {
         validity = Duration.ofSeconds(10);
         SimulatedDevice d = simulator.register("shop", "u1", Platform.IOS, null);
 
         clock.now.set(T0.plusSeconds(3)); // 7 s left of 10
-        simulator.refreshIfNearExpiry(d.deviceId());
+        assertThat(simulator.ensureRegistered(d.deviceId())).isEqualTo(DeviceSimulator.EnsureResult.ALREADY_REGISTERED);
         assertThat(count("POST /v1/devices/token:refresh")).isZero();
 
         clock.now.set(T0.plusSeconds(9)); // 1 s left
-        simulator.refreshIfNearExpiry(d.deviceId());
+        assertThat(simulator.ensureRegistered(d.deviceId())).isEqualTo(DeviceSimulator.EnsureResult.REFRESHED);
         assertThat(count("POST /v1/devices/token:refresh")).isEqualTo(1);
         assertThat(simulator.device(d.deviceId()).tokenExpiresAt()).isEqualTo(T0.plusSeconds(19));
 
-        simulator.refreshIfNearExpiry(d.deviceId()); // fresh token again
+        // fresh token again
+        assertThat(simulator.ensureRegistered(d.deviceId())).isEqualTo(DeviceSimulator.EnsureResult.ALREADY_REGISTERED);
         assertThat(count("POST /v1/devices/token:refresh")).isEqualTo(1);
+        assertThat(count("POST /v1/devices")).isEqualTo(1);
     }
 
     @Test
-    void refreshesBeforeEventsCallWhenNearExpiry() {
+    void ensureRegisteredWithAnExpiredTokenTakesTheIdTokenPath() {
         validity = Duration.ofSeconds(10);
         SimulatedDevice d = simulator.register("shop", "u1", Platform.IOS, null);
-        clock.now.set(T0.plusSeconds(9));
+        clock.now.set(T0.plusSeconds(10)); // expired: a refresh would be refused, so no refresh is tried
+
+        assertThat(simulator.ensureRegistered(d.deviceId())).isEqualTo(DeviceSimulator.EnsureResult.REGISTERED);
+
+        assertThat(count("POST /v1/devices/token:refresh")).isZero();
+        assertThat(count("POST /v1/devices")).isEqualTo(2);
+        Recorded reRegistration = requests.get(requests.size() - 1);
+        assertThat(reRegistration.body().get("deviceId").asString()).isEqualTo(d.deviceId().toString());
+        assertThat(simulator.device(d.deviceId()).tokenExpiresAt()).isEqualTo(T0.plusSeconds(20));
+    }
+
+    @Test
+    void ensureRegisteredRefreshesWhenRenewalIsNeededAndARefresh401ReRegisters() {
+        SimulatedDevice d = simulator.register("shop", "u1", Platform.IOS, null);
+        validTokens.clear(); // the backend no longer knows the token
+        simulator.receivePush(UUID.randomUUID(), "shop", "u1", Map.of(d.deviceId(), DeviceBehaviour.parse("deliver:0s")));
+        await().atMost(Duration.ofSeconds(3)).until(() -> simulator.device(d.deviceId()).renewalNeeded());
+
+        // plenty of validity left, but the flag is set: refresh (401) -> ID-token path
+        assertThat(simulator.ensureRegistered(d.deviceId())).isEqualTo(DeviceSimulator.EnsureResult.REGISTERED);
+
+        assertThat(count("POST /v1/devices/token:refresh")).isEqualTo(1);
+        assertThat(count("POST /v1/devices")).isEqualTo(2);
+        await().atMost(Duration.ofSeconds(3)).until(() -> reported.size() == 2);
+        assertThat(reported).extracting(DeviceEventRecord::outcome).containsExactly("UNAUTHORIZED", "ACCEPTED");
+        assertThat(simulator.device(d.deviceId()).renewalNeeded()).isFalse();
+        assertThat(simulator.device(d.deviceId()).queuedEvents()).isZero();
+    }
+
+    @Test
+    void ensureRegisteredOnAnOfflineDeviceDoesNothing() {
+        validity = Duration.ofSeconds(10);
+        SimulatedDevice d = simulator.register("shop", "u1", Platform.IOS, null);
+        simulator.setOnline(d.deviceId(), false);
+        clock.now.set(T0.plusSeconds(30));
+
+        assertThat(simulator.ensureRegistered(d.deviceId())).isEqualTo(DeviceSimulator.EnsureResult.OFFLINE);
+        assertThat(requests).hasSize(1);
+    }
+
+    @Test
+    void neverRefreshesOnTheEventPath() {
+        validity = Duration.ofSeconds(10);
+        SimulatedDevice d = simulator.register("shop", "u1", Platform.IOS, null);
+        clock.now.set(T0.plusSeconds(9)); // less than 20 % left: the old simulator refreshed here
         simulator.receivePush(UUID.randomUUID(), "shop", "u1", Map.of(d.deviceId(), DeviceBehaviour.parse("deliver:0s")));
         await().atMost(Duration.ofSeconds(3)).until(() -> reported.size() == 1);
-        assertThat(count("POST /v1/devices/token:refresh")).isEqualTo(1);
         assertThat(reported.get(0).outcome()).isEqualTo("ACCEPTED");
+        assertThat(count("POST /v1/devices/token:refresh")).isZero();
+        assertThat(count("POST /v1/devices")).isEqualTo(1);
+        assertThat(simulator.device(d.deviceId()).tokenExpiresAt()).isEqualTo(T0.plusSeconds(10));
     }
 
     @Test
@@ -358,7 +406,7 @@ class DeviceSimulatorIT {
         SimulatedDevice d = simulator.register("shop", "u1", Platform.IOS, null);
         String first = lastIssuedToken;
         clock.now.set(T0.plusSeconds(9));
-        simulator.refreshIfNearExpiry(d.deviceId());
+        simulator.ensureRegistered(d.deviceId());
         String second = lastIssuedToken;
 
         assertThat(second).isNotEqualTo(first);
@@ -387,29 +435,71 @@ class DeviceSimulatorIT {
     }
 
     @Test
-    void unauthorizedEventsRefreshThenRetry() {
+    void unauthorizedEventIsKeptQueuedAndSetsRenewalNeeded() throws Exception {
         SimulatedDevice d = simulator.register("shop", "u1", Platform.IOS, null);
         validTokens.clear();
-        validTokens.add("will-be-replaced");
-        // the refresh also fails (old token unknown), so the simulator re-registers and then succeeds
-        simulator.receivePush(UUID.randomUUID(), "shop", "u1", Map.of(d.deviceId(), DeviceBehaviour.parse("deliver:0s")));
+        UUID tracking = UUID.randomUUID();
+        simulator.receivePush(tracking, "shop", "u1", Map.of(d.deviceId(), DeviceBehaviour.parse("deliver:0s")));
         await().atMost(Duration.ofSeconds(3)).until(() -> reported.size() == 1);
-        assertThat(reported.get(0).outcome()).isEqualTo("ACCEPTED");
-        assertThat(count("POST /v1/devices/token:refresh")).isEqualTo(1);
-        assertThat(count("POST /v1/devices")).isEqualTo(2);
-        assertThat(requests.get(requests.size() - 1).path()).isEqualTo("POST /v1/events");
+        Thread.sleep(300); // no retry loop, no refresh, no re-registration
+
+        assertThat(reported.get(0).outcome()).isEqualTo("UNAUTHORIZED");
+        assertThat(eventCalls()).isEqualTo(1);
+        assertThat(count("POST /v1/devices/token:refresh")).isZero();
+        assertThat(count("POST /v1/devices")).isEqualTo(1);
+        SimulatedDevice now = simulator.device(d.deviceId());
+        assertThat(now.renewalNeeded()).isTrue();
+        assertThat(now.queuedEvents()).isEqualTo(1);
     }
 
     @Test
-    void persistentUnauthorizedGivesUpAfterOneRefreshAndOneReRegistration() {
+    void queuedEventAfter401KeepsItsPlaceAndWaitsForTheNextKick() throws Exception {
+        SimulatedDevice d = simulator.register("shop", "u1", Platform.IOS, null);
+        rejectAllTokens = true;
+        UUID first = UUID.randomUUID();
+        simulator.receivePush(first, "shop", "u1", Map.of(d.deviceId(), DeviceBehaviour.parse("deliver:0s")));
+        await().atMost(Duration.ofSeconds(3)).until(() -> reported.size() == 1);
+        rejectAllTokens = false;
+        UUID second = UUID.randomUUID();
+        simulator.receivePush(second, "shop", "u1", Map.of(d.deviceId(), DeviceBehaviour.parse("deliver:0s")));
+
+        await().atMost(Duration.ofSeconds(3)).until(() -> reported.size() == 3);
+        assertThat(reported).extracting(DeviceEventRecord::trackingId).containsExactly(first, first, second);
+        assertThat(reported).extracting(DeviceEventRecord::outcome)
+                .containsExactly("UNAUTHORIZED", "ACCEPTED", "ACCEPTED");
+    }
+
+    @Test
+    void persistentUnauthorizedNeverLoops() throws Exception {
         SimulatedDevice d = simulator.register("shop", "u1", Platform.IOS, null);
         rejectAllTokens = true;
         simulator.receivePush(UUID.randomUUID(), "shop", "u1", Map.of(d.deviceId(), DeviceBehaviour.parse("deliver:0s")));
         await().atMost(Duration.ofSeconds(3)).until(() -> reported.size() == 1);
-        assertThat(reported.get(0).outcome()).isEqualTo("UNAUTHORIZED");
-        assertThat(count("POST /v1/devices/token:refresh")).isEqualTo(1);
-        assertThat(count("POST /v1/devices")).isEqualTo(2);
-        assertThat(count("POST /v1/events")).isEqualTo(2);
+
+        // refresh 401 -> re-registration succeeds -> the flush is 401 again: kept, one more call, no loop
+        assertThat(simulator.ensureRegistered(d.deviceId())).isEqualTo(DeviceSimulator.EnsureResult.REGISTERED);
+        await().atMost(Duration.ofSeconds(3)).until(() -> reported.size() == 2);
+        Thread.sleep(300);
+        assertThat(reported).extracting(DeviceEventRecord::outcome).containsOnly("UNAUTHORIZED");
+        assertThat(eventCalls()).isEqualTo(2);
+        assertThat(simulator.device(d.deviceId()).queuedEvents()).isEqualTo(1);
+        assertThat(simulator.device(d.deviceId()).renewalNeeded()).isTrue();
+    }
+
+    @Test
+    void forceRefreshClearsRenewalNeededAndFlushes() {
+        SimulatedDevice d = simulator.register("shop", "u1", Platform.IOS, null);
+        String old = lastIssuedToken;
+        validTokens.remove(old);
+        simulator.receivePush(UUID.randomUUID(), "shop", "u1", Map.of(d.deviceId(), DeviceBehaviour.parse("deliver:0s")));
+        await().atMost(Duration.ofSeconds(3)).until(() -> simulator.device(d.deviceId()).renewalNeeded());
+        validTokens.add(old); // the refresh itself is accepted
+
+        assertThat(simulator.forceRefresh(d.deviceId())).isEqualTo(200);
+
+        await().atMost(Duration.ofSeconds(3)).until(() -> reported.size() == 2);
+        assertThat(reported.get(1).outcome()).isEqualTo("ACCEPTED");
+        assertThat(simulator.device(d.deviceId()).renewalNeeded()).isFalse();
     }
 
     @Test
@@ -513,7 +603,7 @@ class DeviceSimulatorIT {
         SimulatedDevice d = simulator.register("shop", "u1", Platform.IOS, null);
         clock.now.set(T0.plusSeconds(9));
         refreshDelayMs = 1500;
-        Thread refresher = Thread.ofVirtual().start(() -> simulator.refreshIfNearExpiry(d.deviceId()));
+        Thread refresher = Thread.ofVirtual().start(() -> simulator.ensureRegistered(d.deviceId()));
         await().atMost(Duration.ofSeconds(3)).until(() -> count("POST /v1/devices/token:refresh") == 1);
 
         long start = System.nanoTime();
@@ -536,7 +626,7 @@ class DeviceSimulatorIT {
             reply(ex, 503, "{}");
         });
         clock.now.set(T0.plusSeconds(9));
-        simulator.refreshIfNearExpiry(d.deviceId());
+        assertThat(simulator.ensureRegistered(d.deviceId())).isEqualTo(DeviceSimulator.EnsureResult.FAILED);
         assertThat(count("POST /v1/devices")).isEqualTo(1);
     }
 }

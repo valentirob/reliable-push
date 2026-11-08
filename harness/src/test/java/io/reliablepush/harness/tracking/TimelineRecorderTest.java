@@ -70,7 +70,7 @@ class TimelineRecorderTest {
         Notification n = TimelineTest.n(tid, NotificationState.PENDING, Instant.now());
         recorder.start();
 
-        onSent.accept(new FakeSender.Sent("shop", n, 2));
+        onSent.accept(new FakeSender.Sent("shop", new FakeSender.SendResult(tid, n, null, false), 2));
         onEvent.accept(new DeviceSimulator.DeviceEventRecord(tid, UUID.randomUUID(), "delivered", Instant.now(), "OK"));
         onStarted.accept(hook(tid, call, 0));
         onReceived.accept(hook(tid, call, 200));
@@ -82,6 +82,26 @@ class TimelineRecorderTest {
                 .filter(e -> e.kind().equals("webhook_received")).findFirst().orElseThrow();
         assertThat(done.details()).containsEntry("status", 200);
         assertThat(timeline.recent("shop", 5)).hasSize(1);
+    }
+
+    @Test
+    void failedOrSkippedRegistrationIsRecordedAndThePushStillShows() {
+        UUID failed = UUID.randomUUID();
+        UUID skipped = UUID.randomUUID();
+        recorder.start();
+
+        onSent.accept(new FakeSender.Sent("shop", new FakeSender.SendResult(failed, null, 400, false), 1));
+        onSent.accept(new FakeSender.Sent("shop", new FakeSender.SendResult(skipped, null, null, true), 1));
+
+        await().untilAsserted(() -> assertThat(timeline.entries(skipped)).hasSize(2));
+        await().untilAsserted(() -> assertThat(timeline.entries(failed)).hasSize(2));
+        assertThat(timeline.entries(failed)).extracting(TimelineEntry::kind)
+                .containsExactly("registration_missing", "push_simulated");
+        assertThat(timeline.entries(failed).get(0).details()).containsEntry("reason", "failed")
+                .containsEntry("status", 400);
+        assertThat(timeline.entries(skipped).get(0).details()).containsEntry("reason", "skipped");
+        assertThat(timeline.appId(failed)).contains("shop");
+        assertThat(timeline.recent("shop", 5)).isEmpty(); // no registered row to list
     }
 
     @Test

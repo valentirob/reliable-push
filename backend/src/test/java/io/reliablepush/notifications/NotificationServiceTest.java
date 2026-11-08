@@ -44,7 +44,7 @@ class NotificationServiceTest {
         TimeScale scale = new TimeScale(props[0], env);
 
         Notification n = NotificationService.newNotification(
-                ID, app, new RegisterNotificationRequest("user-1", null, null, null, FALLBACK), NOW, scale);
+                ID, app, new RegisterNotificationRequest(ID.toString(), "user-1", null, null, null, FALLBACK), NOW, scale, true);
 
         assertThat(n.policy()).isEqualTo(FallbackPolicy.NOT_DELIVERED);
         assertThat(n.timeoutMinutes()).isEqualTo(10);
@@ -68,12 +68,12 @@ class NotificationServiceTest {
         TimeScale scale = new TimeScale(props[0], env);
 
         Notification defaults = NotificationService.newNotification(
-                ID, app, new RegisterNotificationRequest("u", null, null, null, FALLBACK), NOW, scale);
+                ID, app, new RegisterNotificationRequest(ID.toString(), "u", null, null, null, FALLBACK), NOW, scale, true);
         assertThat(defaults.policy()).isEqualTo(FallbackPolicy.NOT_READ);
         assertThat(defaults.dueAt()).isEqualTo(NOW.plus(Duration.ofMinutes(30)));
 
         Notification explicit = NotificationService.newNotification(
-                ID, app, new RegisterNotificationRequest("u", "ext-1", FallbackPolicy.NOT_DELIVERED, 3, FALLBACK), NOW, scale);
+                ID, app, new RegisterNotificationRequest(ID.toString(), "u", "ext-1", FallbackPolicy.NOT_DELIVERED, 3, FALLBACK), NOW, scale, true);
         assertThat(explicit.policy()).isEqualTo(FallbackPolicy.NOT_DELIVERED);
         assertThat(explicit.timeoutMinutes()).isEqualTo(3);
         assertThat(explicit.dueAt()).isEqualTo(NOW.plus(Duration.ofMinutes(3)));
@@ -89,10 +89,27 @@ class NotificationServiceTest {
         TimeScale scale = new TimeScale(props[0], env);
 
         Notification n = NotificationService.newNotification(
-                ID, app, new RegisterNotificationRequest("u", null, null, 5, FALLBACK), NOW, scale);
+                ID, app, new RegisterNotificationRequest(ID.toString(), "u", null, null, 5, FALLBACK), NOW, scale, true);
 
         assertThat(n.timeoutMinutes()).isEqualTo(5);
         assertThat(n.dueAt()).isEqualTo(NOW.plusSeconds(10));
+    }
+
+    @Test
+    void withoutActiveDeviceTheRowIsStoredClosed() {
+        MockEnvironment env = AppFixtures.environment();
+        ReliablePushProperties[] props = new ReliablePushProperties[1];
+        AppConfig app = shop(Map.of(), env, props);
+        TimeScale scale = new TimeScale(props[0], env);
+
+        Notification n = NotificationService.newNotification(
+                ID, app, new RegisterNotificationRequest(ID.toString(), "u", null, null, 5, FALLBACK), NOW, scale, false);
+
+        assertThat(n.state()).isEqualTo(NotificationState.NO_DEVICE_REGISTERED);
+        assertThat(n.dueAt()).isNull();
+        assertThat(n.closedAt()).isEqualTo(NOW);
+        assertThat(n.createdAt()).isEqualTo(NOW);
+        assertThat(n.timeoutMinutes()).isEqualTo(5);
     }
 
     @Test
@@ -131,5 +148,8 @@ class NotificationServiceTest {
         assertThat(NotificationState.FALLBACK_TRIGGERED.closed()).isTrue();
         assertThat(NotificationState.FALLBACK_FAILED.closed()).isTrue();
         assertThat(NotificationState.FALLBACK_EXPIRED.closed()).isTrue();
+        assertThat(NotificationState.NO_DEVICE_REGISTERED.closed()).isTrue();
+        assertThat(NotificationState.fromExternal("NO_DEVICE_REGISTERED")).isEqualTo(NotificationState.NO_DEVICE_REGISTERED);
+        assertThat(NotificationState.NO_DEVICE_REGISTERED.external()).isEqualTo("NO_DEVICE_REGISTERED");
     }
 }

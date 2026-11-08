@@ -36,20 +36,21 @@ public class NotificationRepository {
     }
 
     /**
-     * Inserts the row unless the app already has one with the same {@code externalId}. Atomic and race-safe: of any
-     * number of concurrent inserts with the same {@code (app_id, external_id)} exactly one returns {@code true}
-     * (the others wait for it and do nothing), so the caller can read the winner with {@link #findByExternalId}.
-     * The conflict target repeats the predicate of the partial unique index.
+     * Inserts the row unless its id (the sender's {@code trackingId}, in any app) or, for the same app, its
+     * {@code externalId} is already taken. Atomic and race-safe: of any number of concurrent inserts that collide on
+     * either unique key exactly one returns {@code true} (the others wait for it and do nothing), so the caller can
+     * then read the winner with {@link #findById} or {@link #findByExternalId}. No conflict target: both unique keys
+     * (the primary key and the partial index on {@code (app_id, external_id)}) are covered.
      *
      * @return {@code true} if the row was inserted
      */
     public boolean insert(Notification n) {
         return jdbc.sql("""
                         insert into notification (id, app_id, user_id, external_id, policy, timeout_minutes,
-                                                  fallback_payload, state, created_at, due_at)
+                                                  fallback_payload, state, created_at, due_at, closed_at)
                         values (:id, :appId, :userId, :externalId, :policy, :timeout,
-                                cast(:payload as jsonb), :state, :createdAt, :dueAt)
-                        on conflict (app_id, external_id) where external_id is not null do nothing
+                                cast(:payload as jsonb), :state, :createdAt, :dueAt, :closedAt)
+                        on conflict do nothing
                         """)
                         .param("id", n.id())
                         .param("appId", n.appId())
@@ -61,6 +62,7 @@ public class NotificationRepository {
                         .param("state", n.state().name())
                         .param("createdAt", timestamp(n.createdAt()))
                         .param("dueAt", timestamp(n.dueAt()))
+                        .param("closedAt", timestamp(n.closedAt()))
                         .update()
                 == 1;
     }

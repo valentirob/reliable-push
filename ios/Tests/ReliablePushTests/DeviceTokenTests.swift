@@ -21,6 +21,12 @@ final class DeviceTokenTests: XCTestCase {
         XCTAssertTrue(t.needsRefresh(now: Date(timeIntervalSince1970: 500)))
     }
 
+    func testIsExpiredAtExp() throws {
+        let t = try XCTUnwrap(DeviceToken.parse(Self.token(iat: 0, exp: 100)))
+        XCTAssertFalse(t.isExpired(now: Date(timeIntervalSince1970: 99)))
+        XCTAssertTrue(t.isExpired(now: Date(timeIntervalSince1970: 100)))
+    }
+
     func testParseReadsClaims() throws {
         let raw = Self.token(iat: 1000, exp: 2000)
         let t = try XCTUnwrap(DeviceToken.parse(raw))

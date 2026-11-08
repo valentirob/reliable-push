@@ -12,7 +12,7 @@ Summary of how the backend protects data and authenticates callers. The binding 
 | Stolen or guessed sender API key | Registering or cancelling notifications | Keys are compared as SHA-256 hashes in constant time; one key per app; the key gives access only to that app's data |
 | A device or user | Reading or reporting events for another user's notifications | `appId`/`userId` come from the verified credential or token, never from a body; an event for another user's `trackingId` is `FORBIDDEN`, for another app's `NOT_FOUND` |
 | Forged or replayed device registration | Obtaining a device token for another user | OIDC signature verification against the issuer's JWKS, strict claim checks; signed grants are short-lived and capped |
-| Stolen device token | Reporting events as that device | Short revocation cache, revoke endpoint, `token_version` bump on re-registration, expiry (default 90 days) |
+| Stolen device token | Reporting events as that device | Short revocation cache, revoke endpoint, `token_version` bump on re-registration, expiry (default 90 days) plus the events grace (below) |
 | Attacker in front of the fallback receiver | Forging fallbacks, replaying old ones | HMAC-SHA256 signature over timestamp and body, timestamp for replay rejection, `Idempotency-Key` for de-duplication |
 | Stolen or leaked admin key | Reading notifications, user ids and fallback payloads through the dashboard | Read-only API; keys scoped to apps; the payload only for keys with `payload`; keys stored as hashes; rate limit per key; every search and view audit-logged; page headers; optionally restricted to an internal network at the ingress. See [Admin keys](#admin-keys) |
 | Operator mistakes | Secrets in config files or logs | Secrets and keys only as `env:NAME` references; inline values are rejected at startup; log deny-list |
@@ -32,6 +32,11 @@ Summary of how the backend protects data and authenticates callers. The binding 
   (startup fails).
 - Each app has exactly one key hash, so rotating a key is a switch-over: deploy the new `sender-api-key-sha256` and update
   the sender at the same time (or accept a short window of `401`s on the sender, which should retry registration).
+- **Sender-generated tracking ids.** The sender supplies `trackingId` (spec 2026-11-08, sidecar revision). A
+  `trackingId` that already exists for **another app** answers `409`, so a sender can learn that an id exists in another
+  app of the same deployment, and nothing else (no state, user or content). Low risk: ids are random UUIDs
+  (`TrackingIds.newId()`), all apps belong to one organisation, and a guessed id still gives no access to the other
+  app's notification (`GET` and `DELETE` answer `404` for it, events from another app's devices get `NOT_FOUND`).
 
 ## Admin keys
 
@@ -82,6 +87,13 @@ under `reliable-push.admin.keys[]` as `{id, key-sha256, apps, permissions}`; wit
   Revocation and re-registration take effect immediately on the instance that handles them and on other instances after the
   cache TTL. Refresh, revoke and event reporting are conditional on the presented token version, so a superseded token cannot
   refresh, revoke or report.
+- **Grace for expired tokens.** The SDKs do not renew the token while handling a push, so `POST /v1/events` and `DELETE
+  /v1/devices/me` (only these two) also accept a token that expired less than the app's `device-token-events-grace`
+  ago (default 90 days, `0` disables; `exp + 60 s skew + grace`). Signature, issuer, `ver` and revocation checks are
+  unchanged; `POST /v1/devices/token:refresh` still needs an unexpired token (past expiry the app registers again with an
+  ID token). Risk: a stolen token works for at most `validity + grace` after its last refresh, and can only send
+  `DELIVERED`/`READ` for its own user's notifications (which suppresses that user's fallbacks and nothing else) or revoke
+  its own device. Accepted events log `token_state=grace` and count in `rp_events_total{token="grace"}`.
 - Every failure returns the same `401`; only the logged reason code (`missing_token`, `malformed`, `unknown_kid`,
   `bad_signature`, `wrong_issuer`, `expired`, `unknown_app` for a token of an app no longer configured, `revoked`) differs.
 
@@ -109,7 +121,8 @@ match each other, otherwise startup fails. **Rotation procedure:**
 
 1. Generate a new pair (`k2`) and add it to `signing-keys` next to `k1`; deploy. All instances now verify both kids.
 2. Set `current-kid: k2`; deploy. New and refreshed tokens are signed with `k2`; tokens signed with `k1` still verify.
-3. Keep `k1` configured until the longest `device-token-validity` of any app has elapsed since step 2 (default 90 days),
+3. Keep `k1` configured until the longest `device-token-validity` (plus `device-token-events-grace` if you want expired
+   tokens of `k1` to keep working on events; default 90 + 90 days) of any app has elapsed since step 2,
    because tokens issued with `k1` are valid until their own expiry.
 4. Remove `k1` and its variables; deploy. Anything still signed with `k1` now gets `401` and the SDK re-registers.
 
@@ -179,6 +192,9 @@ environment variables.
 - **Rate limits are per instance:** with N replicas a caller can use up to N times the configured rate. Unauthenticated
   floods (for example `POST /v1/devices` with garbage credentials) are limited only by the ingress: configure per-IP limits
   there.
+- **Expired device tokens on events and logout:** a stolen device token keeps working on those two routes for at most
+  `device-token-validity + device-token-events-grace` after its last refresh ([Device tokens](#device-tokens)).
+- **Cross-app `409` on registration** reveals that a `trackingId` exists in another app ([Sender API keys](#sender-api-keys)).
 - **Revocation latency:** another instance may honour a revoked token for up to `revocation-cache-ttl` (default 60 s).
 - **User hash:** pseudonymisation, not anonymisation.
 - **`azp` is ignored** when verifying OIDC ID tokens; scope tokens by `aud`.
