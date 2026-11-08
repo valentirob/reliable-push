@@ -436,6 +436,20 @@ class SenderClientTest {
     }
 
     @Test
+    void trackingIdIsNormalizedToLowerCase() throws Exception {
+        AtomicReference<String> sent = new AtomicReference<>();
+        SenderClient c = start(ex -> {
+            sent.set(body(ex));
+            reply(ex, 201, "application/json", NOTIFICATION);
+        });
+        RegisterRequest r = RegisterRequest.builder().trackingId(TID.toString().toUpperCase()).userId("u1")
+                .fallback(Map.of()).build();
+        assertThat(r.trackingId()).isEqualTo(TID.toString());
+        c.register(r);
+        assertThat(((Map<?, ?>) Json.read(sent.get())).get("trackingId")).isEqualTo(TID.toString());
+    }
+
+    @Test
     void missingTrackingIdFailsFast() {
         assertThatThrownBy(() -> RegisterRequest.builder().userId("u").fallback(Map.of()).build())
                 .isInstanceOf(NullPointerException.class).hasMessageContaining("trackingId");

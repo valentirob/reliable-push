@@ -81,7 +81,7 @@ class JsonTest {
     @Test
     void rejectsMalformedDocuments() {
         for (String bad : new String[] {"", " ", "tru", "nul", "[1,]", "[1 2]", "{\"a\" 1}", "{\"a\":1 \"b\":2}", "-", "1.", "1e", "+1",
-            ".5", "\"abc", "\"\\u12\"", "\"\\u12G4\"", "\"\\u\u0663\u0663\u0663\u0663\"", "\"\\u\uff11000\"", "[", "{\"a\"", "{1:2}", "1 2", "'x'", "\"a\nb\"", "{\"a\":1,\"a\":1}"}) {
+            ".5", "\"abc", "\"\\u12\"", "\"\\u12G4\"", "\"\\u12g4\"", "\"\\u/000\"", "\"\\u:000\"", "\"\\u@000\"", "\"\\u`000\"", "\"\\u\u0663\u0663\u0663\u0663\"", "\"\\u\uff11000\"", "[", "{\"a\"", "{1:2}", "1 2", "'x'", "\"a\nb\"", "{\"a\":1,\"a\":1}"}) {
             assertThatThrownBy(() -> Json.read(bad)).as(bad).isInstanceOf(IllegalArgumentException.class);
         }
         assertThatThrownBy(() -> Json.read(null)).isInstanceOf(IllegalArgumentException.class);

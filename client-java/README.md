@@ -54,7 +54,7 @@ client.cancel(n.trackingId());                                     // only PENDI
 ```
 
 `trackingId` is required and checked when the request is built (`NullPointerException` when missing,
-`IllegalArgumentException` when it is not a UUID). `register` is idempotent per app on `trackingId`: repeating it
+`IllegalArgumentException` when it is not a UUID; it is lower-cased, as the backend returns it). `register` is idempotent per app on `trackingId`: repeating it
 returns the existing record, so a retry after a lost response is safe. A repeated `externalId` under another
 `trackingId` is a `409`. When the user has no active device the call still succeeds, with state
 `NO_DEVICE_REGISTERED` (closed, not tracked, never falls back).

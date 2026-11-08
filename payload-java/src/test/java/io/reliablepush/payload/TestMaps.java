@@ -4,8 +4,8 @@ import java.util.Collections;
 import java.util.Map;
 
 /** Tiny test helper: Java 8 has no Map.of. */
-final class Collections1 {
-    private Collections1() {
+final class TestMaps {
+    private TestMaps() {
     }
 
     static <V> Map<String, V> map(String k, V v) {

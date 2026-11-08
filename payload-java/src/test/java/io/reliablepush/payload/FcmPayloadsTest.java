@@ -82,9 +82,9 @@ class FcmPayloadsTest {
 
     @Test
     void reservedDataKeysAreRejected() {
-        fail(() -> FcmPayloads.data(TID, "T", "B", Collections1.map("rp_tid", "x")), Code.RESERVED_KEY);
-        fail(() -> FcmPayloads.data(TID, "T", "B", Collections1.map("title", "x")), Code.RESERVED_KEY);
-        fail(() -> FcmPayloads.data(TID, "T", "B", Collections1.map("body", "x")), Code.RESERVED_KEY);
+        fail(() -> FcmPayloads.data(TID, "T", "B", TestMaps.map("rp_tid", "x")), Code.RESERVED_KEY);
+        fail(() -> FcmPayloads.data(TID, "T", "B", TestMaps.map("title", "x")), Code.RESERVED_KEY);
+        fail(() -> FcmPayloads.data(TID, "T", "B", TestMaps.map("body", "x")), Code.RESERVED_KEY);
     }
 
     @Test

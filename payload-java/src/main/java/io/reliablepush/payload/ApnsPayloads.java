@@ -72,8 +72,9 @@ public final class ApnsPayloads {
     }
 
     /**
-     * Adds {@code aps.mutable-content = 1} and the top-level {@code rp_tid} to the sender's own APNs payload. Everything
-     * else is kept as is, in the same order (an existing {@code mutable-content} is replaced in place).
+     * Adds {@code aps.mutable-content = 1} and the top-level {@code rp_tid} to the sender's own APNs
+     * payload. Everything else is kept as is, in the same order (an existing {@code mutable-content} is replaced in
+     * place).
      *
      * @param apnsJson the sender's payload, a JSON object with a visible alert: {@code aps.alert} is a non-empty string
      *     or an object whose {@code title} or {@code body} is a non-empty string

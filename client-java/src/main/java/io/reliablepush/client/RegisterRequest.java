@@ -1,5 +1,6 @@
 package io.reliablepush.client;
 
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.regex.Pattern;
@@ -20,6 +21,7 @@ public record RegisterRequest(String trackingId, String userId, String externalI
         if (!UUID_FORMAT.matcher(trackingId).matches()) {
             throw new IllegalArgumentException("trackingId must be a UUID (8-4-4-4-12 hex digits)");
         }
+        trackingId = trackingId.toLowerCase(Locale.ROOT);
         Objects.requireNonNull(userId, "userId");
         Objects.requireNonNull(fallback, "fallback");
         fallback = Map.copyOf(fallback);

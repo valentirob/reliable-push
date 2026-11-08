@@ -69,8 +69,8 @@ class ApnsPayloadsTest {
 
     @Test
     void buildRejectsReservedCustomKeys() {
-        assertCode(() -> ApnsPayloads.build(TID, "T", "B", Collections1.map("rp_tid", "x")), Code.RESERVED_KEY);
-        assertCode(() -> ApnsPayloads.build(TID, "T", "B", Collections1.map("aps", "x")), Code.RESERVED_KEY);
+        assertCode(() -> ApnsPayloads.build(TID, "T", "B", TestMaps.map("rp_tid", "x")), Code.RESERVED_KEY);
+        assertCode(() -> ApnsPayloads.build(TID, "T", "B", TestMaps.map("aps", "x")), Code.RESERVED_KEY);
     }
 
     @Test
