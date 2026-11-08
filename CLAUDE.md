@@ -10,6 +10,7 @@ The rules with `trigger: always_on`, loaded here as Antigravity loads them:
 @.agents/rules/gitflow.md
 @.agents/rules/handoff.md
 @.agents/rules/docs-sync.md
+@.agents/rules/long-running.md
 
 - The `glob` and `model_decision` rules are not loaded automatically: read the ones the AGENTS.md rules index says
   apply to the files you touch (`backend-java.md`, `mobile-sdk.md`, `security.md`).
@@ -18,5 +19,8 @@ The rules with `trigger: always_on`, loaded here as Antigravity loads them:
 - Subagents in `.claude/agents/` are thin wrappers around the `review-loop` skill roles; keep their logic in the skill.
 - Plugins (for example a planning or sub-agent workflow) may drive the work, but their scratch files stay out of git
   (`.superpowers/` is ignored) and their results go into `docs/specs/`, `docs/plans/` and `docs/STATUS.md`.
+- Hooks: `.claude/settings.json` runs `scripts/check-waits.sh --hook claude` at session start and on every prompt; its
+  findings arrive as context. Background tasks you start (`run_in_background`) still follow `long-running.md`: wrap
+  waits in `scripts/wait-until.sh`, never a hand-written loop.
 - Claude Code's own memory is private to one machine: never rely on it for project knowledge (see AGENTS.md "AI agent
   context").

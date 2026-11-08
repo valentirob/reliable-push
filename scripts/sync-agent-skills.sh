@@ -2,7 +2,8 @@
 # Keeps the AI agent context the same for every tool (AGENTS.md "AI agent context").
 #
 #   scripts/sync-agent-skills.sh          write .claude/skills/<name>/SKILL.md for every .agents/skills/<name>/SKILL.md
-#   scripts/sync-agent-skills.sh --check  verify instead (CI): wrappers in sync, rule frontmatter valid, imports exist
+#   scripts/sync-agent-skills.sh --check  verify instead (CI): wrappers in sync, rule frontmatter valid, imports exist,
+#                                         both tools' hooks run scripts/check-waits.sh (rule long-running.md)
 #
 # .agents/skills is the single source (Antigravity reads it natively). Claude Code reads .claude/skills, so each skill
 # gets a thin wrapper there with the same name and description. Real files, not a symlink: a symlink checked out on
@@ -88,6 +89,12 @@ while IFS= read -r line; do
   line="${line%$'\r'}"
   [ -f "${line#@}" ] || fail "CLAUDE.md imports ${line#@}, which does not exist"
 done < <(tr -d '\r' < CLAUDE.md | grep -E '^@')
+
+# both tools run the long-running check on their own hooks (rule long-running.md)
+grep -q 'scripts/check-waits.sh --hook claude' .claude/settings.json 2>/dev/null ||
+  fail ".claude/settings.json has no hook running scripts/check-waits.sh --hook claude"
+grep -q 'scripts/check-waits.sh --hook antigravity' .agents/hooks.json 2>/dev/null ||
+  fail ".agents/hooks.json has no hook running scripts/check-waits.sh --hook antigravity"
 
 for name in "${sources[@]}"; do
   grep -q "\`$name\`" AGENTS.md || fail "skill $name is not listed in the AGENTS.md skills index"
