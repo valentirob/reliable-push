@@ -120,17 +120,19 @@ class DeviceRepository {
 
     /**
      * Whether the user has an active device for the app (sidecar revision spec 2.3): not revoked, and its newest token
-     * expired less than {@code grace} before {@code now} (or not at all). Served by the {@code device_app_user} index.
+     * still accepted on the grace routes at {@code now}, that is {@code now <= token_expires_at + skew + grace} with the
+     * verifier's {@link DeviceTokenService#SKEW}, so the active window equals token acceptance. Served by the
+     * {@code device_app_user} index.
      */
     boolean hasActiveDevice(String appId, String userId, Instant now, Duration grace) {
         return jdbc.sql("""
                                 select exists (select 1 from device
                                                where app_id = :appId and user_id = :userId
-                                                 and revoked_at is null and token_expires_at > :threshold)
+                                                 and revoked_at is null and token_expires_at >= :threshold)
                                 """)
                 .param("appId", appId)
                 .param("userId", userId)
-                .param("threshold", timestamp(now.minus(grace)))
+                .param("threshold", timestamp(now.minus(grace).minus(DeviceTokenService.SKEW)))
                 .query(Boolean.class)
                 .single();
     }

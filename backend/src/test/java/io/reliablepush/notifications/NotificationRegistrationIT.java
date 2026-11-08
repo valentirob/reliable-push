@@ -327,7 +327,8 @@ class NotificationRegistrationIT extends PostgresTestBase {
     void expiredBeyondGraceMeansNoDevice() {
         // default grace: 90 days after the token's expiry
         String userId = uniqueUser();
-        TestDevices.insert(jdbc, SHOP, userId, Instant.now().minus(Duration.ofDays(90)).minusSeconds(60), null);
+        // past exp + 60 s verifier skew + grace (the active window equals token acceptance)
+        TestDevices.insert(jdbc, SHOP, userId, Instant.now().minus(Duration.ofDays(90)).minusSeconds(120), null);
         // a device of the same user in another app does not count
         TestDevices.insertActive(jdbc, "other", userId);
 
@@ -421,7 +422,7 @@ class NotificationRegistrationIT extends PostgresTestBase {
 
             assertThat(scoped.sql("select token_expires_at from " + schema + ".device where id = :id")
                             .param("id", device).query(java.time.OffsetDateTime.class).single().toInstant())
-                    .isEqualTo(Instant.parse("2026-12-30T12:00:00Z"));
+                    .isEqualTo(Instant.parse("2036-09-28T12:00:00Z")); // last_seen_at + 87600 h: errs toward tracking
             assertThat(scoped.sql("select is_nullable from information_schema.columns"
                             + " where table_schema = :s and table_name = 'device' and column_name = 'token_expires_at'")
                             .param("s", schema).query(String.class).single())

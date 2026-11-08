@@ -226,7 +226,11 @@ kubectl -n reliable-push rollout status deploy/rp-reliable-push --timeout=180s
 - **V7 (sidecar integration revision, 0.2.0):** `V7__sidecar_revision.sql` runs in one transaction. It re-creates the
   `notification_state_check` constraint, which checks every `notification` row while holding an exclusive lock on the
   table (registrations, events and the worker wait for it), fills the new `device.token_expires_at` for every device
-  row and makes it `not null`, and adds a column to `daily_stats`. Seconds on small tables; on tens of millions of
+  row and makes it `not null`, and adds a column to `daily_stats`. Existing devices have no record of their token's
+  expiry, so the backfill is a conservative upper bound, `last_seen_at` + 10 years (`87600 hours`): no existing device
+  is wrongly treated as inactive (`NO_DEVICE_REGISTERED`). It errs toward tracking: a device that is in fact gone keeps
+  counting as active until it is revoked, and its user's notifications get tracked (and may fall back) as in 0.1.x.
+  The device's next register or refresh writes the real expiry. Seconds on small tables; on tens of millions of
   notifications plan a maintenance window (the first new pod starts only after it, within the 180 s startup probe).
   Do not run pre-V7 and V7 pods side by side: an old pod cannot register a device (it does not write
   `token_expires_at`) and cannot read a `NO_DEVICE_REGISTERED` row. Stop the old pods first, as for V3 (split mode

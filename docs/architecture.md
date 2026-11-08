@@ -89,8 +89,8 @@ stateDiagram-v2
 
 `READ`, `FALLBACK_TRIGGERED`, `FALLBACK_FAILED`, `FALLBACK_EXPIRED`, `CANCELLED` and `NO_DEVICE_REGISTERED` are final.
 Registration is idempotent on the sender's `trackingId` (`insert ... on conflict do nothing`, then a re-read). A device is
-active for `(app_id, user_id)` when it is not revoked and `token_expires_at + device-token-events-grace` is in the
-future; without one the row is inserted as `NO_DEVICE_REGISTERED` with `closed_at = created_at` and no `due_at`, so the
+active for `(app_id, user_id)` when it is not revoked and `token_expires_at` + 60 s (the token verifier's clock skew) +
+`device-token-events-grace` is not in the past, the same window in which its token is accepted; without one the row is inserted as `NO_DEVICE_REGISTERED` with `closed_at = created_at` and no `due_at`, so the
 worker never sees it and later events are stored as `LATE`. Under policy
 `NOT_DELIVERED` a `DELIVERED` row is already satisfied: `due_at` is cleared and `closed_at` set, but it can still become
 `READ`. Under `NOT_READ` it stays due until `READ`.

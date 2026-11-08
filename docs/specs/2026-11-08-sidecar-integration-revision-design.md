@@ -108,8 +108,10 @@ reads leave it out too, so many users without a device cannot open an app's circ
 ### 2.3 Active device
 
 A device is active for `(app_id, user_id)` when `revoked_at is null` and
-`token_expires_at + device-token-events-grace > now` (`now` from the application clock). The migration adds
-`token_expires_at timestamptz not null` to `device`, backfilled as `last_seen_at` + 90 days (ruling 2026-11-08: no
+`token_expires_at + 60 s skew + device-token-events-grace >= now` (`now` from the application clock; the skew is the
+token verifier's, so the active window equals token acceptance on the grace routes). The migration adds
+`token_expires_at timestamptz not null` to `device`, backfilled as `last_seen_at` + 10 years (final review 2026-11-08:
+a conservative upper bound, so no existing device is wrongly treated as inactive; ruling 2026-11-08: no
 nullable column). Register and re-register set it to the issued token's `exp`; refresh moves it forward to the new
 token's `exp`. The query uses the existing `device_app_user` index.
 

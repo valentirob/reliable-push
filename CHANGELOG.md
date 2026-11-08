@@ -74,7 +74,7 @@ All notable changes to this project are documented here. Versions follow [Semant
     metric tag `rp_events_total{token}`.
   - Metrics `rp_notifications_registered_total{outcome}` and the histogram `rp_notification_registration_seconds`.
   - Migration `V7__sidecar_revision.sql`: the new state in `notification_state_check`, `device.token_expires_at`
-    (backfilled as `last_seen_at` + 90 days, `not null`), `daily_stats.no_device_registered`. It locks `notification`
+    (backfilled as `last_seen_at` + 10 years, a conservative upper bound, `not null`), `daily_stats.no_device_registered`. It locks `notification`
     while re-checking the constraint and needs a stop-then-start upgrade (`deployment.md`).
   - SDKs: `ensureRegistered(idTokenProvider)` on iOS (async provider, 30 s cap, completion or `async`) and Android
     (callback provider `(deliver) -> Unit`, 30 s cap); one run at a time; `RegisterResult` gains `notLoggedIn` /

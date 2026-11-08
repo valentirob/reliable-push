@@ -40,7 +40,12 @@ import org.springframework.stereotype.Service;
 public class DeviceTokenService {
 
     static final String ISSUER = "reliable-push";
-    private static final Duration SKEW = Duration.ofSeconds(60);
+    /**
+     * Clock skew allowed on {@code iat}/{@code nbf}/{@code exp}. Also bounds the active-device window
+     * ({@link DeviceRepository#hasActiveDevice}); the harness {@code TokenGrace} scenario and
+     * {@code harness/compose/backend.env.template} (the short grace it runs with) rely on it: change them together.
+     */
+    static final Duration SKEW = Duration.ofSeconds(60);
     /** Real tokens are a few hundred bytes; anything this large is rejected before parsing. */
     private static final int MAX_TOKEN_LENGTH = 8192;
     /** Year 9999: keeps {@code Instant} arithmetic far from overflow for absurd {@code exp} values. */
