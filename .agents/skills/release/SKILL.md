@@ -28,7 +28,7 @@ Replace `x.y.z-SNAPSHOT` (or the previous version) with `x.y.z` in:
 | `pom.xml`, `backend/pom.xml`, `client-java/pom.xml`, `payload-java/pom.xml`, `harness/pom.xml`, `loadtest/pom.xml` | `<version>` |
 | `backend/src/test/java/io/reliablepush/ContainerImageIT.java` | image tag |
 | `android/gradle.properties` | `VERSION_NAME` |
-| `android/reliablepush/src/main/kotlin/io/reliablepush/android/ReliablePush.kt`, `.../src/test/kotlin/io/reliablepush/android/VersionTest.kt` | `VERSION` and its test |
+| `android/reliablepush/src/main/kotlin/io/reliablepush/android/ReliablePush.kt`, `android/reliablepush/src/test/kotlin/io/reliablepush/android/VersionTest.kt` | `VERSION` and its test |
 | `ios/Sources/ReliablePush/ReliablePush.swift`, `ios/Tests/ReliablePushTests/VersionTests.swift` | `version` and its test |
 | `deploy/helm/reliable-push/Chart.yaml` | `version` and `appVersion` |
 | `client-java/README.md`, `payload-java/README.md`, `docs/integration-guide.md`, `docs/android.md`, `docs/ios.md` | dependency snippets and the status line |

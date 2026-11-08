@@ -121,8 +121,9 @@ Full prerequisites and setup per component: `docs/getting-started.md` §0.
 | Linux | backend, client, payload jar, harness, load tests module, Helm checks and the Android SDK build: all run in CI on `ubuntu-latest` | the local-only scripts (`e2e.sh`, `demo.sh`, `load.sh`, `android-e2e.sh` with KVM, `helm-smoke.sh`) are bash and portable but have not been run on Linux yet; Docker's default socket needs no `DOCKER_HOST` |
 | Windows | the Java modules, the Android SDK, the backend E2E and the demo through `pwsh scripts/e2e.ps1` / `scripts\demo.ps1` (never run on Windows yet: TODO 3.2) | the other scripts are bash: use WSL 2 or Git Bash; the iOS SDK needs macOS |
 
-The repository forces LF for `*.sh`, `mvnw` and `gradlew` (`.gitattributes`), so the scripts run after a checkout on
-Windows too.
+The repository forces LF for `*.sh`, `mvnw`, `gradlew` and the agent context (`AGENTS.md`, `CLAUDE.md`, `.agents/`,
+`.claude/`) in `.gitattributes`, so the scripts run and the rule and skill frontmatter parses after a Windows checkout
+too.
 
 ## Pitfalls seen in earlier sessions
 

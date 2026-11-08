@@ -17,7 +17,7 @@ errors=0
 fail() { echo "agent-context: $*" >&2; errors=$((errors + 1)); }
 
 frontmatter_value() { # file key -> value of "key:" inside the leading --- block
-  awk -v key="$2" 'NR==1 && $0!="---" {exit} NR>1 && $0=="---" {exit} NR>1 && index($0, key": ")==1 {print substr($0, length(key)+3); exit}' "$1"
+  awk -v key="$2" '{sub(/\r$/, "")} NR==1 && $0!="---" {exit} NR>1 && $0=="---" {exit} NR>1 && index($0, key": ")==1 {print substr($0, length(key)+3); exit}' "$1"
 }
 
 wrapper() { # name description
@@ -49,7 +49,7 @@ for src in .agents/skills/*/SKILL.md; do
   target=".claude/skills/$name/SKILL.md"
   expected="$(wrapper "$name" "$description")"
   if $CHECK; then
-    [ -f "$target" ] && [ "$(cat "$target")" = "$expected" ] || fail "$target missing or out of date; run scripts/sync-agent-skills.sh"
+    [ -f "$target" ] && [ "$(tr -d '\r' < "$target")" = "$expected" ] || fail "$target missing or out of date; run scripts/sync-agent-skills.sh"
   else
     mkdir -p "$(dirname "$target")"
     printf '%s\n' "$expected" > "$target"
@@ -82,11 +82,12 @@ done
 # every always_on rule is imported by CLAUDE.md, and every import exists
 for rule in .agents/rules/*.md; do
   [ "$(frontmatter_value "$rule" trigger)" = "always_on" ] || continue
-  grep -qx "@$rule" CLAUDE.md || fail "CLAUDE.md does not import the always_on rule $rule (add the line @$rule)"
+  tr -d '\r' < CLAUDE.md | grep -qx "@$rule" || fail "CLAUDE.md does not import the always_on rule $rule (add the line @$rule)"
 done
 while IFS= read -r line; do
+  line="${line%$'\r'}"
   [ -f "${line#@}" ] || fail "CLAUDE.md imports ${line#@}, which does not exist"
-done < <(grep -E '^@' CLAUDE.md)
+done < <(tr -d '\r' < CLAUDE.md | grep -E '^@')
 
 for name in "${sources[@]}"; do
   grep -q "\`$name\`" AGENTS.md || fail "skill $name is not listed in the AGENTS.md skills index"
