@@ -1,0 +1,15 @@
+{
+  "name": "fcm-decorate-invalid-tracking-id",
+  "operation": "fcm.decorate",
+  "input": {
+    "trackingId": "nope",
+    "fcm": {
+      "message": {
+        "token": "tok"
+      }
+    }
+  },
+  "expect": {
+    "error": "INVALID_TRACKING_ID"
+  }
+}

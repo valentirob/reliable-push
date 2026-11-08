@@ -1,0 +1,22 @@
+{
+  "name": "apns-build-non-ascii",
+  "description": "non-ASCII stays UTF-8; control characters, quote and backslash are escaped (RFC 8259)",
+  "operation": "apns.build",
+  "input": {
+    "trackingId": "6f1c2b9e-5d1a-4c55-9a38-0c1f3a7d9e11",
+    "title": "Pedido enviado é 日本 🚀",
+    "body": "line1\nline2 \"quoted\" back\\slash \u0001"
+  },
+  "expect": {
+    "output": {
+      "aps": {
+        "alert": {
+          "title": "Pedido enviado é 日本 🚀",
+          "body": "line1\nline2 \"quoted\" back\\slash \u0001"
+        },
+        "mutable-content": 1
+      },
+      "rp_tid": "6f1c2b9e-5d1a-4c55-9a38-0c1f3a7d9e11"
+    }
+  }
+}

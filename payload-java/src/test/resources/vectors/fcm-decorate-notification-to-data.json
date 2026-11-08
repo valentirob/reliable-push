@@ -1,0 +1,41 @@
+{
+  "name": "fcm-decorate-notification-to-data",
+  "description": "notification removed, title/body moved to data, priority HIGH, ttl and token kept",
+  "operation": "fcm.decorate",
+  "input": {
+    "trackingId": "6f1c2b9e-5d1a-4c55-9a38-0c1f3a7d9e11",
+    "fcm": {
+      "message": {
+        "token": "tok",
+        "notification": {
+          "title": "T",
+          "body": "B"
+        },
+        "data": {
+          "orderId": "1001"
+        },
+        "android": {
+          "ttl": "60s",
+          "priority": "NORMAL"
+        }
+      }
+    }
+  },
+  "expect": {
+    "output": {
+      "message": {
+        "token": "tok",
+        "data": {
+          "orderId": "1001",
+          "rp_tid": "6f1c2b9e-5d1a-4c55-9a38-0c1f3a7d9e11",
+          "title": "T",
+          "body": "B"
+        },
+        "android": {
+          "ttl": "60s",
+          "priority": "HIGH"
+        }
+      }
+    }
+  }
+}

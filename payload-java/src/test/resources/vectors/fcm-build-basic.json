@@ -1,0 +1,26 @@
+{
+  "name": "fcm-build-basic",
+  "description": "equals the integration guide's v1 example",
+  "operation": "fcm.build",
+  "input": {
+    "token": "<device FCM token>",
+    "trackingId": "6f1c2b9e-5d1a-4c55-9a38-0c1f3a7d9e11",
+    "title": "Order shipped",
+    "body": "Your order 1001 is on its way."
+  },
+  "expect": {
+    "output": {
+      "message": {
+        "token": "<device FCM token>",
+        "data": {
+          "rp_tid": "6f1c2b9e-5d1a-4c55-9a38-0c1f3a7d9e11",
+          "title": "Order shipped",
+          "body": "Your order 1001 is on its way."
+        },
+        "android": {
+          "priority": "HIGH"
+        }
+      }
+    }
+  }
+}

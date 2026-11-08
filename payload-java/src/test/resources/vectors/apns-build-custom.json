@@ -1,0 +1,38 @@
+{
+  "name": "apns-build-custom",
+  "description": "custom keys come after rp_tid, in input order; numbers are written as given",
+  "operation": "apns.build",
+  "input": {
+    "trackingId": "6f1c2b9e-5d1a-4c55-9a38-0c1f3a7d9e11",
+    "title": "T",
+    "body": "B",
+    "custom": {
+      "orderId": 1001,
+      "price": 1.5,
+      "tags": [
+        "a",
+        true,
+        null
+      ]
+    }
+  },
+  "expect": {
+    "output": {
+      "aps": {
+        "alert": {
+          "title": "T",
+          "body": "B"
+        },
+        "mutable-content": 1
+      },
+      "rp_tid": "6f1c2b9e-5d1a-4c55-9a38-0c1f3a7d9e11",
+      "orderId": 1001,
+      "price": 1.5,
+      "tags": [
+        "a",
+        true,
+        null
+      ]
+    }
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "name": "tracking-ids-valid-uppercase",
+  "description": "any case, any version",
+  "operation": "trackingIds.isValid",
+  "input": {
+    "id": "6F1C2B9E-5D1A-4C55-9A38-0C1F3A7D9E11"
+  },
+  "expect": {
+    "output": true
+  }
+}

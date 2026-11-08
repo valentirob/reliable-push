@@ -1,0 +1,15 @@
+{
+  "name": "apns-decorate-invalid-tracking-id",
+  "operation": "apns.decorate",
+  "input": {
+    "trackingId": "nope",
+    "apns": {
+      "aps": {
+        "alert": "x"
+      }
+    }
+  },
+  "expect": {
+    "error": "INVALID_TRACKING_ID"
+  }
+}

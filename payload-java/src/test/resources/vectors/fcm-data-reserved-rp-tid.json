@@ -1,0 +1,15 @@
+{
+  "name": "fcm-data-reserved-rp-tid",
+  "operation": "fcm.data",
+  "input": {
+    "trackingId": "6f1c2b9e-5d1a-4c55-9a38-0c1f3a7d9e11",
+    "title": "T",
+    "body": "B",
+    "data": {
+      "rp_tid": "x"
+    }
+  },
+  "expect": {
+    "error": "RESERVED_KEY"
+  }
+}

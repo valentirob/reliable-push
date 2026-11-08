@@ -1,0 +1,10 @@
+{
+  "name": "tracking-ids-invalid-garbage",
+  "operation": "trackingIds.isValid",
+  "input": {
+    "id": "not-a-uuid"
+  },
+  "expect": {
+    "output": false
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "name": "fcm-data-custom",
+  "operation": "fcm.data",
+  "input": {
+    "trackingId": "6f1c2b9e-5d1a-4c55-9a38-0c1f3a7d9e11",
+    "title": "T",
+    "body": "B",
+    "data": {
+      "orderId": "1001",
+      "k": "v"
+    }
+  },
+  "expect": {
+    "output": {
+      "rp_tid": "6f1c2b9e-5d1a-4c55-9a38-0c1f3a7d9e11",
+      "title": "T",
+      "body": "B",
+      "orderId": "1001",
+      "k": "v"
+    }
+  }
+}

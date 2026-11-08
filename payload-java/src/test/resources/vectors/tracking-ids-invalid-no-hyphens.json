@@ -1,0 +1,10 @@
+{
+  "name": "tracking-ids-invalid-no-hyphens",
+  "operation": "trackingIds.isValid",
+  "input": {
+    "id": "6f1c2b9e5d1a4c559a380c1f3a7d9e11"
+  },
+  "expect": {
+    "output": false
+  }
+}
