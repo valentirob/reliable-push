@@ -69,6 +69,21 @@ class AdminKeysTest {
     }
 
     @Test
+    void fallbackControlPermissionIsParsedIndependentlyOfPayload() {
+        AdminKeys keys = keys(
+                key("k1", sha(RAW), List.of("*"), List.of("fallback-control")),
+                key("k2", sha(RAW_2), List.of("*"), List.of("payload", "fallback-control")));
+        AdminPrincipal p1 = keys.byRawKey(RAW).orElseThrow();
+        assertThat(p1.canControlFallback()).isTrue();
+        assertThat(p1.payload()).isFalse();
+        AdminPrincipal p2 = keys.byRawKey(RAW_2).orElseThrow();
+        assertThat(p2.canControlFallback()).isTrue();
+        assertThat(p2.payload()).isTrue();
+        assertThat(keys(key("k3", sha(RAW), List.of("*"), List.of("payload"))).byRawKey(RAW).orElseThrow()
+                .canControlFallback()).isFalse();
+    }
+
+    @Test
     void scopedKeySeesOnlyItsApps() {
         AdminPrincipal p = keys(key("k1", sha(RAW), List.of("shop"), List.of())).byRawKey(RAW).orElseThrow();
         assertThat(p.canSee("shop")).isTrue();

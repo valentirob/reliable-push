@@ -56,7 +56,7 @@ PNG re-rendered), `docs/presentation.html` and `CHANGELOG.md`. Full rule:
 E2E scenarios run only on a developer machine, never in CI:
 `./scripts/e2e.sh` (Windows: `pwsh scripts/e2e.ps1`). Report the result in the
 merge commit or PR description, for example
-`E2E: 18/18 passed (./scripts/e2e.sh, 2026-11-07)`. See
+`E2E: 19/19 passed (./scripts/e2e.sh, 2026-11-08)`. See
 `.agents/skills/run-e2e/SKILL.md`.
 
 ## Secrets

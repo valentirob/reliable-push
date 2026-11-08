@@ -18,7 +18,8 @@ import org.springframework.transaction.support.TransactionTemplate;
 /**
  * The nightly rollup of per-app daily statistics (spec 3.2). Recomputes the last {@code W} complete UTC days in one
  * transaction guarded by a PostgreSQL advisory lock (another worker holding it means this run does nothing), then
- * deletes rows older than {@code rollup-retention-days}. Does nothing while admin is disabled. Worker role only.
+ * deletes daily stats older than {@code rollup-retention-days} (the fallback circuit events, kept as long, are deleted
+ * by the circuit detector). Does nothing while admin is disabled. Worker role only.
  */
 @Component
 @Profile("worker")
@@ -81,7 +82,8 @@ public class DailyRollupJob {
                 LocalDate today = LocalDate.now(clock.withZone(ZoneOffset.UTC));
                 List<LocalDate> days = RollupWindow.days(today, retention.retentionDays());
                 days.forEach(stats::upsert);
-                stats.deleteBefore(today.minusDays(properties.rollupRetentionDays()));
+                LocalDate cutoff = today.minusDays(properties.rollupRetentionDays());
+                stats.deleteBefore(cutoff);
                 return days.size();
             });
             int count = written == null ? 0 : written;

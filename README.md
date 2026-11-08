@@ -12,8 +12,9 @@ and keeps the FCM/APNs credentials.
 
 ![reliable-push at a glance: your backend, FCM/APNs, an iPhone and an Android phone with the tracking module, the reliable-push backend, the fallback clock and your SMS service](docs/images/reliable-push-at-a-glance.png)
 
-The backend also serves a read-only **ops dashboard** at `/admin/` (delivery and read rates, the due backlog, daily trends,
-search, and a timeline per notification), off until you configure an admin key: [docs/admin.md](docs/admin.md).
+The backend also serves an **ops dashboard** at `/admin/` (delivery and read rates, the due backlog, daily trends,
+search, a timeline per notification and each app's fallback circuit), off until you configure an admin key:
+[docs/admin.md](docs/admin.md). It is read-only except "Resume fallbacks" for keys with the `fallback-control` permission.
 
 ## A sidecar, not a push gateway
 
@@ -23,7 +24,8 @@ they never change how your notifications are sent or shown:
 - **Your backend keeps sending the pushes** with its own FCM / APNs credentials. reliable-push never sends a push and
   never sees those credentials.
 - **If the reliable-push backend is down, your pushes still go out.** Only tracking and fallbacks pause. Device events
-  wait in the SDK's queue and are sent when the backend is back.
+  wait in the SDK's queue and are sent when the backend is back. If only the tracking side fails (API or ingress down,
+  an SDK bug), a per-app **circuit breaker** stops the fallbacks instead of sending an SMS for every push of that period.
 - **The SDKs never hide or block a notification.** Pushes without `rp_tid` are left to your own code. Network errors
   stay inside the SDK and never reach the app.
 
@@ -57,6 +59,9 @@ To present the project, open [docs/presentation.html](docs/presentation.html) in
 5. The reliable-push worker periodically claims notifications that are due and
    whose policy is still unmet, and calls your fallback webhook with a signed
    request (`trackingId`, `userId`, message, `reason`).
+6. Before claiming, it checks each app's fallback circuit: when an app's fallbacks come due while almost none of its
+   notifications were reported delivered (tracking is missing), it closes them as `FALLBACK_EXPIRED` without a call until
+   deliveries are reported again ([docs/operations.md](docs/operations.md#fallback-circuit-breaker)).
 
 ## Components
 

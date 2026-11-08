@@ -34,6 +34,8 @@ one or more apps.
 - **FR-11** Events arriving after the fallback fired are recorded but do not revert it.
 - **FR-12** Webhook calls are signed, idempotent (`Idempotency-Key`) and retried with backoff; exhausted retries end in `FALLBACK_FAILED` and are observable.
 - **FR-12a** A fallback (first attempt, retry, or recovery after a worker crash/outage) is dispatched only within a configurable trigger window after its scheduled time (default 20 minutes). Outside the window it is not sent and ends in `FALLBACK_EXPIRED`.
+- **FR-18** The backend stops triggering fallbacks for an app when, within a configurable window, many notifications come due unmet while almost no `DELIVERED` event arrives for that app (circuit open). It resumes by itself when `DELIVERED` events arrive again. Notifications that come due while the circuit is open end without a fallback and are never resumed. Every open and close is logged, counted and stored with its counters. (0.2.0, [spec](specs/2026-11-07-fallback-circuit-breaker-design.md))
+- **FR-19** Configuration can disable the circuit breaker, and can suspend fallback triggering for every app regardless of the circuit. An operator with the admin permission `fallback-control` can force an open circuit closed from the admin console for a configurable time; the action is audit-logged.
 
 ### Multi-app
 - **FR-13** One deployment serves several apps of one organisation, each with its own sender API key, OIDC issuer/audience, device-token validity, default timeout and fallback webhook.
@@ -43,8 +45,8 @@ one or more apps.
 - **FR-15** The sender API offers a paginated list of notifications per app (filter by user, state, time) in addition to lookup by `trackingId`.
 
 ### Ops dashboard
-- **FR-16** A read-only web dashboard served by the backend shows, per app, delivery, read and fallback rates for the last hour, day or week; the current due backlog; daily trends kept for up to 400 days; a search by user, external id, tracking id, state and time; and per notification a timeline of events and webhook attempts.
-- **FR-17** The dashboard and its API are protected by admin API keys from configuration (stored hashed), each scoped to all apps or a list of apps; the fallback payload is shown only to keys with the `payload` permission; every search and view is audit-logged without personal data. With no admin key configured, neither the page nor the API exists.
+- **FR-16** A web dashboard, read-only except the fallback resume of FR-19, served by the backend shows, per app, delivery, read and fallback rates for the last hour, day or week; the current due backlog; daily trends kept for up to 400 days; a search by user, external id, tracking id, state and time; and per notification a timeline of events and webhook attempts.
+- **FR-17** The dashboard and its API are protected by admin API keys from configuration (stored hashed), each scoped to all apps or a list of apps; the fallback payload is shown only to keys with the `payload` permission, and the fallback resume of FR-19 only to keys with the `fallback-control` permission; every search, view and resume is audit-logged without personal data. With no admin key configured, neither the page nor the API exists.
 
 ## Non-functional requirements
 

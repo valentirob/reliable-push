@@ -11,7 +11,10 @@ For a slide-style version to present the project, open [presentation.html](prese
 The picture above is the whole system on one page: ① your backend registers the push with reliable-push, ② sends it
 through FCM / APNs as today, ③ the phone receives it, ④ the tracking module reports `DELIVERED` and `READ`, ⑤ when the
 timeout passes without the policy being met the worker calls your signed webhook, and ⑥ your fallback service sends
-the SMS or email. The small "Dashboard /admin" box in the backend is the read-only ops dashboard ([§5](#5-ops-dashboard)). The editable source is [images/reliable-push-at-a-glance.svg](images/reliable-push-at-a-glance.svg).
+the SMS or email. Before the worker claims anything, the per-app **circuit breaker** checks that delivery tracking still
+works: when an app's fallbacks come due while almost none of its pushes were reported delivered, it stops that app's
+fallbacks instead of firing a storm of needless SMS ([§4](#4-backend)). The small "Dashboard /admin" box in the backend is
+the ops dashboard ([§5](#5-ops-dashboard)), read-only except the fallback resume. The editable source is [images/reliable-push-at-a-glance.svg](images/reliable-push-at-a-glance.svg).
 
 ## 1. The sidecar principle
 
@@ -74,7 +77,7 @@ flowchart TB
 | Component | Path | What it does | Detail |
 |---|---|---|---|
 | Backend | `backend/` | Stores notifications, receives device events, triggers fallbacks | [§4](#4-backend) |
-| Ops dashboard | `backend/` (module `admin`) | Read-only web page and API for support, ops and product | [§5](#5-ops-dashboard) |
+| Ops dashboard | `backend/` (module `admin`) | Web page and API for support, ops and product, read-only except the fallback resume | [§5](#5-ops-dashboard) |
 | Java sender client | `client-java/` | Optional zero-dependency client for the sender API | [§6](#6-java-sender-client) |
 | Android SDK | `android/` | Reports `DELIVERED` / `READ` from an Android app | [§7](#7-android-sdk) |
 | iOS SDK | `ios/`, `Package.swift` | Reports `DELIVERED` / `READ` from an iOS app and its extension | [§8](#8-ios-sdk) |
@@ -102,6 +105,7 @@ sequenceDiagram
   SDK->>RP: POST /v1/events READ
   Note over RP: policy satisfied: no fallback
   alt not confirmed by dueAt
+    W->>RP: circuit check: is the app's delivery tracking working?
     W->>RP: claim the due notification (PostgreSQL row lock)
     W->>FR: signed webhook {trackingId, userId, fallback, reason}
     FR-->>W: 2xx
@@ -124,12 +128,12 @@ stateDiagram-v2
   DELIVERED --> CANCELLED: sender DELETE
   PENDING --> DISPATCHING: due, policy unmet
   DELIVERED --> DISPATCHING: due, policy NOT_READ unmet
-  PENDING --> FALLBACK_EXPIRED: claimed after the trigger window
-  DELIVERED --> FALLBACK_EXPIRED: claimed after the trigger window
+  PENDING --> FALLBACK_EXPIRED: claimed after the trigger window, or circuit open
+  DELIVERED --> FALLBACK_EXPIRED: claimed after the trigger window, or circuit open
   DISPATCHING --> DISPATCHING: retryable failure, backoff
   DISPATCHING --> FALLBACK_TRIGGERED: webhook 2xx
   DISPATCHING --> FALLBACK_FAILED: final 4xx or attempts exhausted
-  DISPATCHING --> FALLBACK_EXPIRED: next retry after the window
+  DISPATCHING --> FALLBACK_EXPIRED: next retry after the window, or circuit open
   READ --> [*]
   CANCELLED --> [*]
   FALLBACK_TRIGGERED --> [*]
@@ -154,16 +158,18 @@ flowchart LR
     EC["tracking<br/>DELIVERED / READ events"]
   end
   subgraph bg["Background (worker profile)"]
+    CB["CircuitBreaker<br/>per-app check before the claim,<br/>suppresses open apps"]
     FS["FallbackScheduler<br/>claim due rows"]
     FD["FallbackDispatcher<br/>decision + trigger window"]
     WC["HttpWebhookClient<br/>HMAC signature"]
     RJ["RetentionJob"]
   end
   APPS["apps<br/>per-app configuration"]
-  DB[("PostgreSQL<br/>notification, notification_event, device,<br/>fallback_attempt, daily_stats")]
+  DB[("PostgreSQL<br/>notification, notification_event, device,<br/>fallback_attempt, daily_stats,<br/>fallback_circuit")]
   F --> NC & DC & EC
   NC & DC & EC --> DB
-  FS --> DB
+  FS -- "first: evaluate" --> CB --> DB
+  FS -- "then: claim" --> DB
   FS --> FD --> WC
   RJ --> DB
   APPS -.-> NC & DC & FD
@@ -176,7 +182,11 @@ sequenceDiagram
   participant W as Worker replica
   participant DB as PostgreSQL
   participant FR as Fallback receiver
-  W->>DB: claim due rows FOR NO KEY UPDATE SKIP LOCKED, set lease_until
+  W->>DB: circuit check under advisory lock: due fallbacks vs. delivered share of their cohort, per app
+  alt circuit OPEN (tracking missing) or fallbacks suspended
+    W->>DB: close the app's due rows FALLBACK_EXPIRED, webhook not called
+  end
+  W->>DB: claim the other apps' rows due by the check's instant, FOR NO KEY UPDATE SKIP LOCKED, set lease_until
   Note over W,DB: other replicas skip locked rows, so no row is claimed twice
   W->>W: inside due_at + trigger window?
   alt inside the window
@@ -189,13 +199,18 @@ sequenceDiagram
   Note over W,DB: if the worker dies, the lease ends and another replica re-claims the row
 ```
 
+The claim takes only rows that were due when the circuits were checked, so every fallback fired was counted by a check.
+The circuit closes by itself once deliveries are reported again; an operator with `fallback-control` can force it from
+the dashboard. Fallbacks suppressed while it was open are never re-sent. Opens, closes and failed checks are logged and
+counted (`rp_fallback_circuit_transitions_total`, `rp_fallback_circuit_check_failed_total`).
+
 Reference: [architecture.md](architecture.md), [api.md](api.md), [security.md](security.md),
-[operations.md](operations.md).
+[operations.md](operations.md) (circuit breaker and its runbook).
 
 ## 5. Ops dashboard
 
-A read-only page (`/admin/`) and API (`/v1/admin`) served by the backend, for support ("what happened to this push?"), ops
-(rates and backlog now) and product (daily trends). It exists only when an admin key is configured; otherwise both paths
+A page (`/admin/`) and API (`/v1/admin`) served by the backend, read-only except the fallback resume, for support ("what
+happened to this push?"), ops (rates, backlog and fallback circuits now) and product (daily trends). It exists only when an admin key is configured; otherwise both paths
 answer `404`. Guide: [admin.md](admin.md).
 
 ```mermaid
@@ -203,14 +218,15 @@ flowchart LR
   BR["Browser<br/>admin key in sessionStorage"]
   subgraph be["Backend (every instance)"]
     PG["/admin/ page<br/>static files, security headers"]
-    AA["/v1/admin API<br/>X-Admin-Key, read-only, audit log"]
+    AA["/v1/admin API<br/>X-Admin-Key, audit log;<br/>only write: resume fallbacks"]
   end
   subgraph wk["Backend (worker profile)"]
     WR["FallbackDispatcher<br/>one row per webhook call"]
     RU["DailyRollupJob<br/>nightly, advisory lock"]
     RJ["RetentionJob"]
+    CB["CircuitBreaker<br/>per-app circuit, history"]
   end
-  DB[("PostgreSQL<br/>notification, notification_event,<br/>fallback_attempt, daily_stats")]
+  DB[("PostgreSQL<br/>notification, notification_event,<br/>fallback_attempt, daily_stats,<br/>fallback_circuit(_event)")]
   BR -- "loads page" --> PG
   BR -- "JSON" --> AA
   AA -- "live windows, search, detail" --> DB
@@ -218,6 +234,8 @@ flowchart LR
   WR -- "fallback_attempt" --> DB
   RU -- "daily_stats" --> DB
   RJ -- "checks the rollup first" --> DB
+  CB -- "fallback_circuit, events" --> DB
+  AA -- "circuits, history, resume (fallback-control)" --> DB
 ```
 
 Live windows and the last 7 days are computed from `notification`. Older days come from `daily_stats`, which outlives the

@@ -1,11 +1,12 @@
 # Ops dashboard
 
-A read-only web page and API served by the backend for support, ops and product. It answers: did user X get
-notification Y, which device confirmed it, did the fallback fire and how did the webhook answer; how healthy are
-delivery and read rates now; how do volumes and rates trend over months.
+A web page and API served by the backend for support, ops and product, read-only except the fallback resume. It answers:
+did user X get notification Y, which device confirmed it, did the fallback fire and how did the webhook answer; how
+healthy are delivery and read rates now; how do volumes and rates trend over months; is an app's fallback circuit open.
 
-Requirements: FR-16, FR-17 ([`requirements.md`](requirements.md)). Design: [`specs/2026-11-06-ops-dashboard-design.md`](specs/2026-11-06-ops-dashboard-design.md).
-API contract: [`api.md`](api.md#admin-api-read-only) and `openapi.yaml`.
+Requirements: FR-16, FR-17, FR-19 ([`requirements.md`](requirements.md)). Design: [`specs/2026-11-06-ops-dashboard-design.md`](specs/2026-11-06-ops-dashboard-design.md),
+circuit view and resume: [`specs/2026-11-07-fallback-circuit-breaker-design.md`](specs/2026-11-07-fallback-circuit-breaker-design.md).
+API contract: [`api.md`](api.md#admin-api) and `openapi.yaml`.
 
 ## Turning it on
 
@@ -29,9 +30,10 @@ Each key has an `id` (shown in the page header and in audit logs, never the key 
 | `apps: ["*"]` | The key sees every configured app |
 | `apps: [a, b]` | The key sees only these apps. Any other app, and any notification of it, answers `404` (never `403`) |
 | `permissions: [payload]` | The key may read the stored fallback payload. Without it, the payload route answers `404` and the page shows "hidden (N bytes)" |
+| `permissions: [fallback-control]` | The key may resume the fallbacks of an app whose circuit is open (`POST /v1/admin/fallback-circuits/{appId}:resume`). Without it the route answers `403`. Reading the circuits and their history needs no permission |
 
 `userId` is visible and searchable for every admin key. The fallback payload (SMS text, e-mail body) is the only
-data behind a permission.
+data behind a read permission; `fallback-control` is the only permission that changes something.
 
 ## Signing in
 
@@ -43,10 +45,11 @@ A `401` from any call returns to the sign-in form. Closing the tab forgets the k
 
 | View | Route | What it shows |
 |---|---|---|
-| Overview | `#/overview` | Per app (or all visible apps) and window (1 h, 24 h, 7 d): registered, delivery rate, read rate, fallbacks triggered, failed and expired. A "Backlog now" block: pending, due and not yet claimed, dispatching, age of the oldest due notification (amber above 60 s). Refreshes every 30 s; "Pause refresh" stops it |
+| Overview | `#/overview` | Per app (or all visible apps) and window (1 h, 24 h, 7 d): registered, delivery rate, read rate, fallbacks triggered, failed and expired. A fallback circuit badge per app (`CLOSED`, `OPEN since <time> — <n> suppressed`, `FORCED until <time>`) linking to the circuit view, a banner "Fallbacks suspended by configuration" when the config suspends all fallbacks and a note "Circuit breaker disabled" when the breaker is off (the badges are left out, without delaying the tiles, when the circuit route fails). A "Backlog now" block: pending, due and not yet claimed, dispatching, age of the oldest due notification (amber above 60 s). Refreshes every 30 s; "Pause refresh" stops it |
 | Trends | `#/trends` | Daily volumes and the three rates as inline SVG charts, for 30, 90 or 400 days, with the same numbers in a table. Days still changing are marked `live` |
 | Search | `#/search` | One app plus any of user id, external id, tracking id (opens the detail directly), state and a created-time range. Newest first, 50 per page, "next page" |
 | Notification | `#/n/<trackingId>` | Timeline: created, due, each `DELIVERED` and `READ` event (device, platform, late or not), each webhook attempt (outcome, HTTP status, reason, duration), closed with the final state. "Show payload" for keys with `payload`. A link to the user's devices |
+| Fallback circuit | `#/circuit/<app>` | Reached from the badge on the overview. The app's circuit state and its history (when, transition `OPENED` / `CLOSED` / `FORCED` / `FORCE_ENDED`, reason, due count, ratio, suppressed count, admin key), newest first, "Next page" for more. For keys with `fallback-control` and an `OPEN` circuit, a "Resume fallbacks" button asks for confirmation (`window.confirm`) and then shows the `FORCED` state; a `409` (suspended or disabled) or `503` (a detector run holds the lock) shows the server's message, a `409` or `404` reads the circuit again (a `404` then shows "App not found." once), and a network error is reported, never retried (only reads are retried, so a resume is never sent twice). The view shows "Fallbacks suspended by configuration" whenever the config suspends all fallbacks, also with the breaker disabled. What to check before resuming: [runbook](operations.md#runbook-circuit-open) |
 | Devices | `#/devices/<app>/<userId>` | The user's devices, revoked ones included, newest first, at most 50 |
 
 Rates are `count / (registered - cancelled)`; with a zero denominator the page shows "–".
@@ -65,6 +68,7 @@ Every search and view is logged (logger `io.reliablepush.event`, INFO) without p
 | `admin.notification_viewed` | `rp.admin_key`, `rp.app_id`, `rp.tracking_id`, `rp.user_hash` |
 | `admin.payload_viewed` | same |
 | `admin.devices_viewed` | `rp.admin_key`, `rp.app_id`, `rp.user_hash` (devices of a user; the user id itself is never logged) |
+| `admin.fallback_resumed` | `rp.admin_key`, `rp.app_id` (an operator resumed the fallbacks of an app) |
 
 A failed sign-in logs `auth.failed` with `reason` `missing_admin_key` or `unknown_admin_key`; a key over its limit logs
 `rate_limit.exceeded` with `rate_limit.scope=admin`. The key, the user id and the payload never appear in a log line.
@@ -72,7 +76,7 @@ Field details: [`operations.md`](operations.md#event-catalogue).
 
 ## What it does not do
 
-- It is **read-only**. It cannot cancel a notification, re-fire a fallback or change a configuration.
+- It is **read-only**, except "Resume fallbacks" for keys with `fallback-control`. It cannot cancel a notification, re-fire a fallback or change a configuration.
 - There are no user accounts, SSO or per-user permissions: the admin key is the identity. Rotate it as in
   [`security.md`](security.md#admin-keys).
 - No CSV export and no alerting; use the Prometheus metrics for alerts.

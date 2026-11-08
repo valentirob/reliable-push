@@ -12,3 +12,8 @@ reliable-push:
       - id: admin-shop
         key-sha256: b265e96ffd721b086d68cfea299c4908ff65111b5e9cb3676d91403fc3031cf9
         apps: [shop]
+      # raw "test-admin-key-ctl": app shop only, may see payloads and resume fallback circuits
+      - id: admin-ctl
+        key-sha256: d8019b3fcd7520a4c271bb195903aa4adfdc5809881055165dc6e980f5ca844d
+        apps: [shop]
+        permissions: [payload, fallback-control]

@@ -85,6 +85,10 @@ pre { background: var(--code-bg); padding: 10px; overflow: auto; max-height: 360
 .swatch { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
 .sw1 { background: var(--c1); } .sw2 { background: var(--c2); } .sw3 { background: var(--c3); }
 tr.live-day td { font-style: italic; }
+.circuit-badge { margin: 0 0 10px; font-weight: 600; }
+.circuit-badge.state-OPEN { color: var(--bad); }
+.circuit-badge.state-FORCED { color: var(--warn); }
+.circuit-suspended { padding: 8px 12px; border: 2px solid var(--warn); border-radius: 8px; background: var(--warn-soft); color: var(--warn); font-weight: 700; }
 @media (max-width: 600px) {
   main { padding: 8px; }
   label > input, label > select { min-width: 0; width: 100%; }

@@ -8,6 +8,48 @@ Everything left after `v0.1.0` is in [TODO.md](TODO.md): each item says why it i
 unblocks it. Agents: remind the maintainer of its section 1 (real APNs and the locked-device check, real FCM, Maven
 Central) at the start of a session.
 
+## 2026-11-08 (16) — Claude Code — cycle 5: fallback circuit breaker (0.2.0, on `feature/fallback-circuit-breaker`)
+
+- **Done:** the per-app fallback circuit breaker (FR-18, FR-19; spec
+  `docs/specs/2026-11-07-fallback-circuit-breaker-design.md`, plan `docs/plans/2026-11-08-cycle5-fallback-circuit-breaker.md`):
+  - Backend package `io.reliablepush.fallback.circuit`: configuration (`fallback.suspended`, `fallback.circuit-breaker.*`),
+    migration `V6__fallback_circuit.sql`, detection before every claim under the blocking advisory lock `4242002`
+    (2 s `lock_timeout`, fail closed with `fallback.circuit_check_failed`), re-evaluation during long drains,
+    suppression as `FALLBACK_EXPIRED` without a call, daily event prune; admin routes
+    `GET /v1/admin/fallback-circuits`, `.../{appId}/events`, `POST .../{appId}:resume` (permission `fallback-control`,
+    `503` after 5 s on the lock); admin page badge, circuit view and "Resume fallbacks".
+  - Task 7: E2E scenario `fallback-circuit` on a dedicated harness app `circuit` (the E2E stack tunes the breaker for all
+    apps: window 30 s, `min-due` 10, `close-min-delivered` 3, `min-open` 5 s; no other scenario comes near it, and the
+    full run's logs show circuits opening only for `circuit`); Helm `config.fallback` example and a unit test; page fixes
+    (badge fetch no longer retries a 503 before the tiles render; the circuit view re-reads the circuit after a 409/404
+    resume); every doc of spec §8, the at-a-glance SVG/PNG (breaker in front of the webhook; PNG re-rendered at 2x with
+    headless Chrome) and a new presentation slide.
+- **Rulings:** the app `Clock` for detection; breaker disabled in backend tests and the load test; resume allowed from
+  any state, button only for `OPEN`; `fallback.suppressed` only when rows were closed. Spec §7: the E2E burst
+  step asserts fewer than `min-due` calls (guaranteed since the final fix wave: a tick claims only rows its check
+  counted); the batch sent while the circuit is open must get none. Observed: 0 calls, all 15 suppressed in one tick.
+- **State:** `cd backend && ./mvnw -B verify`: unit 310, IT 316, 0 failures, line coverage 95.2 %; root `./mvnw -B verify`:
+  client 34, harness 162 unit + 81 IT, loadtest 19, 0 failures; `deploy/helm/scripts/validate.sh`: 93 unit tests, all
+  checks passed; `./scripts/e2e.sh`: `[e2e] summary: 19/19 passed` (2026-11-08). Android and iOS suites not run (no
+  SDK change).
+- **Open:** TODO 4.8 (due-set indexes without `app_id`) and 4.9 (breaker untested under load); the circuit pages were
+  checked by the Playwright smoke only, not by a person; release 0.2.0 is the maintainer's call.
+- **Final review fix wave** (commits 6dc6f2d..this entry): (1) a tick takes its check instant once and passes it to
+  `CircuitBreaker.evaluate(appIds, at)`, the suppressor and `claimDue` as the due cut-off (lease from the real now; a
+  drain re-check advances it), so no claimed row came due after the check and the E2E burst assertion `fired < min-due`
+  is guaranteed (spec §4/§7 reworded); (2) metrics `rp_fallback_circuit_transitions_total{app,transition}` (once per
+  committed transition, both roles) and `rp_fallback_circuit_check_failed_total` (worker), in `operations.md` with
+  alert hints; (3) a `circuit_open` suppression chunk locks the circuit row and stops once it is no longer `OPEN`;
+  (4) circuit view shows the suspended message whatever `enabled` is, a 404 resume shows "App not found." once;
+  (5) `api.js` retries network errors for GET only; (6) the demo stack sets the breaker back to the production
+  defaults (`demo.override.yml`), `testing.md` says so and adds "bursts go to a dedicated app".
+  State after the wave: `cd backend && ./mvnw -B verify`: unit 317, IT 319, 0 failures, line coverage 95.3 %, BUILD
+  SUCCESS; root `./mvnw -B verify`: client 34, harness 162 unit + 81 IT, loadtest 19, BUILD SUCCESS; `./scripts/e2e.sh`:
+  `[e2e] summary: 19/19 passed` (burst: 0 calls, 15 `FALLBACK_EXPIRED`). Not run: Helm validate (no chart change),
+  Android/iOS suites (no SDK change). Note: transition timestamps use the tick's check instant, taken before the lock
+  wait, so two workers' events can be up to the 2 s lock timeout out of order.
+- **Next:** review loop, merge `feature/fallback-circuit-breaker` into `develop` (`--no-ff`), push, CI.
+
 ## 2026-11-07 (15) — Claude Code — iOS extension reads nothing for untracked pushes
 
 - **Done:** review of how both SDKs treat a push without `rp_tid`: iOS `ReliablePushExtension.didReceive` and
