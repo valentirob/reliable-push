@@ -28,10 +28,12 @@ final class SDKEnvironment: Sendable {
     let sessionConfiguration: @Sendable () -> URLSessionConfiguration
     let now: @Sendable () -> Date
     let activity: any ExpiringActivityRunner
+    /// Longest wait for the app's ID-token provider in `ensureRegistered` (Android parity: 30 s); tests shorten it.
+    let providerTimeout: TimeInterval
 
     init(state: SharedState, queueDirectory: URL, secrets: any SecretStore, settings: any NotificationSettingsSource,
          sessionConfiguration: @escaping @Sendable () -> URLSessionConfiguration, now: @escaping @Sendable () -> Date,
-         activity: any ExpiringActivityRunner) {
+         activity: any ExpiringActivityRunner, providerTimeout: TimeInterval = 30) {
         self.state = state
         self.queueDirectory = queueDirectory
         self.secrets = secrets
@@ -39,6 +41,7 @@ final class SDKEnvironment: Sendable {
         self.sessionConfiguration = sessionConfiguration
         self.now = now
         self.activity = activity
+        self.providerTimeout = providerTimeout
     }
 
     /// The production environment of an App Group: its `UserDefaults` suite, the queue in
@@ -82,10 +85,15 @@ final class SDK: Sendable {
     let queue: EventQueue
     let flushLock: FileLock
     private let flushes = Locked(Flushes())
-    /// The `ensureRegistered` run in progress, if any (a call during a run joins it).
-    private let ensureRun = Locked<Task<RegisterResult, Never>?>(nil)
+    /// The `ensureRegistered` run in progress, if any (a call during a run joins it), with its per-run id.
+    private let ensureRun = Locked(EnsureRun())
     /// Bumped by logout and reconfigure: a registration that started before must not store its token afterwards.
     private let epoch = Locked(0)
+
+    private struct EnsureRun: Sendable {
+        var next = 0
+        var current: (id: Int, task: Task<RegisterResult, Never>)?
+    }
 
     /// The app-side flushes still running (all are cancelled by logout and reconfigure: M9), and the most recent one.
     private struct Flushes: Sendable {
@@ -190,11 +198,8 @@ final class SDK: Sendable {
     private func register(idToken: String, knownDeviceId known: String?, epoch started: Int) async -> RegisterResult {
         switch await api.register(idToken: idToken, deviceId: known) {
         case .ok(let reg):
-            guard let stored = save(reg, ifEpoch: started) else {
-                SDKLog.warn("device.register_failed", ["reason": "logged_out"])
-                return .failed(httpStatus: nil)
-            }
-            guard stored else {
+            // not stored: a logout came in between, or the Keychain refused it
+            guard save(reg, ifEpoch: started) == true else {
                 SDKLog.warn("device.register_failed", ["reason": "token_not_stored"])
                 return .failed(httpStatus: nil)
             }
@@ -223,16 +228,18 @@ final class SDK: Sendable {
 
     /// One run at a time: a call while a run is in progress joins it (and its provider is not called).
     func ensureRegistered(idTokenProvider: @escaping @Sendable () async -> String?) async -> RegisterResult {
-        let run = ensureRun.withLock { running -> Task<RegisterResult, Never> in
-            if let running { return running }
+        let run = ensureRun.withLock { r -> Task<RegisterResult, Never> in
+            if let running = r.current { return running.task }
+            let id = r.next
+            r.next += 1
             let task = Task<RegisterResult, Never> {
                 let result = await self.decideAndRegister(idTokenProvider)
                 if case .success = result { self.startFlush() } // once per run, not per joined call
-                // after the creator's assignment (same lock), so this always clears its own entry
-                self.ensureRun.withLock { $0 = nil }
+                // only its own entry: invalidate() may have detached this run and a newer one may be running
+                self.ensureRun.withLock { if $0.current?.id == id { $0.current = nil } }
                 return result
             }
-            running = task
+            r.current = (id, task)
             return task
         }
         return await run.value
@@ -240,7 +247,7 @@ final class SDK: Sendable {
 
     /// The local decision, in the order of spec 3.2: no token or an expired one → ID token; `renewalNeeded` or under
     /// 20 % left → refresh (a 401 → ID token); otherwise nothing to do.
-    private func decideAndRegister(_ idTokenProvider: @Sendable () async -> String?) async -> RegisterResult {
+    private func decideAndRegister(_ idTokenProvider: @escaping @Sendable () async -> String?) async -> RegisterResult {
         let started = epoch.withLock { $0 }
         var known: String?
         switch tokens.load() {
@@ -257,11 +264,28 @@ final class SDK: Sendable {
                 if let result = await refresh(deviceId: deviceId, token: token, epoch: started) { return result }
             }
         }
-        guard let idToken = await idTokenProvider() else {
+        guard let answer = await idToken(from: idTokenProvider) else {
+            SDKLog.warn("device.register_skipped", ["reason": "provider_timeout"])
+            return .notLoggedIn
+        }
+        guard let idToken = answer else {
             SDKLog.info("device.register_skipped", ["reason": "not_logged_in"])
             return .notLoggedIn
         }
         return await register(idToken: idToken, knownDeviceId: known, epoch: started)
+    }
+
+    /// The provider's answer (`.some(nil)`: not logged in), or nil after `providerTimeout` or when this run is
+    /// cancelled. The provider runs in its own task, so one that ignores cancellation cannot hold the run; its late
+    /// answer is ignored. Polled every 20 ms (as `FileLock`): a continuation-based race is much larger in binary size,
+    /// and the SDK has a size budget (spec 9.2).
+    private func idToken(from provider: @escaping @Sendable () async -> String?) async -> String?? {
+        let answer = Locked<String??>(nil)
+        let ask = Task { let t = await provider(); answer.withLock { $0 = .some(t) } }
+        let end = Date().addingTimeInterval(env.providerTimeout)
+        while answer.withLock({ $0 }) == nil && !Task.isCancelled && Date() < end { try? await sleep(0.02) }
+        ask.cancel()
+        return answer.withLock { $0 } // read once: a later answer lands in a box nobody reads
     }
 
     /// `POST /v1/devices/token:refresh`; nil when the backend answered 401 (the caller takes the ID-token path).
@@ -269,17 +293,13 @@ final class SDK: Sendable {
         switch await api.refresh(token: token.raw) {
         case .ok(let issued):
             let reg = Registration(deviceId: deviceId, deviceToken: issued.deviceToken, expiresAt: issued.expiresAt)
-            switch save(reg, ifEpoch: started) {
-            case nil:
-                SDKLog.warn("device.register_failed", ["reason": "logged_out", "call": "refresh"])
-                return .failed(httpStatus: nil)
-            case false?:
+            // not stored: a logout came in between, or the Keychain refused it
+            guard save(reg, ifEpoch: started) == true else {
                 SDKLog.warn("device.register_failed", ["reason": "token_not_stored", "call": "refresh"])
                 return .failed(httpStatus: nil)
-            case true?:
-                SDKLog.info("token.refreshed", ["deviceId": deviceId])
-                return .success(deviceId: deviceId)
             }
+            SDKLog.info("token.refreshed", ["deviceId": deviceId])
+            return .success(deviceId: deviceId)
         case let .http(status, retryAfter):
             switch status {
             case 401:
@@ -303,7 +323,11 @@ final class SDK: Sendable {
     /// every app-side flush is cancelled.
     func invalidate() {
         epoch.withLock { $0 += 1 }
-        ensureRun.withLock { $0 }?.cancel()
+        // detached: a call right after this starts a fresh run instead of joining the cancelled one
+        ensureRun.withLock { r -> Task<RegisterResult, Never>? in
+            defer { r.current = nil }
+            return r.current?.task
+        }?.cancel()
         cancelFlush()
     }
 
@@ -325,6 +349,8 @@ final class SDK: Sendable {
             confirmed = false
         }
         flushLock.withLock(timeout: Self.lockWait) {
+            // again: a registration started during the revoke must not store its token after this clear
+            epoch.withLock { $0 += 1 }
             tokens.clear()
             queue.clear()
             env.state.retryNotBefore = nil

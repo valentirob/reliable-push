@@ -263,6 +263,80 @@ final class ReliablePushTests: XCTestCase {
         XCTAssertNil(ReliablePush.deviceId)
     }
 
+    func testEnsureRegisteredRightAfterLogoutStartsAFreshRun() async throws {
+        let slow = SlowOnceSecretStore(fx.secrets)
+        try ReliablePush.configure(baseURL: "http://localhost:8080", appId: "app1", environment: fx.environment(secrets: slow))
+        await awaitFlush()
+        StubURLProtocol.reset { req in req.url?.path == "/v1/devices" ? SDKFixture.registration() : SDKFixture.acceptAll(req) }
+        let calls = Locked(0)
+        // the first run is held in a Keychain read (not cancellable) while the logout runs
+        slow.blockNextRead(for: 1)
+        let old = provider("old", calls: calls)
+        let before = Task { await ReliablePush.ensureRegistered(idTokenProvider: old) }
+        try await Task.sleep(nanoseconds: 200_000_000)
+
+        let confirmed = await withCheckedContinuation { c in ReliablePush.logout { c.resume(returning: $0) } }
+        XCTAssertTrue(confirmed)
+        let after = await ReliablePush.ensureRegistered(idTokenProvider: provider("new", calls: calls))
+        XCTAssertEqual(after, .success(deviceId: "dev1"), "a fresh run, not the cancelled one")
+        let body = try XCTUnwrap(StubURLProtocol.requests.first { $0.url.path == "/v1/devices" }?.body)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        XCTAssertEqual(json["idToken"] as? String, "new")
+
+        let stale = await before.value
+        XCTAssertNotEqual(stale, .success(deviceId: "dev1"), "the cancelled run stores nothing")
+        XCTAssertEqual(ReliablePush.deviceId, "dev1", "the cancelled run did not undo the fresh one")
+        // the cancelled run's end did not clear the newer run's slot wrongly: the next call decides again at once
+        let again = await ReliablePush.ensureRegistered(idTokenProvider: provider("x", calls: calls))
+        XCTAssertEqual(again, .alreadyRegistered)
+    }
+
+    func testRefreshStartedDuringLogoutStoresNoTokenAfterTheClear() async throws {
+        try configure()
+        await awaitFlush()
+        fx.register(token: SDKFixture.staleToken)
+        StubURLProtocol.reset { req in
+            switch req.url?.path {
+            case "/v1/devices/me":
+                Thread.sleep(forTimeInterval: 0.5) // the revoke is slow: a refresh starts meanwhile
+                return .response(status: 204)
+            case "/v1/devices/token:refresh":
+                Thread.sleep(forTimeInterval: 1.0) // and answers after the logout's clear
+                return SDKFixture.refreshed()
+            default: return SDKFixture.acceptAll(req)
+            }
+        }
+        let loggedOut = Task { await withCheckedContinuation { c in ReliablePush.logout { c.resume(returning: $0) } } }
+        let revoking = await waitUntilAsync { StubURLProtocol.requests.contains { $0.url.path == "/v1/devices/me" } }
+        XCTAssertTrue(revoking)
+        let result = await ReliablePush.ensureRegistered(idTokenProvider: { nil })
+        let confirmed = await loggedOut.value
+        XCTAssertTrue(confirmed)
+        XCTAssertTrue(StubURLProtocol.requests.contains { $0.url.path == "/v1/devices/token:refresh" })
+        XCTAssertEqual(result, .failed(httpStatus: nil))
+        XCTAssertFalse(fx.secrets.has("app1"), "no token stored after the logout's clear")
+        XCTAssertNil(ReliablePush.deviceId)
+    }
+
+    func testSlowIdTokenProviderTimesOutAsNotLoggedInAndItsLateAnswerIsIgnored() async throws {
+        fx.providerTimeout = 0.3
+        try configure()
+        await awaitFlush()
+        StubURLProtocol.reset { req in req.url?.path == "/v1/devices" ? SDKFixture.registration() : SDKFixture.acceptAll(req) }
+        let start = Date()
+        let result = await ReliablePush.ensureRegistered(idTokenProvider: {
+            // ignores cancellation: answers after 1 s whatever happens
+            await withCheckedContinuation { c in DispatchQueue.global().asyncAfter(deadline: .now() + 1) { c.resume() } }
+            return "late"
+        })
+        XCTAssertEqual(result, .notLoggedIn)
+        XCTAssertLessThan(Date().timeIntervalSince(start), 0.9, "not held by the provider")
+        XCTAssertTrue(fx.warned("device.register_skipped"))
+        try await Task.sleep(nanoseconds: 1_200_000_000) // the late answer has come by now
+        XCTAssertTrue(StubURLProtocol.requests.isEmpty, "the late ID token is not used")
+        XCTAssertNil(ReliablePush.deviceId)
+    }
+
     // MARK: ensureRegistered (spec 3.2)
 
     /// A provider that counts its calls and answers `token` (nil: not logged in), optionally after `delay` seconds.

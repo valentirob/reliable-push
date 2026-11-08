@@ -57,7 +57,8 @@ public enum ReliablePush {
     ///
     /// - Parameters:
     ///   - idTokenProvider: Returns the signed-in user's OIDC ID token (or signed grant), or `nil` when nobody is
-    ///     logged in. Called only on path 1. Never logged.
+    ///     logged in. Called only on path 1. Never logged. No answer within 30 s counts as `nil` (`.notLoggedIn`);
+    ///     a late answer is ignored.
     ///   - completion: Called on the main actor with the result; `.failed(httpStatus: nil)` if `configure` has not
     ///     been called.
     public static func ensureRegistered(idTokenProvider: @escaping @Sendable () async -> String?,

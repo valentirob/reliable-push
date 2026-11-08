@@ -130,7 +130,8 @@ after login. It decides locally, with no network call unless needed, in this ord
 On success the token is stored, `renewalNeeded` is cleared and the queued events are sent. Only one run at a time: a
 call while one is in progress joins it (its provider is not called). It never throws and never blocks the caller.
 `idTokenProvider` returns your OIDC ID token (or a signed grant, as the harness uses), or `nil` when nobody is logged in;
-it is called only on path 1, and the token is never logged.
+it is called only on path 1, and the token is never logged. A provider that has not answered within 30 s counts as
+`nil` (`.notLoggedIn`); its late answer is ignored.
 
 Until the app calls `ensureRegistered`, the SDK keeps sending events with the token it has, even an expired one: the
 backend accepts it on `POST /v1/events` (and on the logout revoke) for a grace period after expiry (90 days by default,
@@ -216,7 +217,7 @@ changes:
 
 | Case | The user sees | Tracking |
 |---|---|---|
-| Backend slow or not answering | the notification after at most `extensionSendTimeout` (2 s) | `DELIVERED` queued, sent at the next app launch or NSE run |
+| Backend slow or not answering | the notification after about 2 s (at most `extensionSendTimeout` + 0.5 s) | `DELIVERED` queued, sent at the next app launch or NSE run |
 | Network error | the notification at once | `DELIVERED` queued, sent later |
 | Token rejected (`401`: past the grace period, or revoked) | the notification as usual | `DELIVERED` queued, `renewalNeeded` set; sent after the app's next `ensureRegistered` |
 | Not registered (never registered, logged out) | the notification at once | nothing recorded (WARN `tracking.not_registered`); the fallback decides |
@@ -224,7 +225,7 @@ changes:
 | Keychain unreadable | the notification at once | `DELIVERED` queued if the device was registered, sent later by the app |
 | Queue file corrupt | the notification as usual | the corrupt file is reset (older events lost, WARN); this event is sent |
 | Queue file cannot be written | the notification at once | nothing recorded (WARN); the fallback may fire although the user saw it |
-| Notification settings read hangs | the notification after at most 2 s | nothing recorded (counted as not shown); the fallback decides |
+| Notification settings read hangs | the notification after about 2 s (at most `extensionSendTimeout` + 0.5 s) | nothing recorded (counted as not shown); the fallback decides |
 | Notifications disabled | nothing (iOS decides) | nothing recorded; the fallback decides |
 | iOS ends the extension (`serviceExtensionTimeWillExpire`) | the best content so far | `DELIVERED` already queued, sent later |
 | Your `customize` closure crashes | the original content (iOS) | nothing recorded (`customize` runs before `DELIVERED` is persisted); the fallback may fire |
@@ -329,11 +330,15 @@ Subsystem `io.reliablepush`, category `ReliablePush` (`os_log`), message `event=
 at `os_log` error level, the rest at info level.
 
 - Info level: `device.registered`, `token.refreshed` (by `ensureRegistered` only), `device.register_skipped`
-  (`reason=not_logged_in`), `device.revoked`, `tracking.event_queued`, `tracking.event_sent`, `sdk.reconfigured`.
+  (`reason=not_logged_in`; a WARN with `reason=provider_timeout` when the ID-token provider did not answer within 30 s,
+  which gives `.notLoggedIn`), `device.revoked`, `tracking.event_queued`, `tracking.event_sent`, `sdk.reconfigured`.
 - Error level (WARN): `tracking.event_dropped`, `tracking.not_registered`, `auth.failed` (`call=events`: the token was
   rejected on a send, `renewalNeeded` is set; `call=refresh` or `call=register`), `rate_limit.exceeded`,
   `token.unreadable`, `token.unavailable`, `device.register_failed`, `device.revoked` (when the revoke was not
   confirmed), `extension.time_expired`, `sdk.app_group_unavailable`, `lock.unavailable`, `file.protection_failed`.
+
+No `sdk.internal_error` on iOS (Android logs it when an entry point catches an exception): no iOS entry point can
+throw into the SDK's code paths, so every failure is reported where it happens, with the specific WARN above.
 
 Info level is logged only in `DEBUG` builds of the package. Tokens, ID tokens, user ids and notification title or body
 are never logged. Public fields: `trackingId` (the `rp_tid`), `deviceId`, and the low-cardinality `reason`, `status`,

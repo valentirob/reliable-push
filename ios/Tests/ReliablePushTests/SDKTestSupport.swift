@@ -24,6 +24,22 @@ final class FailingSecretStore: SecretStore {
     func delete(account: String) {}
 }
 
+/// The fixture's secrets, except that the read after `blockNextRead(for:)` blocks its thread first (a slow Keychain).
+final class SlowOnceSecretStore: SecretStore, @unchecked Sendable {
+    private let inner: FakeSecretStore
+    private let delay = Locked<TimeInterval?>(nil)
+    init(_ inner: FakeSecretStore) { self.inner = inner }
+    func blockNextRead(for seconds: TimeInterval) { delay.withLock { $0 = seconds } }
+    func read(account: String) -> SecretRead {
+        if let seconds = delay.withLock({ d -> TimeInterval? in defer { d = nil }; return d }) {
+            Thread.sleep(forTimeInterval: seconds)
+        }
+        return inner.read(account: account)
+    }
+    func write(_ data: Data, account: String) -> Bool { inner.write(data, account: account) }
+    func delete(account: String) { inner.delete(account: account) }
+}
+
 extension GateSettings {
     static let shown = GateSettings(authorized: true, alert: true, notificationCenter: true, lockScreen: true)
 }
@@ -82,6 +98,8 @@ final class SDKFixture {
     let settings = FakeSettings()
     let activity = FakeActivity()
     let log = WarnBox()
+    /// `SDKEnvironment.providerTimeout` of the next `environment` (30 s in production).
+    var providerTimeout: TimeInterval = 30
 
     init() {
         root = FileManager.default.temporaryDirectory.appendingPathComponent("rp-sdk-\(UUID().uuidString)")
@@ -98,7 +116,7 @@ final class SDKFixture {
     func environment(secrets: (any SecretStore)? = nil, settings: (any NotificationSettingsSource)? = nil) -> SDKEnvironment {
         SDKEnvironment(state: state, queueDirectory: dir, secrets: secrets ?? self.secrets, settings: settings ?? self.settings,
                        sessionConfiguration: { StubURLProtocol.configuration() },
-                       now: { SDKFixture.now }, activity: activity)
+                       now: { SDKFixture.now }, activity: activity, providerTimeout: providerTimeout)
     }
 
     var queue: EventQueue { EventQueue(directory: dir) }
