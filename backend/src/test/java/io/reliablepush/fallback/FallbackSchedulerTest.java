@@ -82,7 +82,7 @@ class FallbackSchedulerTest {
 
     @BeforeEach
     void closedCircuits() {
-        when(breaker.evaluate(any())).thenReturn(Map.of());
+        when(breaker.evaluate(any(), any())).thenReturn(Map.of());
         when(suppressor.suppress(any(), anyBoolean(), any())).thenReturn(Set.of());
     }
 
@@ -157,21 +157,38 @@ class FallbackSchedulerTest {
 
     @Test
     void tickEvaluatesThenSuppressesThenClaimsWithoutTheSuppressedApps() {
-        when(breaker.evaluate(APPS)).thenReturn(circuits());
+        when(breaker.evaluate(eq(APPS), any())).thenReturn(circuits());
         when(suppressor.suppress(circuits(), false, NOW)).thenReturn(Set.of("shop"));
         when(notifications.claimDue(any(), any(), anyInt(), any())).thenReturn(List.of());
 
         assertThat(scheduler().tick()).isZero();
 
         InOrder order = inOrder(breaker, suppressor, notifications);
-        order.verify(breaker).evaluate(APPS);
+        order.verify(breaker).evaluate(APPS, NOW);
         order.verify(suppressor).suppress(circuits(), false, NOW);
         order.verify(notifications).claimDue(eq(NOW), eq(NOW.plusSeconds(120)), eq(1), eq(Set.of("shop")));
     }
 
     @Test
+    void claimTakesOnlyTheRowsDueAtTheEvaluationInstant() {
+        MutableClock clock = new MutableClock(NOW);
+        // the check waits 1 s for the detector lock: rows coming due meanwhile were not evaluated
+        when(breaker.evaluate(APPS, NOW)).thenAnswer(invocation -> {
+            clock.advance(Duration.ofSeconds(1));
+            return circuits();
+        });
+        when(suppressor.suppress(circuits(), false, NOW)).thenReturn(Set.of("shop"));
+        when(notifications.claimDue(any(), any(), anyInt(), any())).thenReturn(List.of());
+
+        scheduler(false, clock).tick();
+
+        // due cut-off: the evaluation instant (what the circuits saw); lease: from the real now
+        verify(notifications).claimDue(eq(NOW), eq(NOW.plusSeconds(121)), eq(1), eq(Set.of("shop")));
+    }
+
+    @Test
     void suspendedReachesTheSuppressor() {
-        when(breaker.evaluate(APPS)).thenReturn(circuits());
+        when(breaker.evaluate(eq(APPS), any())).thenReturn(circuits());
         when(suppressor.suppress(circuits(), true, NOW)).thenReturn(Set.copyOf(APPS));
         when(notifications.claimDue(any(), any(), anyInt(), any())).thenReturn(List.of());
 
@@ -182,7 +199,7 @@ class FallbackSchedulerTest {
 
     @Test
     void failedCircuitCheckClaimsNothing() {
-        when(breaker.evaluate(APPS)).thenThrow(new CannotGetJdbcConnectionException("down"));
+        when(breaker.evaluate(eq(APPS), any())).thenThrow(new CannotGetJdbcConnectionException("down"));
 
         try (EventCapture capture = new EventCapture();
                 EventCapture classLog = new EventCapture(FallbackScheduler.class.getName())) {
@@ -206,7 +223,7 @@ class FallbackSchedulerTest {
 
     @Test
     void failedSuppressionClaimsNothing() {
-        when(breaker.evaluate(APPS)).thenReturn(circuits());
+        when(breaker.evaluate(eq(APPS), any())).thenReturn(circuits());
         when(suppressor.suppress(any(), anyBoolean(), any())).thenThrow(new IllegalStateException("boom"));
 
         try (EventCapture capture = new EventCapture()) {
@@ -222,7 +239,7 @@ class FallbackSchedulerTest {
     @Test
     void longDrainChecksTheCircuitsAgainAfterOnePollInterval() {
         MutableClock clock = new MutableClock(NOW);
-        when(breaker.evaluate(APPS)).thenReturn(circuits());
+        when(breaker.evaluate(eq(APPS), any())).thenReturn(circuits());
         when(suppressor.suppress(eq(circuits()), eq(false), any())).thenReturn(Set.of(), Set.of("shop"));
         when(notifications.claimDue(any(), any(), anyInt(), any()))
                 .thenReturn(List.of(row()), List.of(row()), List.of());
@@ -233,20 +250,25 @@ class FallbackSchedulerTest {
 
         assertThat(scheduler(false, clock).tick()).isEqualTo(2);
 
-        // claims at 0 s (checked), 3 s (last check 3 s ago: none), 6 s (6 s >= poll interval: checked again)
-        verify(breaker, times(2)).evaluate(APPS);
+        // claims at 0 s (checked), 3 s (last check 3 s ago: none), 6 s (6 s >= poll interval: checked again); each
+        // claim takes only the rows due by the last check, with a lease from the real now
+        verify(breaker).evaluate(APPS, NOW);
+        verify(breaker).evaluate(APPS, NOW.plusSeconds(6));
         verify(suppressor).suppress(circuits(), false, NOW);
         verify(suppressor).suppress(circuits(), false, NOW.plusSeconds(6));
         InOrder claims = inOrder(notifications);
-        claims.verify(notifications).claimDue(eq(NOW), any(), anyInt(), eq(Set.of()));
-        claims.verify(notifications).claimDue(eq(NOW.plusSeconds(3)), any(), anyInt(), eq(Set.of()));
-        claims.verify(notifications).claimDue(eq(NOW.plusSeconds(6)), any(), anyInt(), eq(Set.of("shop")));
+        claims.verify(notifications).claimDue(eq(NOW), eq(NOW.plusSeconds(120)), anyInt(), eq(Set.of()));
+        claims.verify(notifications).claimDue(eq(NOW), eq(NOW.plusSeconds(123)), anyInt(), eq(Set.of()));
+        claims.verify(notifications).claimDue(eq(NOW.plusSeconds(6)), eq(NOW.plusSeconds(126)), anyInt(),
+                eq(Set.of("shop")));
     }
 
     @Test
     void failedCheckDuringADrainStopsClaiming() {
         MutableClock clock = new MutableClock(NOW);
-        when(breaker.evaluate(APPS)).thenReturn(circuits()).thenThrow(new CannotGetJdbcConnectionException("down"));
+        when(breaker.evaluate(eq(APPS), any()))
+                .thenReturn(circuits())
+                .thenThrow(new CannotGetJdbcConnectionException("down"));
         when(notifications.claimDue(any(), any(), anyInt(), any())).thenReturn(List.of(row()));
         doAnswer(invocation -> {
             clock.advance(Duration.ofSeconds(6));
@@ -267,7 +289,7 @@ class FallbackSchedulerTest {
     void stopRequestedDuringTheRecheckOfALongDrainClaimsNothingMore() {
         MutableClock clock = new MutableClock(NOW);
         FallbackScheduler scheduler = scheduler(false, clock);
-        when(breaker.evaluate(APPS)).thenReturn(circuits()).thenAnswer(invocation -> {
+        when(breaker.evaluate(eq(APPS), any())).thenReturn(circuits()).thenAnswer(invocation -> {
             scheduler.requestStop(); // the shutdown arrives while the second check runs
             return circuits();
         });
@@ -289,7 +311,7 @@ class FallbackSchedulerTest {
 
         scheduler.tick();
 
-        verify(breaker, never()).evaluate(any());
+        verify(breaker, never()).evaluate(any(), any());
     }
 
     @Test

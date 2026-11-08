@@ -37,7 +37,9 @@ import org.springframework.scheduling.annotation.Scheduled;
  * of one {@code batch-size} per poll interval. Each claim takes {@code min(batch-size, free slots)} rows, where at most
  * {@code max-concurrency} webhook calls are in flight: a row is only claimed when it can start at once, so no lease
  * runs out while a claimed row waits for a slot, and a new claim starts as soon as any call finishes rather than after
- * the slowest of a batch. Every claim uses a fresh {@code now} for its due check and lease.
+ * the slowest of a batch. Every claim takes only the rows due at the instant of the last circuit check (its due
+ * cut-off), never a row that came due after the circuits were evaluated, and leases them from a fresh {@code now};
+ * the re-check of a long drain advances the cut-off.
  *
  * <p>Concurrency: one virtual thread per row; the tick returns when all its rows are done, and the scheduler runs ticks
  * with a fixed delay, so ticks of one instance never overlap.
@@ -177,7 +179,7 @@ public class FallbackScheduler {
      */
     private Optional<Set<String>> suppressedApps(Instant now) {
         try {
-            Map<String, Circuit> circuits = breaker.evaluate(appIds);
+            Map<String, Circuit> circuits = breaker.evaluate(appIds, now);
             return Optional.of(suppressor.suppress(circuits, suspended, now));
         } catch (RuntimeException e) {
             EventLog.warn("fallback.circuit_check_failed", Map.of("reason", e.getClass().getSimpleName()));
@@ -232,7 +234,9 @@ public class FallbackScheduler {
                 first = false;
                 List<ClaimedNotification> claimed;
                 try {
-                    claimed = notifications.claimDue(now, now.plus(lease), capacity, excluded);
+                    // due cut-off: the instant the circuits were evaluated at, so every row claimed was counted by
+                    // that evaluation (circuit breaker spec 4); the lease runs from the real now
+                    claimed = notifications.claimDue(checkedAt, now.plus(lease), capacity, excluded);
                 } catch (RuntimeException e) {
                     slots.release(capacity);
                     throw e;

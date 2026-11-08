@@ -33,9 +33,9 @@ import tools.jackson.databind.JsonNode;
  *
  * <ol>
  *   <li>A burst of {@value #BURST} notifications whose device never confirms opens the circuit. The burst is sent in
- *       parallel; a worker tick that sees fewer than min-due of them due may still fire those (spec 4: a storm is caught
- *       once the window holds min-due rows), so this step allows at most min-due - 1 calls and expects the rest
- *       {@code FALLBACK_EXPIRED}.</li>
+ *       parallel; a worker check that sees fewer than min-due of them due lets the tick fire those, but never a row
+ *       that came due after the check (spec 4: the claim's due cut-off is the check's instant), so fewer than min-due
+ *       calls are guaranteed and the rest end {@code FALLBACK_EXPIRED}.</li>
  *   <li>While the circuit is open, {@value #WHILE_OPEN} more unmet notifications end {@code FALLBACK_EXPIRED} with no
  *       call at all.</li>
  *   <li>The device confirms {@value #CLOSE_MIN_DELIVERED} new notifications: the circuit closes (after min-open), with
@@ -92,7 +92,8 @@ class FallbackCircuit extends CatalogScenario {
         ctx.check(fired < MIN_DUE && expired == BURST - fired,
                 "fewer than " + MIN_DUE + " calls for the burst, every other row FALLBACK_EXPIRED",
                 () -> fired + " call(s), states " + outcome.values(),
-                "spec 4: the circuit opens once " + MIN_DUE + " unmet fallbacks are due in the window; spec 5 closes "
+                "spec 4: the circuit opens once " + MIN_DUE + " unmet fallbacks are due in the window and a tick claims "
+                        + "only rows its check counted; spec 5 closes "
                         + "the rest as FALLBACK_EXPIRED; see fallback.circuit_opened and fallback.suppressed");
         JsonNode open = circuit(ctx);
         ctx.check("OPEN".equals(open.path("state").asText()) && open.path("suppressed").asLong() >= expired,

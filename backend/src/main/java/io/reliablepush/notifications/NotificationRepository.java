@@ -192,15 +192,20 @@ public class NotificationRepository {
      * Rows of {@code excludedApps} (apps whose fallbacks are suppressed this tick, circuit breaker spec 5) are never
      * claimed.
      *
+     * @param dueCutoff a row is due when its {@code due_at} (or {@code next_attempt_at}) is at or before it: the worker
+     *     passes the instant its circuit check evaluated at, not a later now, so no row that came due after the check
+     *     is claimed (circuit breaker spec 4)
+     * @param leaseUntil the new lease, from the real now
      * @return the claimed rows, each with its state before the claim
      */
-    public List<ClaimedNotification> claimDue(Instant now, Instant leaseUntil, int batch, Set<String> excludedApps) {
+    public List<ClaimedNotification> claimDue(
+            Instant dueCutoff, Instant leaseUntil, int batch, Set<String> excludedApps) {
         return jdbc.sql("""
                         with due as (
                             select id, state as previous_state, lease_until is not null as reclaimed
                               from notification
-                             where ((state in ('PENDING', 'DELIVERED') and due_at <= :now)
-                                    or (state = 'DISPATCHING' and next_attempt_at <= :now))
+                             where ((state in ('PENDING', 'DELIVERED') and due_at <= :dueCutoff)
+                                    or (state = 'DISPATCHING' and next_attempt_at <= :dueCutoff))
                                and not (app_id = any (cast(:excluded as text[])))
                              order by coalesce(next_attempt_at, due_at)
                              limit :batch
@@ -213,7 +218,7 @@ public class NotificationRepository {
                         returning n.id, n.app_id, n.user_id, n.policy, n.fallback_payload::text as fallback_payload,
                                   n.due_at, n.fallback_attempts, due.previous_state, due.reclaimed, n.lease_until
                         """)
-                .param("now", timestamp(now))
+                .param("dueCutoff", timestamp(dueCutoff))
                 .param("leaseUntil", timestamp(leaseUntil))
                 .param("batch", batch)
                 .param("excluded", excludedApps.toArray(String[]::new))

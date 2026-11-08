@@ -31,7 +31,8 @@ import org.springframework.transaction.support.TransactionTemplate;
  * disabled only that prune runs, under a non-blocking try-lock.
  *
  * <p>Time comes from the application {@link Clock}, the one the claim and the tracking writes use, so detection and
- * claim agree on {@code now} (also with the fast clock of the demo and E2E).
+ * claim agree on {@code now} (also with the fast clock of the demo and E2E); the worker passes the instant of its
+ * check, which is also the due cut-off of the claims that follow it.
  *
  * <p>Not profile-restricted: the API role uses {@link #force} for the operator resume. Log lines are written after the
  * transaction commits, so a rolled-back transition is never logged.
@@ -88,17 +89,21 @@ public class CircuitBreaker {
     }
 
     /**
-     * Evaluates the circuits of {@code appIds} and returns every one of them (an app without a stored row as CLOSED
-     * since the epoch). With {@code circuit-breaker.enabled: false} every app is CLOSED and no circuit is read or
-     * written; only the daily prune of old events runs (under the same lock, without waiting for it).
+     * Evaluates the circuits of {@code appIds} at {@code at} and returns every one of them (an app without a stored row
+     * as CLOSED since the epoch). {@code at} is the instant the detection reads the due set and the cohort at, and the
+     * time of any transition written: the worker passes the instant it then uses as the due cut-off of its claims and
+     * suppression, so every row it claims was counted by this evaluation (spec 4), even when the lock wait took time.
+     * With {@code circuit-breaker.enabled: false} every app is CLOSED and no circuit is read or written; only the daily
+     * prune of old events runs (under the same lock, without waiting for it).
      *
      * @throws org.springframework.dao.DataAccessException when the lock is not free within {@link #LOCK_TIMEOUT}, or
      *     on any database error
      */
-    public Map<String, Circuit> evaluate(Collection<String> appIds) {
+    public Map<String, Circuit> evaluate(Collection<String> appIds, Instant at) {
+        Instant now = at.truncatedTo(ChronoUnit.MICROS);
         Set<String> apps = new LinkedHashSet<>(appIds);
         if (!properties.enabled()) {
-            pruneOnly();
+            pruneOnly(now);
             Map<String, Circuit> closed = new LinkedHashMap<>();
             apps.forEach(app -> closed.put(app, Circuit.closed(app, Instant.EPOCH)));
             return closed;
@@ -106,13 +111,18 @@ public class CircuitBreaker {
         Evaluation evaluation = transactions.execute(status -> {
             jdbc.sql("set local lock_timeout = '" + LOCK_TIMEOUT.toMillis() + "ms'").update();
             jdbc.sql("select 1 from pg_advisory_xact_lock(:key)").param("key", LOCK_KEY).query(Integer.class).single();
-            return evaluateLocked(apps);
+            return evaluateLocked(apps, now);
         });
         if (evaluation.prunedAt() != null) {
             lastPrune = evaluation.prunedAt();
         }
-        evaluation.applied().forEach(CircuitBreaker::log);
+        evaluation.applied().forEach(this::report);
         return evaluation.circuits();
+    }
+
+    /** {@link #evaluate(Collection, Instant)} at the application clock's now (tests). */
+    Map<String, Circuit> evaluate(Collection<String> appIds) {
+        return evaluate(appIds, now());
     }
 
     /**
@@ -135,7 +145,7 @@ public class CircuitBreaker {
             return apply(current, CircuitTransitions.force(current, now, adminKeyId, properties), null, now,
                     adminKeyId);
         });
-        log(applied);
+        report(applied);
         return applied.transition().next();
     }
 
@@ -148,8 +158,7 @@ public class CircuitBreaker {
     }
 
     /** The breaker is disabled: no detection, but old events are still deleted once a day. */
-    private void pruneOnly() {
-        Instant now = now();
+    private void pruneOnly(Instant now) {
         if (!pruneDue(now)) {
             return; // no database round trip on the ticks between two prunes
         }
@@ -159,8 +168,7 @@ public class CircuitBreaker {
         }
     }
 
-    private Evaluation evaluateLocked(Set<String> apps) {
-        Instant now = now();
+    private Evaluation evaluateLocked(Set<String> apps, Instant now) {
         Map<String, Circuit> stored = circuits.findAll(apps);
         Map<String, Circuit> result = new LinkedHashMap<>();
         List<Applied> applied = new ArrayList<>();
@@ -240,7 +248,8 @@ public class CircuitBreaker {
         return clock.instant().truncatedTo(ChronoUnit.MICROS);
     }
 
-    private static void log(Applied applied) {
+    /** A committed transition: its log line. */
+    private void report(Applied applied) {
         CircuitEvent e = applied.event();
         Map<String, Object> fields = new LinkedHashMap<>();
         fields.put("rp.app_id", e.appId());

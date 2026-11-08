@@ -1,9 +1,14 @@
 package io.reliablepush.fallback;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.spy;
 
 import io.micrometer.core.instrument.MeterRegistry;
 import io.reliablepush.apps.AppConfig;
+import io.reliablepush.fallback.circuit.CircuitBreaker;
+import io.reliablepush.fallback.circuit.Suppressor;
 import io.reliablepush.notifications.FallbackPolicy;
 import io.reliablepush.notifications.Notification;
 import io.reliablepush.notifications.NotificationRepository;
@@ -52,6 +57,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.TestPropertySource;
+import org.springframework.test.util.ReflectionTestUtils;
 
 /**
  * The fallback worker against a real PostgreSQL (spec 2): claiming, lease, trigger window, retries. The fast clock is
@@ -159,6 +165,12 @@ class FallbackSchedulerIT extends PostgresTestBase {
 
     @Autowired
     JdbcClient jdbc;
+
+    @Autowired
+    CircuitBreaker breaker;
+
+    @Autowired
+    Suppressor suppressor;
 
     private EventCapture capture;
 
@@ -319,6 +331,36 @@ class FallbackSchedulerIT extends PostgresTestBase {
         // in parallel, but never more calls in flight than max-concurrency
         assertThat(maxInFlight.get()).isBetween(2, MAX_CONCURRENCY);
         assertThat(scheduler.tick()).isZero();
+    }
+
+    @Test
+    void rowComingDueDuringTheCircuitCheckIsNotClaimedByThatTick() {
+        scheduler.tick(); // leftovers of other tests out of the way
+        Instant checkedAt = now();
+        UUID evaluated = insert(FallbackPolicy.NOT_DELIVERED, checkedAt.minusSeconds(1));
+        UUID unchecked = insert(FallbackPolicy.NOT_DELIVERED, checkedAt.plusMillis(500)); // due after the check
+        // the circuit check takes 1 s (waiting for the detector lock): the second row comes due meanwhile
+        CircuitBreaker slow = spy(breaker);
+        doAnswer(invocation -> {
+            Object circuits = invocation.callRealMethod();
+            clock.advance(Duration.ofSeconds(1));
+            return circuits;
+        }).when(slow).evaluate(any(), any());
+        FallbackScheduler worker = new FallbackScheduler(notifications,
+                (FallbackDispatcher) ReflectionTestUtils.getField(scheduler, "dispatcher"), slow, suppressor,
+                List.of(APP, RACE_APP), false, clock, (Duration) ReflectionTestUtils.getField(scheduler, "lease"),
+                Duration.ofDays(1), BATCH, MAX_CONCURRENCY);
+
+        worker.tick();
+
+        // only what the evaluation saw is claimed
+        assertThat(webhook.count(evaluated)).isEqualTo(1);
+        assertThat(webhook.count(unchecked)).isZero();
+        assertThat(row(unchecked).state()).isEqualTo(NotificationState.PENDING);
+
+        worker.tick(); // the next evaluation sees it due
+        assertThat(webhook.count(unchecked)).isEqualTo(1);
+        assertClosed(unchecked, NotificationState.FALLBACK_TRIGGERED);
     }
 
     @Test
