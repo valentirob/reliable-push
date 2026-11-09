@@ -1,0 +1,141 @@
+# Flow in detail, step B6: delivery and read reach the sidecar (docs/flow-in-detail.md).
+title = "DELIVERED and READ reach reliable-push"
+desc = "The SDK sends the queued DELIVERED and READ events with the device token, one to fifty per call; each event is ACCEPTED and moves the state, LATE when it no longer can, or ignored as a duplicate, unknown or foreign; an accepted DELIVERED meets the NOT_DELIVERED policy and an accepted READ meets both, which closes the notification without a fallback."
+width = 960
+height = 448
+
+[legend]
+input = "Your app"
+skip = ["state"]
+final = "Final for the policy"
+
+[[zone]]
+x = 96
+y = 288
+w = 768
+h = 144
+tone = "accent"
+label = "What ACCEPTED does to the notification"
+
+[[node]]
+id = "sdk"
+x = 40
+y = 104
+w = 200
+h = 72
+kind = "input"
+tag = "sdk"
+name = "App + SDK"
+sub = ["DELIVERED, READ", "queued on disk"]
+
+[[node]]
+id = "api"
+x = 320
+y = 40
+w = 240
+h = 200
+kind = "focal"
+tag = "api"
+name = "POST /v1/events"
+sub = ["device token", "1 to 50 events per call", "200: an outcome per event"]
+
+[[node]]
+id = "acc"
+x = 640
+y = 40
+w = 280
+h = 56
+kind = "backend"
+name = "ACCEPTED"
+sub = "stored, the state moves"
+
+[[node]]
+id = "late"
+x = 640
+y = 112
+w = 280
+h = 56
+kind = "final"
+rx = 6
+name = "LATE"
+sub = "stored; fallback already claimed, ..."
+
+[[node]]
+id = "ign"
+x = 640
+y = 184
+w = 280
+h = 56
+kind = "final"
+rx = 6
+name = "DUPLICATE · NOT_FOUND · FORBIDDEN"
+sub = "ignored"
+
+[[node]]
+id = "pend"
+x = 120
+y = 328
+w = 176
+h = 48
+kind = "state"
+name = "PENDING"
+
+[[node]]
+id = "del"
+x = 392
+y = 328
+w = 176
+h = 48
+kind = "state"
+name = "DELIVERED"
+
+[[node]]
+id = "read"
+x = 664
+y = 328
+w = 176
+h = 48
+kind = "final"
+name = "READ"
+
+[[edge]]
+points = [[240, 140], [320, 140]]
+style = "track"
+label = "EVENTS"
+
+[[edge]]
+points = [[560, 68], [640, 68]]
+
+[[edge]]
+points = [[560, 140], [640, 140]]
+
+[[edge]]
+points = [[560, 212], [640, 212]]
+
+[[edge]]
+points = [[296, 352], [392, 352]]
+style = "track"
+label = "DELIVERED"
+
+[[edge]]
+points = [[568, 352], [664, 352]]
+style = "track"
+label = "READ"
+
+[[shape]]
+kind = "text"
+x = 480
+y = 404
+font_size = 10
+fill = "#0b7268"
+text_anchor = "middle"
+text = "NOT_DELIVERED is met here: closed"
+
+[[shape]]
+kind = "text"
+x = 752
+y = 404
+font_size = 10
+fill = "#0b7268"
+text_anchor = "middle"
+text = "NOT_READ is met here: closed"

@@ -5,7 +5,8 @@ The reference documents linked from each section have the full contracts and set
 the style of the [diagram-design](https://github.com/cathrynlavery/diagram-design) plugin, generated from short text
 sources in [diagrams/src/](diagrams/src/) by `scripts/diagrams.py` ([how to edit them](diagrams/README.md)).
 
-For a slide-style version to present the project, open [presentation.html](presentation.html) in a browser.
+For a slide-style version to present the project, open [presentation.html](presentation.html) in a browser. To follow
+one tracked push step by step, from the device registration to the SMS, read [flow-in-detail.md](flow-in-detail.md).
 
 ![reliable-push at a glance](images/reliable-push-at-a-glance.svg)
 

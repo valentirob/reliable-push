@@ -1,0 +1,93 @@
+# Flow in detail, step B4: send the push, always (docs/flow-in-detail.md).
+title = "Send the push, as today"
+desc = "Your backend sends the tracked push itself, with its own APNs and FCM credentials and clients, whatever the registration answered; APNs and FCM deliver it to the iPhone and the Android phone; reliable-push is not on this path."
+width = 960
+height = 420
+
+[legend]
+input = "Yours"
+external = "Google and Apple"
+optional = "Not on this path"
+
+[[node]]
+id = "be"
+x = 40
+y = 60
+w = 200
+h = 224
+kind = "input"
+tag = "yours"
+name = "Your backend"
+sub = ["your APNs client,", "your Firebase SDK,", "your keys"]
+
+[[node]]
+id = "apns"
+x = 360
+y = 60
+w = 200
+h = 64
+kind = "external"
+tag = "apple"
+name = "APNs"
+
+[[node]]
+id = "fcm"
+x = 360
+y = 220
+w = 200
+h = 64
+kind = "external"
+tag = "google"
+name = "FCM"
+
+[[node]]
+id = "ios"
+x = 720
+y = 60
+w = 200
+h = 64
+kind = "input"
+tag = "device"
+name = "iPhone"
+sub = "your iOS app"
+
+[[node]]
+id = "and"
+x = 720
+y = 220
+w = 200
+h = 64
+kind = "input"
+tag = "device"
+name = "Android phone"
+sub = "your Android app"
+
+[[node]]
+id = "rp"
+x = 360
+y = 340
+w = 200
+h = 56
+kind = "optional"
+name = "reliable-push"
+sub = "not on this path"
+
+[[edge]]
+points = [[240, 92], [360, 92]]
+style = "push"
+label = "ALERT + RP_TID"
+
+[[edge]]
+points = [[240, 252], [360, 252]]
+style = "push"
+label = "DATA + RP_TID"
+
+[[edge]]
+points = [[560, 92], [720, 92]]
+style = "push"
+label = "DELIVER"
+
+[[edge]]
+points = [[560, 252], [720, 252]]
+style = "push"
+label = "DELIVER"

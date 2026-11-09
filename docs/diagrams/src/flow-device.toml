@@ -1,0 +1,92 @@
+# Flow in detail, step A: the device registers (docs/flow-in-detail.md).
+type = "sequence"
+title = "The device registers"
+desc = "At start, foreground or login the app calls ensureRegistered, which returns at once; in the background the SDK gets the signed-in user's ID token from your login, registers the device with reliable-push, which verifies the token and takes the user id from it, and keeps the device token in secure storage; near expiry, or after an event was refused with 401, the next ensureRegistered refreshes it."
+width = 960
+height = 0
+numbered = true
+
+[legend]
+input = "Your app and your login"
+flow = "Call"
+dashed = "Reply"
+
+[[actor]]
+id = "app"
+name = "Your app + SDK"
+kind = "input"
+
+[[actor]]
+id = "idp"
+name = "Your login"
+sub = "OIDC provider"
+kind = "input"
+
+[[actor]]
+id = "rp"
+name = "reliable-push"
+sub = "api"
+kind = "focal"
+
+[[row]]
+kind = "note"
+over = ["app"]
+text = "app start, foreground or login"
+
+[[row]]
+kind = "self"
+from = "app"
+text = "ensureRegistered(provider): returns at once"
+
+[[row]]
+kind = "call"
+from = "app"
+to = "idp"
+text = "ID token of the signed-in user"
+
+[[row]]
+kind = "return"
+from = "idp"
+to = "app"
+text = "ID token"
+
+[[row]]
+kind = "track"
+from = "app"
+to = "rp"
+text = "POST /v1/devices {appId, idToken, platform}"
+
+[[row]]
+kind = "self"
+from = "rp"
+text = "verify with the provider's keys; userId = sub"
+
+[[row]]
+kind = "return"
+from = "rp"
+to = "app"
+text = "201 {deviceId, deviceToken}, valid 90 days"
+
+[[row]]
+kind = "note"
+over = ["app"]
+text = "token in the Keychain group (iOS)\nor encrypted with the Android Keystore"
+
+[[row]]
+kind = "opt"
+guard = "[near expiry, or an event got 401]"
+
+[[row]]
+kind = "track"
+from = "app"
+to = "rp"
+text = "POST /v1/devices/token:refresh"
+
+[[row]]
+kind = "return"
+from = "rp"
+to = "app"
+text = "new deviceToken"
+
+[[row]]
+kind = "end"

@@ -1,0 +1,84 @@
+# Flow in detail, step B3: register the push with the sidecar (docs/flow-in-detail.md).
+type = "sequence"
+title = "Register the push with reliable-push"
+desc = "Before sending, your backend registers the push with its tracking id, user id, policy, timeout and fallback text, with a 1 s timeout; reliable-push stores it once per tracking id and opens it as PENDING with a due time when the user has an active device, or closes it as NO_DEVICE_REGISTERED; the answer is informative only: whatever happens, the backend sends the push."
+width = 960
+height = 0
+numbered = true
+
+[legend]
+input = "Your backend"
+flow = "Call"
+dashed = "Reply"
+
+[[actor]]
+id = "be"
+name = "Your backend"
+kind = "input"
+
+[[actor]]
+id = "rp"
+name = "reliable-push"
+sub = "api"
+kind = "focal"
+
+[[actor]]
+id = "db"
+name = "PostgreSQL"
+kind = "store"
+
+[[row]]
+kind = "call"
+from = "be"
+to = "rp"
+text = "POST /v1/notifications · X-Api-Key · 1 s"
+
+[[row]]
+kind = "note"
+over = ["be", "rp"]
+text = "{trackingId, userId, policy, timeoutMinutes, fallback}"
+
+[[row]]
+kind = "call"
+from = "rp"
+to = "db"
+text = "insert once per trackingId"
+
+[[row]]
+kind = "call"
+from = "rp"
+to = "db"
+text = "does userId have an active device?"
+
+[[row]]
+kind = "alt"
+guard = "[active device]"
+actors = ["rp", "db"]
+
+[[row]]
+kind = "note"
+over = ["rp", "db"]
+text = "PENDING · dueAt = now + timeout"
+
+[[row]]
+kind = "else"
+guard = "[no active device]"
+
+[[row]]
+kind = "note"
+over = ["rp", "db"]
+text = "NO_DEVICE_REGISTERED · closed, never a fallback"
+
+[[row]]
+kind = "end"
+
+[[row]]
+kind = "return"
+from = "rp"
+to = "be"
+text = "201 + the row (informative only)"
+
+[[row]]
+kind = "note"
+over = ["be"]
+text = "timeout, 4xx or 5xx:\nsend the push anyway"

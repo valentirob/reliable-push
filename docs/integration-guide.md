@@ -1,5 +1,7 @@
 # Integration guide
 
+New to the flow? [flow-in-detail.md](flow-in-detail.md) walks through it step by step, with a diagram per step.
+
 reliable-push is a sidecar: your existing backend keeps sending pushes through FCM and APNs and keeps those credentials.
 You add three things: (1) for each push you want tracked, generate a tracking id, register the notification with
 reliable-push and send the push with that id as `rp_tid`; (2) run a **fallback receiver**, an HTTPS endpoint that

@@ -677,6 +677,8 @@ class Diagram:
                 d = f"M {x0 + 4:g},{ry:g} H {x0 + 36:g} Q {x0 + 44:g},{ry:g} {x0 + 44:g},{ry + 8:g} V {ry + 16:g} Q {x0 + 44:g},{ry + 24:g} {x0 + 36:g},{ry + 24:g} H {x0 + 6:g}"
                 body.append(f'<path d="{d}" fill="none" stroke="{colour}" stroke-width="{sw}"{dash_attr} marker-end="{mk}"/>')
                 tx, ty, anchor = x0 + 52, ry + 15, "start"
+                if tx + text_width(text, r["body"]) * 0.92 > self.width - 24:  # no room on the right
+                    tx, anchor = x0 - 12, "end"
             else:
                 x1 = xs[row["to"]]
                 direction = 1 if x1 > x0 else -1
@@ -692,7 +694,9 @@ class Diagram:
             if label_x and tw > label_x[1] - label_x[0] - (40 if numbering else 16) and anchor == "middle":
                 self.err(f"message '{text}' wider than its arrow")
             if text:
-                mx = tx - tw / 2 - 4 if anchor == "middle" else tx - 4
+                mx = {"middle": tx - tw / 2 - 4, "start": tx - 4, "end": tx - tw - 4}[anchor]
+                if mx < 4 or mx + tw + 8 > self.width - 4:
+                    self.err(f"message '{text}' runs off the canvas")
                 body.append(
                     f'<rect x="{mx:g}" y="{ty - r["body"]:g}" width="{tw + 8:g}" height="{r["body"] + 4:g}" fill="{P["paper"]}"/>'
                 )

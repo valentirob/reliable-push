@@ -8,6 +8,19 @@ Everything left after `v0.1.0` is in [TODO.md](TODO.md): each item says why it i
 unblocks it. Agents: remind the maintainer of its section 1 (real APNs and the locked-device check, real FCM, Maven
 Central) at the start of a session.
 
+## 2026-11-09 (24) — Claude Code — flow in detail (`feature/flow-in-detail`)
+
+- **Asked by the maintainer:** a section "Flow in detail" that follows the integration step by step from the existing
+  backend, with a sub-diagram per step; device registration first, then the push and its tracking; as a new page (the
+  slides are not changed). The maintainer confirmed the current order: register the push, then send it.
+- **Done:** `docs/flow-in-detail.md` (steps A, B1 to B8, a table of what can go wrong), diagrams `flow-device`,
+  `flow-payload`, `flow-register`, `flow-send`, `flow-events`, `flow-receiver` (plus `ios`, `android-receive`, `worker`
+  reused); links from README, overview and the integration guide; `scripts/diagrams.py` puts a self-message label on the
+  left when it would leave the canvas and reports any label that does.
+- **State:** `python3 scripts/diagrams.py --check` passes (22 diagrams), generator tests pass. Facts from `api.md`,
+  `integration-guide.md`, `android.md`, `ios.md`, `operations.md`.
+- **Possible next:** the same section in the slides, if the maintainer wants it.
+
 ## 2026-11-09 (23) — Claude Code — market comparison (`feature/market-comparison`)
 
 - **Asked by the maintainer:** compare reliable-push's capabilities with the market products named before, Catapush
