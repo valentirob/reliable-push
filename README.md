@@ -34,6 +34,7 @@ they never change how your notifications are sent or shown:
 ![The sidecar principle](docs/diagrams/sidecar.svg)
 
 What happens when each part fails, the component diagrams and the full lifecycle: [docs/overview.md](docs/overview.md).
+One tracked push, step by step, with a diagram per step: [docs/flow-in-detail.md](docs/flow-in-detail.md).
 To present the project, open [docs/presentation.html](docs/presentation.html) in a browser.
 
 ## How it works
@@ -160,6 +161,7 @@ Building from source needs JDK 21 and Docker: `cd backend && ./mvnw -B verify` (
 ## Documentation
 
 - [System overview with diagrams](docs/overview.md)
+- [Flow in detail](docs/flow-in-detail.md): one tracked push, step by step, from device registration to the SMS
 - [Presentation (HTML slides)](docs/presentation.html)
 - [reliable-push and the market](docs/market-comparison.md): Catapush, OneSignal, Airship, Braze
 - [Getting started: run and test each component](docs/getting-started.md)

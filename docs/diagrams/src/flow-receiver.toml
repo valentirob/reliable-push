@@ -1,0 +1,73 @@
+# Flow in detail, step B8: your receiver sends the SMS (docs/flow-in-detail.md).
+type = "sequence"
+title = "Your receiver sends the SMS or email"
+desc = "The worker sends a signed POST to your fallback receiver; the receiver verifies the HMAC signature on the raw body and the timestamp, answers a repeated Idempotency-Key without sending again, sends or enqueues the SMS or email and answers 2xx within 10 s; a final 4xx ends as FALLBACK_FAILED, while 5xx, 408, 429 and timeouts are retried inside the trigger window."
+width = 960
+height = 0
+numbered = true
+
+[legend]
+alert = "Your fallback receiver"
+external = "Your SMS / email provider"
+dashed = "Reply"
+
+[[actor]]
+id = "rp"
+name = "reliable-push"
+sub = "worker"
+kind = "focal"
+
+[[actor]]
+id = "fr"
+name = "Fallback receiver"
+sub = "yours"
+kind = "alert"
+
+[[actor]]
+id = "sms"
+name = "SMS / email"
+sub = "your provider"
+kind = "external"
+
+[[row]]
+kind = "fallback"
+from = "rp"
+to = "fr"
+text = "signed POST {trackingId, userId, fallback}"
+
+[[row]]
+kind = "note"
+over = ["fr"]
+text = "X-RP-Timestamp, X-RP-Signature,\nIdempotency-Key = trackingId"
+
+[[row]]
+kind = "self"
+from = "fr"
+text = "verify the HMAC on the raw body"
+
+[[row]]
+kind = "self"
+from = "fr"
+text = "timestamp older than 5 min? reject"
+
+[[row]]
+kind = "self"
+from = "fr"
+text = "key already handled? 2xx, send nothing"
+
+[[row]]
+kind = "call"
+from = "fr"
+to = "sms"
+text = "send the SMS or email (or enqueue)"
+
+[[row]]
+kind = "return"
+from = "fr"
+to = "rp"
+text = "2xx within 10 s: FALLBACK_TRIGGERED"
+
+[[row]]
+kind = "note"
+over = ["rp", "fr"]
+text = "final 4xx: FALLBACK_FAILED · 5xx, 408, 429, timeout:\nretried after 1, 2, 4, 8 min inside the window"

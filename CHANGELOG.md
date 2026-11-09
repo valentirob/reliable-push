@@ -35,6 +35,11 @@ All notable changes to this project are documented here. Versions follow [Semant
   outcomes), the iOS flow (the Notification Service Extension confirms an alert that iOS draws) and the Android flow
   (the SDK turns a data-only message into a local notification after the gate), and an iOS vs Android comparison. The
   SDK slides now cover only what goes into the app.
+- `docs/flow-in-detail.md` follows one tracked push step by step, from the device registration to the SMS: the device
+  registers, the backend creates the tracking id and the tracked payload, registers the push (1 s), sends it as today,
+  the phone receives it (iOS and Android), the events arrive, the worker decides and the receiver sends the SMS, each
+  with its own diagram, plus what can go wrong at each step. Six new diagrams; sequence labels now stay inside the
+  canvas.
 - `docs/market-comparison.md` and two slides compare reliable-push with Catapush, OneSignal, Airship and Braze
   (confirmed delivery, read tracking, fallback, who sends the push, hosting, cost, scope), from each vendor's public
   documentation with sources, and say when each one fits and where reliable-push stops.

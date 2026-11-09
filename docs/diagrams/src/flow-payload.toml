@@ -1,0 +1,106 @@
+# Flow in detail, steps B1 and B2: tracking id and tracked payload (docs/flow-in-detail.md).
+title = "Tracking id and tracked payload"
+desc = "For each push that needs tracking, your backend asks the payload jar for a new tracking id, generated locally without any network call, and builds the push with it: an APNs alert with mutable-content and a top-level rp_tid, or an FCM data-only, high-priority message with rp_tid, title and body."
+width = 960
+height = 344
+
+[legend]
+input = "Your backend"
+backend = "payload jar"
+store = "Tracked push"
+dashed = "Return"
+
+[[zone]]
+x = 280
+y = 40
+w = 360
+h = 288
+tone = "plain"
+label = "payload jar: Java 8+, no dependencies"
+
+[[node]]
+id = "be"
+x = 40
+y = 160
+w = 192
+h = 96
+kind = "input"
+tag = "yours"
+name = "Your backend"
+sub = ["a push that needs", "confirmation"]
+
+[[node]]
+id = "tid"
+x = 304
+y = 72
+w = 312
+h = 56
+kind = "backend"
+name = "TrackingIds.newId()"
+sub = "a UUID, local, no network"
+
+[[node]]
+id = "apns"
+x = 304
+y = 160
+w = 312
+h = 56
+kind = "backend"
+name = "ApnsPayloads"
+sub = "build(tid, title, body) or decorate"
+
+[[node]]
+id = "fcm"
+x = 304
+y = 248
+w = 312
+h = 56
+kind = "backend"
+name = "FcmPayloads"
+sub = "data(tid, title, body) or decorate"
+
+[[node]]
+id = "outa"
+x = 688
+y = 152
+w = 232
+h = 72
+kind = "store"
+tag = "ios"
+name = "APNs alert"
+sub = ["mutable-content: 1", "rp_tid at the top level"]
+
+[[node]]
+id = "outf"
+x = 688
+y = 240
+w = 232
+h = 72
+kind = "store"
+tag = "android"
+name = "FCM data message"
+sub = ["rp_tid, title, body as data", "priority HIGH"]
+
+[[edge]]
+points = [[136, 160], [136, 96], [304, 96]]
+label = "NEW ID"
+label_seg = 1
+
+[[edge]]
+points = [[304, 116], [168, 116], [168, 160]]
+style = "dashed"
+label = "TID"
+label_seg = 0
+label_side = "below"
+
+[[edge]]
+points = [[232, 188], [304, 188]]
+
+[[edge]]
+points = [[232, 228], [264, 228], [264, 276], [304, 276]]
+
+[[edge]]
+points = [[616, 188], [688, 188]]
+
+[[edge]]
+points = [[616, 276], [688, 276]]

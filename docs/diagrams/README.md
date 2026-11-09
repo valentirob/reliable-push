@@ -90,5 +90,6 @@ actors), `else` (guard), `end`. `numbered = true` numbers the messages.
 | `helm.toml` | `overview.md` §10 |
 | `loadtest.toml` | `overview.md` §11 |
 | `integration.toml` | `integration-guide.md` |
+| `flow-device.toml`, `flow-payload.toml`, `flow-register.toml`, `flow-send.toml`, `flow-events.toml`, `flow-receiver.toml` | `flow-in-detail.md` (which also reuses `ios`, `android-receive` and `worker`) |
 
 The at-a-glance picture of release 0.2.0, drawn by hand, is kept in [`../images/backup/`](../images/backup/).
