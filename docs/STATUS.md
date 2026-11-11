@@ -8,6 +8,23 @@ Everything left after `v0.1.0` is in [TODO.md](TODO.md): each item says why it i
 unblocks it. Agents: remind the maintainer of its section 1 (real APNs and the locked-device check, real FCM, Maven
 Central) at the start of a session.
 
+## 2026-11-11 (25) — Claude Code (Fable 5.2) — scale and integration review started (`feature/review-open-checks`)
+
+- **Asked by the maintainer:** review the whole project against its goals and the design changes made on the way, for
+  a target installation with millions of users and hundreds of millions of tracked notifications a year. New facts:
+  the existing push backend sends single pushes (also for campaigns) and stays the system of record for the status, so
+  reliable-push must call it to change a notification's status (key: its message id) and keep its own data only for
+  as long as tracking needs; a delivery-confirmation provider is in use today, and during the rollout the existing
+  backend chooses per device between it and a direct push tracked by reliable-push.
+- **Done:** the open checks are in [TODO.md](TODO.md) section 6 (6.1 to 6.7). The installation's figures and the review
+  report are kept outside this public repository, with the maintainer.
+- **First findings (to be confirmed in the review):** the average load is far below what one API replica was measured
+  at, the peak is unknown; history, not live data, is what makes the database heavy; the outbound status calls are a
+  new and the heaviest flow; nothing in the docs says what an Android app without the SDK does with a tracked
+  data-only push; real APNs and FCM delivery are still unverified (TODO 1.1, 1.2).
+- **Next:** walk through the review report with the maintainer, take the decisions (first: 6.7, who decides the
+  fallback), then `plan-feature` for the chosen design.
+
 ## 2026-11-09 (24) — Claude Code — flow in detail (`feature/flow-in-detail`)
 
 - **Asked by the maintainer:** a section "Flow in detail" that follows the integration step by step from the existing
