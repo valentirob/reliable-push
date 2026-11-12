@@ -26,13 +26,6 @@ here and record the result in [STATUS.md](STATUS.md).
 | 4.11 | iOS size gate: about 240 bytes left in the last 16 KB code page | Maintainer + agent | Action: maintainer decision on the metric (proposal: measure what ships in the app and the extension) |
 | 4.12 | Harness device simulator drops `429` / `503` / network-error events (the SDKs keep them) | Agent | Action: a scenario that needs the SDKs' retry behaviour in the simulator |
 | 5.1 | Pick the 0.3.0 scope | Maintainer | Action: maintainer decision (0.2.0 shipped on 2026-11-08) |
-| 6.1 | Yearly volume of tracked notifications and share that falls back, for the target installation | Maintainer | Action: confirm the figures with the owners of the existing push backend |
-| 6.2 | Peak load: the largest campaign and how long its send takes | Maintainer | Action: ask the owners of the existing push backend |
-| 6.3 | Status API of the existing push backend: endpoint, key (its message id), batch support, rate it accepts | Maintainer | Action: get the API contract |
-| 6.4 | Infrastructure available where reliable-push will run: managed PostgreSQL, Redis, a message bus | Maintainer | Action: ask the platform team |
-| 6.5 | How much history reliable-push must keep when the existing backend is the system of record | Maintainer | Action: maintainer decision |
-| 6.6 | Rollout next to the delivery-confirmation provider in use today: how the sender chooses per device, and whether both SDKs can live in one app | Maintainer + agent | Action: the rollout rules, then a test on real devices (needs 1.1 and 1.2) |
-| 6.7 | Who decides the fallback after an unconfirmed push: reliable-push (as today) or the existing backend | Maintainer | Action: find out what the existing backend does today when a push is not confirmed |
 
 ## 1. Maintainer-only: needs personal accounts and credentials
 
@@ -227,75 +220,3 @@ Agents never create accounts or keys, sign in, or enter credentials. These steps
 - **Why deferred:** it is a product decision.
 - **Unblocked by:** the maintainer choosing the scope. Then write a spec or plan in `docs/plans/` as for the earlier
   cycles.
-
-## 6. Open checks of the scale and integration review (2026-11-11)
-
-The maintainer asked for a review of the whole design against a target installation: millions of users, hundreds of
-millions of tracked notifications a year, an existing push backend that stays the system of record for notification
-status, and a delivery-confirmation provider already in use that reliable-push would replace step by step. The
-installation's own figures are deliberately **not** in this public repository; the maintainer has them, with the
-review report. The design work waits for the answers below; until then the review uses stated assumptions.
-
-### 6.1 Yearly volume and fallback share
-
-- **What:** the number of notifications a year that need tracking, and the share that ends in a fallback.
-- **Why it matters:** it sizes the storage and the outbound status calls. The average rate is low; the peak (6.2)
-  decides the sizing.
-- **Unblocked by:** the owners of the existing push backend confirming the figures.
-
-### 6.2 Peak load
-
-- **What:** the largest campaign (pushes) and the time its send takes; the busiest hour of a normal day.
-- **Why it matters:** the existing backend sends single pushes, so a campaign is one registration per push, and the
-  events come back within seconds. One API replica was measured at 500 registrations/s plus 1,000 events/s
-  ([operations.md](operations.md#measured-capacity)); the peak says how many replicas and how much database.
-- **Unblocked by:** the owners of the existing push backend.
-
-### 6.3 Status API of the existing push backend
-
-- **What:** the existing backend keeps the notification status. reliable-push must call it to change the status of a
-  notification, keyed by the backend's own message id. Needed: the endpoint and its authentication, the key (is the
-  message id a UUID, can it be the `trackingId` or does it travel as `externalId`), whether one call can carry several
-  status changes, the rate it accepts, what it answers on a repeat.
-- **Why it matters:** this is the heaviest flow, up to two calls per tracked notification (delivered, read), several
-  times the fallback calls. Without a batch call it also sets the load on the existing backend.
-- **Unblocked by:** the API contract. Then a spec for the outbound status calls (today reliable-push only has the
-  fallback webhook).
-
-### 6.4 Infrastructure available
-
-- **What:** what the target environment already runs and operates: a managed PostgreSQL, Redis or Valkey, Kafka or
-  Pub/Sub.
-- **Why it matters:** the storage choice. With the existing backend as the system of record, reliable-push keeps only
-  the device registry and the notifications still waiting; PostgreSQL holds that easily, and another store is worth it
-  only when it is already operated there.
-- **Unblocked by:** the platform team.
-
-### 6.5 History kept in reliable-push
-
-- **What:** whether reliable-push still needs its own history (30 days of notifications and events, 400 days of daily
-  trends, the dashboard's search) once the status lives in the existing backend.
-- **Why it matters:** history is what makes the database heavy, not the live data. Keeping hours instead of days
-  removes most of the storage, the nightly deletes and several indexes.
-- **Unblocked by:** a maintainer decision.
-
-### 6.6 Rollout next to the provider in use today
-
-- **What:** during the rollout the existing backend chooses, per device and its registration state, between the
-  provider in use today and a direct push tracked by reliable-push. Open points: how the backend learns that a device
-  has the reliable-push SDK (per user from the registration answer, or per device from a flag the app sends with its
-  push token); what an Android app **without** the SDK does with a tracked data-only message (it may show nothing);
-  whether the two SDKs can share one `FirebaseMessagingService` and one iOS Notification Service Extension.
-- **Why it matters:** a tracked Android push sent to an app that cannot show it is a lost notification with no
-  fallback.
-- **Unblocked by:** the rollout rules from the maintainer, then a test on real devices with both SDKs (needs 1.1 and
-  1.2).
-
-### 6.7 Who decides the fallback
-
-- **What:** today reliable-push keeps the timer: it knows every registered push and calls the fallback webhook when
-  one is not confirmed in time. If the existing backend already reacts to a missing confirmation by itself, reliable-push
-  could only forward the events, with no registration call and almost no database.
-- **Why it matters:** it is the largest design choice left: it decides whether the register-before-send call, the
-  worker, the circuit breaker and the stored fallback text stay.
-- **Unblocked by:** finding out what the existing backend does today when a push is not confirmed.
