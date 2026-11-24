@@ -1,6 +1,6 @@
 # Every version: latest stable release at least two weeks old on 2026-11-05. Nothing dynamic.
 [versions]
-agp = "9.4.1"                 # released 2026-09-18
+agp = "9.5.2"                 # released 2026-09-18
 firebaseMessaging = "26.0.1"  # 2026-10-21
 junit = "4.13.2"              # 2021-02-13
 robolectric = "4.17"          # 2026-09-10
@@ -8,7 +8,7 @@ androidxTestRunner = "1.7.0"  # 2025-07-30
 androidxTestRules = "1.7.0"   # 2025-07-30
 androidxTestExtJunit = "1.3.0" # 2025-07-30
 androidxTestOrchestrator = "1.6.1" # 2025-08-01
-uiautomator = "2.4.0"         # 2026-07-01
+uiautomator = "2.4.1"         # 2026-07-01
 googleServices = "4.5.0"      # 2026-06-16
 
 [libraries]
