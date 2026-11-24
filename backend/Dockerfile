@@ -9,7 +9,7 @@ RUN ./mvnw -B -DskipTests package \
     && chmod -R g=u /build/extracted
 
 # ---- jre stage: a trimmed runtime with only the modules the application needs (musl, to match the alpine runtime) ----
-FROM eclipse-temurin:21.0.13_9-jdk-alpine-3.24 AS jre
+FROM eclipse-temurin:21-jdk-alpine-3.21 AS jre
 COPY --from=build /build/extracted /extracted
 # jdeps finds the modules the code references; the extras are loaded reflectively or by service lookup and are
 # invisible to it: TLS/EC crypto (jdk.crypto.ec), Kerberos for the PostgreSQL driver (java.security.jgss),
@@ -26,7 +26,7 @@ RUN set -eux; \
     /jre/bin/java --list-modules
 
 # ---- runtime stage: non-root, OpenShift arbitrary UID (group 0) ----
-FROM alpine:3.24.3
+FROM alpine:3.24.4
 
 LABEL org.opencontainers.image.title="reliable-push-backend" \
       org.opencontainers.image.description="Reliable push delivery/read tracking service with webhook fallback" \
